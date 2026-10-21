@@ -40,7 +40,7 @@ class Battery:
             if not allow_ec:
                 self.ec_why = "no kernel charge driver; enable raw EC writes under Advanced to use the EC fallback"
             else:
-                self.ec_ok, self.ec_why = ec.available()
+                self.ec_ok, self.ec_why = ec.available(dev.ec_mmio, dev.ec_check_regs())
                 if self.ec_ok:
                     try:
                         self._probe()

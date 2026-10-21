@@ -60,10 +60,9 @@ class HwmonFan:
 
 
 class EcFanCtl:
-    name = "ec_sys"
-
-    def __init__(self, cfg):
+    def __init__(self, cfg, transport: str):
         self.cfg = cfg
+        self.name = f"EC via {transport}"
 
     def probe(self) -> None:
         """Refuse to drive the fan if the registers don't look as mapped."""
@@ -86,6 +85,7 @@ class EcFanCtl:
     def restore_spec(self) -> dict:
         return {
             "kind": "ec",
+            **ec.transport_spec(),
             "mode_reg": self.cfg.mode_reg,
             "manual": self.cfg.manual,
             "auto": self.cfg.auto,
@@ -100,10 +100,10 @@ def find_backend(dev: Device, allow_ec: bool):
         return None, "no fan driver for this device"
     if not allow_ec:
         return None, "no kernel fan driver; enable raw EC writes under Advanced to use the EC fallback"
-    ok, why = ec.available()
+    ok, why = ec.available(dev.ec_mmio, dev.ec_check_regs())
     if not ok:
         return None, why
-    ctl = EcFanCtl(dev.ec_fan)
+    ctl = EcFanCtl(dev.ec_fan, why)
     try:
         ctl.probe()
     except OSError as e:

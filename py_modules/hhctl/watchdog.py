@@ -10,6 +10,7 @@ Standalone on purpose: no imports from the plugin package.
 """
 
 import json
+import mmap
 import os
 import sys
 import time
@@ -23,17 +24,72 @@ STALE = 20.0  # seconds of CLOCK_MONOTONIC, which does not advance in suspend
 POLL = 3.0
 
 
+def _port_xfer(fd: int, cmd: int, reg: int, value: int | None = None) -> int | None:
+    """Minimal ACPI EC transaction on 0x62/0x66 (see ec.PortIo)."""
+    def status():
+        return os.pread(fd, 1, 0x66)[0]
+
+    def wait(ready):
+        deadline = time.monotonic() + 0.2
+        while not ready(status()):
+            if time.monotonic() > deadline:
+                raise OSError("EC port handshake timed out")
+            time.sleep(0.0002)
+
+    wait(lambda s: not s & 0x02)
+    try:
+        wait(lambda s: not s & 0x01)
+    except OSError:
+        os.pread(fd, 1, 0x62)  # discard a stale byte nobody collected
+    os.pwrite(fd, bytes([cmd]), 0x66)
+    wait(lambda s: not s & 0x02)
+    os.pwrite(fd, bytes([reg]), 0x62)
+    if value is None:
+        wait(lambda s: s & 0x01)
+        return os.pread(fd, 1, 0x62)[0]
+    wait(lambda s: not s & 0x02)
+    os.pwrite(fd, bytes([value]), 0x62)
+    wait(lambda s: not s & 0x02)
+    return None
+
+
+def _ec_restore(spec: dict) -> None:
+    reg, manual, auto = spec["mode_reg"], spec["manual"], spec["auto"]
+    transport = spec.get("transport", "ec_sys")
+    # Only flip the register if it still holds our manual value.
+    if transport == "port":
+        fd = os.open("/dev/port", os.O_RDWR)
+        try:
+            if _port_xfer(fd, 0x80, reg) == manual:
+                _port_xfer(fd, 0x81, reg, auto)
+        finally:
+            os.close(fd)
+    elif transport == "mmio":
+        base = spec["base"]
+        page = base & ~(mmap.PAGESIZE - 1)
+        fd = os.open("/dev/mem", os.O_RDWR | os.O_SYNC)
+        try:
+            mm = mmap.mmap(fd, mmap.PAGESIZE, mmap.MAP_SHARED,
+                           mmap.PROT_READ | mmap.PROT_WRITE, offset=page)
+        finally:
+            os.close(fd)
+        if mm[base - page + reg] == manual:
+            mm[base - page + reg] = auto
+        mm.close()
+    else:
+        with open(spec.get("path", EC_IO), "r+b", buffering=0) as f:
+            f.seek(reg)
+            if f.read(1)[0] == manual:
+                f.seek(reg)
+                f.write(bytes([auto]))
+
+
 def restore(spec: dict) -> None:
     if spec["kind"] == "hwmon":
         with open(f"{spec['path']}/pwm1_enable", "w") as f:
             f.write("2\n")
     elif spec["kind"] == "ec":
-        with open(EC_IO, "r+b", buffering=0) as f:
-            f.seek(spec["mode_reg"])
-            # Only flip the register if it still holds our manual value.
-            if f.read(1)[0] == spec["manual"]:
-                f.seek(spec["mode_reg"])
-                f.write(bytes([spec["auto"]]))
+        _ec_restore(spec)
 
 
 def heartbeat_age() -> float:

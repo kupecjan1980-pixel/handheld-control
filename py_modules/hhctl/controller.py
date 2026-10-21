@@ -9,9 +9,10 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 import time
 
-from . import battery, ec, fan, rgb, tdp, watchdog
+from . import backlight, battery, ec, fan, gpu, kargs, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -75,6 +76,12 @@ class Controller:
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
         self.rgb = rgb.find_backend(self.dev)
+        self.gpu = gpu.Gpu()
+        self.backlight = backlight.Backlight.find()
+        self.kargs = kargs.detect() if self.gpu.driver in ("xe", "i915") else None
+        self.display_busy = False
+        self.display_msg: str | None = None
+        self.kargs_configured: set[str] | None = None  # cached; refreshed after edits
         self._scan()
         self.errors: dict[str, str] = {}
         self.fan_pct: int | None = None
@@ -266,6 +273,83 @@ class Controller:
             return
         self._guard("rgb", lambda: self.rgb.apply(s["mode"], s["hue"], s["sat"], s["bright"], s["effect"]))
 
+    # --- display ----------------------------------------------------------
+
+    def set_brightness(self, pct: int) -> dict:
+        if self.backlight:
+            self._guard("display", lambda: self.backlight.set_percent(pct))
+        return self.state()
+
+    def _display_params(self) -> dict[str, list[str]]:
+        """Kernel parameters behind each display toggle, for the bound driver."""
+        drv = self.gpu.driver
+        have = lambda p: os.path.exists(f"/sys/module/{drv}/parameters/{p}")
+        groups = {
+            "psr": [f"{drv}.{p}=0" for p in ("enable_psr", "enable_panel_replay") if have(p)],
+            "dc": [f"{drv}.enable_dc=0"] if have("enable_dc") else [],
+        }
+        return {k: v for k, v in groups.items() if v}
+
+    def set_display(self, group: str, enabled: bool) -> dict:
+        params = self._display_params().get(group)
+        if not self.kargs or not params or self.display_busy:
+            return self.state()
+        self.display_busy = True
+        self.display_msg = f"Updating {self.kargs.name} boot entries…"
+
+        def run():
+            try:
+                if enabled:
+                    self.kargs.set(params, set())
+                else:
+                    self.kargs.set([], {t.split("=", 1)[0] for t in params})
+                self.display_msg = None
+                self.errors.pop("display", None)
+            except Exception as e:
+                log.exception("kernel parameter update failed")
+                self.display_msg = None
+                self.errors["display"] = str(e)
+            finally:
+                self.kargs_configured = None
+                self.display_busy = False
+
+        # Bootloader updates can take a minute; keep the fan loop running.
+        threading.Thread(target=run, daemon=True).start()
+        return self.state()
+
+    def _display_state(self) -> dict:
+        out = {
+            "brightness": self.backlight.percent() if self.backlight else None,
+            "backlight": self.backlight.name if self.backlight else None,
+            "bootloader": self.kargs.name if self.kargs else None,
+            "busy": self.display_busy,
+            "message": self.display_msg,
+            "toggles": {},
+        }
+        if not self.kargs:
+            return out
+        if self.kargs_configured is None and not self.display_busy:
+            try:
+                self.kargs_configured = set(self.kargs.configured())
+            except Exception as e:
+                self.errors["display"] = str(e)
+        configured = self.kargs_configured or set()
+        drv = self.gpu.driver
+        for group, params in self._display_params().items():
+            # "xe.enable_psr=0" -> /sys/module/xe/parameters/enable_psr
+            active = all(
+                sysfs.read(f"/sys/module/{drv}/parameters/{t.split('=', 1)[0].split('.', 1)[1]}") == "0"
+                for t in params
+            )
+            on = all(t in configured for t in params)
+            out["toggles"][group] = {
+                "params": params,
+                "configured": on,
+                "active": active,
+                "reboot": on != active,
+            }
+        return out
+
     # --- periodic ---------------------------------------------------------
 
     def tick_fan(self) -> None:
@@ -292,6 +376,7 @@ class Controller:
             self._guard("fan", self._watchdog_start)
 
     def tick(self) -> None:
+        self.gpu.sample()
         offset = _sleep_offset()
         resumed = offset - self.sleep_offset > 2
         self.sleep_offset = offset
@@ -366,6 +451,8 @@ class Controller:
                 "unavailable": None if self.bat.behaviours() else (self.bat.ec_why or "no charge control driver"),
                 **self.bat.status(),
             },
+            "gpu": self.gpu.state(),
+            "display": self._display_state(),
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),

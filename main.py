@@ -60,3 +60,9 @@ class Plugin:
 
     async def set_ec(self, values: dict):
         return await self._run(self.ctl.update, "ec", values)
+
+    async def set_brightness(self, percent: int):
+        return await self._run(self.ctl.set_brightness, percent)
+
+    async def set_display(self, group: str, enabled: bool):
+        return await self._run(self.ctl.set_display, group, enabled)

@@ -1,6 +1,7 @@
 # Handheld Control (Decky plugin)
 
-TDP, fan, RGB and battery (charge limit + charge bypass) control for:
+TDP, fan, RGB, battery (charge limit + charge bypass), brightness and display
+stability control for:
 
 | | AYANEO NEXT 2 (Bazzite 44) | ONEXPLAYER 3 (CachyOS) |
 |---|---|---|
@@ -10,6 +11,8 @@ TDP, fan, RGB and battery (charge limit + charge bypass) control for:
 | Charge limit | **emulated**: the EC can only inhibit charging, so the plugin inhibits at the limit and resumes 3% below it | native `charge_control_end_threshold` → EC 0xA3 |
 | Charge bypass | Off / Always (EC 0x1E, `0xAA`/`0x55`) | Off / While awake / Always (`charge_behaviour` → EC 0xA4) |
 | RGB | stick rings over vendor HID `1c4f:0002` | `hid-oxp` LED class → vendor HID `1a86:fe00` |
+| GPU readout | amdgpu power, clock, VRAM and GTT | GPU power (xe hwmon energy or RAPL uncore), GPU memory from DRM fdinfo, clock |
+| Display | brightness slider | brightness slider, PSR / Panel Replay / DC toggles |
 
 Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
@@ -21,10 +24,10 @@ boot, after resume, and (for TDP) when AC is plugged or unplugged. When the
 plugin unloads, the fan goes back to firmware auto and the emulated charge
 inhibit is cleared.
 
-> **Status: untested on hardware.** Packet formats and register maps were
-> checked against the kernel drivers and HHD, but the plugin has not yet run on
-> a NEXT 2 or ONEXPLAYER 3. Enable one section at a time and watch the result.
-> Please report what works in an issue.
+> **Status: early.** Reported working so far: TDP, fan, battery and RGB on the
+> ONEXPLAYER 3 (EC via `ec_sys`), and TDP and RGB on the NEXT 2. NEXT 2 fan and
+> battery through `/dev/port` (added in 0.3.0) and the 0.3.0 display features
+> are not yet confirmed on hardware. Please report what works in an issue.
 
 ## Install
 
@@ -32,7 +35,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.2.0/handheld-control-0.2.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.3.0/handheld-control-0.3.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -49,8 +52,19 @@ applies to PowerStation/InputPlumber on CachyOS Handheld. The plugin shows a
 warning when it sees one of them running.
 
 **Kernel drivers vs raw EC.** The plugin prefers kernel interfaces. If they
-are missing, it can write the EC through `ec_sys`, but only after you turn on
-**Advanced → Allow raw EC writes** (off by default):
+are missing, it can write the EC directly, but only after you turn on
+**Advanced → Allow raw EC writes** (off by default). It uses the first of
+these that works:
+
+1. `ec_sys` debugfs. The kernel serialises it with its own EC traffic, so it's
+   the safest. CachyOS has it; Bazzite's kernel does not.
+2. Memory-mapped EC RAM through `/dev/mem` (NEXT 2: `0xFE800400`). Used only
+   if it matches port reads byte for byte on the probe registers.
+3. The ACPI EC port protocol on `0x62`/`0x66` through `/dev/port`. This isn't
+   serialised with the kernel's EC driver, so transactions retry on timeout,
+   stale bytes are discarded, and every write is verified.
+
+Driver notes:
 
 - `oxpec` supports the ONEXPLAYER 3 in pdx86 `for-next` (mapped like the G1 i).
   Older CachyOS kernels fall back to EC.
@@ -58,7 +72,8 @@ are missing, it can write the EC through `ec_sys`, but only after you turn on
   not `AYANEO`). On a kernel without a NEXT 2 entry, fan and charge control
   need the EC fallback.
 - The EC fallback **does not work with Secure Boot enabled**, because kernel
-  lockdown blocks `ec_sys`. The panel shows why when a section is unavailable.
+  lockdown blocks `ec_sys`, `/dev/mem` and `/dev/port`. The panel shows why
+  when a section is unavailable.
 
 **EC safety.** Raw EC writes are guarded:
 
@@ -80,6 +95,28 @@ are missing, it can write the EC through `ec_sys`, but only after you turn on
 `custom` first. Without it, the plugin uses `ryzenadj` if it is installed.
 Strix Halo support in ryzenadj depends on its version.
 
+**GPU readout.** The TDP section shows package power, GPU power, GPU memory
+and GPU clock. The TDP limit is a package limit, so CPU and GPU share it.
+Steam's overlay runs unprivileged, so on Intel it can't read GPU power (RAPL
+counters are root-only) and shows no VRAM (integrated Arc has none). The
+plugin can't change what the overlay shows; use the panel instead.
+
+**Display.** The brightness slider writes `/sys/class/backlight/*` directly,
+so it works in Game Mode even when gamescope's own slider doesn't. It stops
+at 5%, so the panel never goes fully dark. On Intel GPUs (`xe`/`i915`) two
+toggles help with the screen blanking or not waking:
+
+- **Fix screen blanking** adds `xe.enable_psr=0 xe.enable_panel_replay=0`.
+- **Disable display C-states** adds `xe.enable_dc=0`. Stronger, but uses more
+  battery.
+
+They edit `KERNEL_CMDLINE[default]` in `/etc/default/limine` (then run
+`limine-update`), GRUB, or sdboot-manage, or use `rpm-ostree kargs` on
+Bazzite. Only those parameters are touched. The file is backed up first
+(`.hhctl-orig` once, `.hhctl.bak` each time) and restored if regenerating the
+boot entries fails. The panel shows *Reboot required* until the running
+kernel has the new values.
+
 **RGB on the NEXT 2**: the AYANEO RGB report also carries joystick
 sensitivity and vibration bytes. The plugin sends HHD's defaults (100%
 sensitivity, medium vibration).
@@ -94,7 +131,10 @@ py_modules/hhctl/
   fan.py                hwmon / EC fan, curves, temperature source
   battery.py            charge limit (native/EC/emulated) and bypass
   rgb.py                AYANEO HID, hid-oxp LED, OXP HID v1
-  ec.py                 guarded ec_sys access (lockdown, value checks, read-back)
+  ec.py                 guarded EC access: ec_sys / MMIO / port I/O
+  gpu.py                GPU + package power, GPU memory, clock
+  backlight.py          brightness
+  kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree
   watchdog.py           standalone fan watchdog (own systemd unit)
   controller.py         settings, apply, tick, resume detection, UI state
 src/index.tsx           Quick Access panel

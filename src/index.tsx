@@ -46,11 +46,30 @@ type State = {
   };
   rgb: { backend: string | null; modes: string[]; effects: string[] };
   ec: { supported: boolean; lockdown: string | null };
+  gpu: {
+    driver: string | null;
+    gpu_w: number | null;
+    pkg_w: number | null;
+    freq_mhz: number | null;
+    vram_mb: number | null;
+    gtt_mb: number | null;
+    mem_mb: number | null;
+  };
+  display: {
+    brightness: number | null;
+    backlight: string | null;
+    bootloader: string | null;
+    busy: boolean;
+    message: string | null;
+    toggles: Record<string, { params: string[]; configured: boolean; active: boolean; reboot: boolean }>;
+  };
 };
 
 type Section = keyof Settings;
 
 const getState = callable<[], State>("get_state");
+const setBrightness = callable<[number], State>("set_brightness");
+const setDisplay = callable<[string, boolean], State>("set_display");
 const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
   fan: callable<[object], State>("set_fan"),
@@ -64,6 +83,19 @@ const BYPASS_LABELS: Record<string, string> = {
   awake: "While awake",
   always: "Always",
 };
+
+const DISPLAY_TOGGLES: Record<string, { label: string; description: string }> = {
+  psr: {
+    label: "Fix screen blanking",
+    description: "Turns off Panel Self Refresh and Panel Replay. Small battery cost.",
+  },
+  dc: {
+    label: "Disable display C-states",
+    description: "Stronger fix if the screen still fails to wake. Uses more battery.",
+  },
+};
+
+const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 
 const titleCase = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -90,12 +122,16 @@ function Content() {
   const [draft, setDraft] = useState<Settings | null>(null);
   const timers = useRef<Partial<Record<Section, ReturnType<typeof setTimeout>>>>({});
   const lastEdit = useRef(0);
+  const [bright, setBright] = useState<number | null>(null);
+  const brightTimer = useRef<ReturnType<typeof setTimeout>>();
+  const lastBrightEdit = useRef(0);
 
   const refresh = async () => {
     const s = await getState();
     setState(s);
     // Don't clobber a slider the user is still dragging.
     if (Date.now() - lastEdit.current > 1500) setDraft(s.settings);
+    if (Date.now() - lastBrightEdit.current > 1500) setBright(s.display.brightness);
   };
 
   useEffect(() => {
@@ -124,7 +160,22 @@ function Content() {
     }, delay);
   };
 
-  const { tdp, fan, battery, rgb } = state;
+  const changeBrightness = (v: number) => {
+    lastBrightEdit.current = Date.now();
+    setBright(v);
+    clearTimeout(brightTimer.current);
+    brightTimer.current = setTimeout(async () => setState(await setBrightness(v)), 150);
+  };
+
+  const { tdp, fan, battery, rgb, gpu, display } = state;
+  const perf = [
+    gpu.pkg_w != null ? `Package ${gpu.pkg_w} W` : null,
+    gpu.gpu_w != null ? `GPU ${gpu.gpu_w} W` : null,
+    gpu.vram_mb != null ? `VRAM ${gb(gpu.vram_mb)}` : null,
+    gpu.gtt_mb != null ? `GTT ${gb(gpu.gtt_mb)}` : null,
+    gpu.mem_mb != null ? `GPU mem ${gb(gpu.mem_mb)}` : null,
+    gpu.freq_mhz != null ? `${gpu.freq_mhz} MHz` : null,
+  ].filter(Boolean);
   const t = draft.tdp;
   const f = draft.fan;
   const b = draft.battery;
@@ -149,6 +200,11 @@ function Content() {
       </PanelSection>
 
       <PanelSection title="TDP">
+        {perf.length > 0 && (
+          <PanelSectionRow>
+            <Field label="Now" description={perf.join(" · ")} />
+          </PanelSectionRow>
+        )}
         {!tdp.backend ? (
           <Unavailable why="No TDP interface found (firmware-attributes, RAPL or ryzenadj)." />
         ) : (
@@ -166,6 +222,7 @@ function Content() {
                 <PanelSectionRow>
                   <SliderField
                     label="Sustained power"
+                    description="Whole package: CPU and GPU share this limit"
                     value={t.watts ?? tdp.default}
                     min={tdp.min}
                     max={tdp.max}
@@ -391,6 +448,49 @@ function Content() {
           </>
         )}
       </PanelSection>
+
+      {(display.backlight || display.bootloader) && (
+        <PanelSection title="Display">
+          {display.backlight && bright != null && (
+            <PanelSectionRow>
+              <SliderField
+                label="Brightness"
+                description="Writes the backlight directly, so it also works in Game Mode"
+                value={bright}
+                min={5}
+                max={100}
+                step={1}
+                showValue
+                valueSuffix="%"
+                onChange={changeBrightness}
+              />
+            </PanelSectionRow>
+          )}
+          {Object.entries(display.toggles).map(([group, t]) => (
+            <PanelSectionRow key={group}>
+              <ToggleField
+                label={DISPLAY_TOGGLES[group]?.label ?? group}
+                description={[
+                  DISPLAY_TOGGLES[group]?.description,
+                  t.params.join(" "),
+                  t.reboot ? "Reboot required" : t.active ? "Active" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                checked={t.configured}
+                disabled={display.busy}
+                onChange={async (v) => setState(await setDisplay(group, v))}
+              />
+            </PanelSectionRow>
+          ))}
+          {display.message && (
+            <PanelSectionRow>
+              <Field description={display.message} />
+            </PanelSectionRow>
+          )}
+          <ErrorRow msg={state.errors.display} />
+        </PanelSection>
+      )}
 
       {state.ec.supported && (
         <PanelSection title="Advanced">

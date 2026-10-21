@@ -65,9 +65,19 @@ class Device:
     ec_fan: EcFan | None = None
     ec_charge: EcCharge | None = None
     rgb: str | None = None  # "ayaneo_hid" | "oxp" | None
+    ec_mmio: int | None = None  # physical address of memory-mapped EC RAM
     notes: list[str] = field(default_factory=list)
     board: str = ""
     vendor: str = ""
+
+    def ec_check_regs(self) -> tuple[int, ...]:
+        """Stable registers used to probe and cross-check EC transports."""
+        regs = []
+        if self.ec_charge:
+            regs.append(self.ec_charge.behaviour_reg)
+        if self.ec_fan:
+            regs.append(self.ec_fan.mode_reg)
+        return tuple(regs)
 
 
 def _next2(vendor: str, board: str) -> Device:
@@ -87,6 +97,9 @@ def _next2(vendor: str, board: str) -> Device:
         ),
         ec_charge=EcCharge(behaviour_reg=0x1E, auto=0xAA, inhibit=0x55),
         rgb="ayaneo_hid",
+        # From a NEXT 2 EC map: ports 0x62/0x66 mirror this window. Only
+        # used after it matches port reads register for register.
+        ec_mmio=0xFE800400,
         notes=[
             "No EC charge-% register: the limit is enforced by toggling "
             "charge inhibit while the plugin runs.",
