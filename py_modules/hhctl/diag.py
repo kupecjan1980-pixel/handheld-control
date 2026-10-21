@@ -9,12 +9,21 @@ context needed to explain it and writes a report to the user's home.
 import glob
 import os
 import platform
+import subprocess
 import time
 
 from . import sysfs
 
 STEPS = (25, 75)
 SAMPLES = (0.1, 0.5, 1.0, 2.0)  # seconds after each write
+
+# Intel display debugfs: I915_PSR_DEBUG_DISABLE | I915_PSR_DEBUG_PANEL_REPLAY_DISABLE
+PSR_OFF = "0x41"
+
+
+def psr_debug_path() -> str | None:
+    found = sorted(glob.glob("/sys/kernel/debug/dri/*/i915_edp_psr_debug"))
+    return found[0] if found else None
 
 
 def _proc_args(names: tuple[str, ...]) -> list[str]:
@@ -43,9 +52,25 @@ def context() -> list[str]:
         vals = {k: sysfs.read(f"{c}/{k}") for k in ("status", "enabled", "dpms")}
         lines.append(f"connector {os.path.basename(c)}: " + " ".join(f"{k}={v}" for k, v in vals.items()))
     for drv in ("xe", "i915", "amdgpu"):
-        params = sorted(glob.glob(f"/sys/module/{drv}/parameters/*backlight*"))
+        params = sorted(
+            glob.glob(f"/sys/module/{drv}/parameters/*backlight*")
+            + glob.glob(f"/sys/module/{drv}/parameters/enable_psr*")
+            + glob.glob(f"/sys/module/{drv}/parameters/enable_panel_replay")
+            + glob.glob(f"/sys/module/{drv}/parameters/enable_dc")
+        )
         for p in params:
             lines.append(f"{drv}.{os.path.basename(p)} = {sysfs.read(p)}")
+    for status in sorted(glob.glob("/sys/kernel/debug/dri/*/i915_edp_psr_status")):
+        text = (sysfs.read(status) or "").splitlines()[:12]
+        lines.append(f"psr status ({status}):")
+        lines += [f"  {line}" for line in text]
+    try:
+        log = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=10).stdout
+        hits = [l for l in log.splitlines() if any(k in l.lower() for k in ("backlight", "dpcd", "psr", "panel replay"))]
+        lines.append(f"dmesg backlight/psr lines: {len(hits)}")
+        lines += [f"  {l}" for l in hits[-20:]]
+    except (OSError, subprocess.SubprocessError):
+        pass
     return lines
 
 

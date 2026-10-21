@@ -76,7 +76,7 @@ class Controller:
     def __init__(self, settings_path: str, user_home: str | None = None):
         self.settings_path = settings_path
         self.user_home = user_home
-        self.btest = {"running": False, "verdict": None, "report": None, "answer": None}
+        self.btest = {"running": False, "phase": None, "phases": 0, "verdict": None, "report": None, "answer": None}
         self.btest_sections: list[tuple[str, list[str]]] = []
         self.dev = detect()
         self.settings = self._load()
@@ -310,28 +310,49 @@ class Controller:
     def run_brightness_test(self) -> dict:
         if not self.backlight or self.btest["running"]:
             return self.state()
-        self.btest = {"running": True, "verdict": None, "report": None, "answer": None}
+        psr = diag.psr_debug_path()
+        # Pass 1 as-is; pass 2 with PSR + Panel Replay switched off at runtime.
+        phases = [("normal", None)] + ([("PSR and Panel Replay off", psr)] if psr else [])
+        self.btest = {"running": True, "phase": None, "phases": len(phases),
+                      "verdict": None, "report": None, "answer": None}
 
         def run():
+            sections, verdicts = [], []
             try:
-                verdict, lines = diag.brightness_test(self.backlight)
-                self.btest_sections = [("verdict", [verdict]), ("test", lines), ("system", diag.context())]
-                self.btest["verdict"] = verdict
+                for i, (label, psr_path) in enumerate(phases, 1):
+                    self.btest["phase"] = i
+                    old = sysfs.read(psr_path) if psr_path else None
+                    try:
+                        if psr_path:
+                            sysfs.write(psr_path, diag.PSR_OFF)
+                            time.sleep(1.0)  # let the panel leave self-refresh
+                        verdict, lines = diag.brightness_test(self.backlight)
+                    finally:
+                        if psr_path and old is not None:
+                            sysfs.write(psr_path, old)
+                    verdicts.append(f"pass {i} ({label}): {verdict}")
+                    sections.append((f"test pass {i}: {label}", lines))
+                    if i < len(phases):
+                        time.sleep(2.0)  # visible gap between passes
+                self.btest_sections = [("verdict", verdicts), *sections, ("system", diag.context())]
+                self.btest["verdict"] = " ".join(verdicts) if len(verdicts) > 1 else verdicts[0].split(": ", 1)[1]
                 self.btest["report"] = diag.write_report(self.user_home, self.btest_sections)
             except Exception as e:
                 log.exception("brightness test failed")
                 self.btest["verdict"] = f"Test failed: {e}"
             finally:
+                self.btest["phase"] = None
                 self.btest["running"] = False
 
-        # ~7 s of sleeps; don't block the fan loop.
+        # ~7 s of sleeps per pass; don't block the fan loop.
         threading.Thread(target=run, daemon=True).start()
         return self.state()
 
-    def answer_brightness_test(self, changed: bool) -> dict:
+    def answer_brightness_test(self, answer: str) -> dict:
+        """answer: which passes visibly changed the screen: first/second/both/neither."""
         if self.btest_sections and self.btest["answer"] is None:
-            self.btest["answer"] = changed
-            self.btest_sections.insert(1, ("user", [f"screen visibly changed during test: {'yes' if changed else 'no'}"]))
+            self.btest["answer"] = answer
+            self.btest_sections.insert(1, ("user", [f"screen visibly changed in: {answer}"]))
             self.btest["report"] = diag.write_report(self.user_home, self.btest_sections)
         return self.state()
 

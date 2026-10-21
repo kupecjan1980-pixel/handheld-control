@@ -73,8 +73,8 @@ class Plugin:
     async def brightness_test(self):
         return await self._run(self.ctl.run_brightness_test)
 
-    async def brightness_test_answer(self, changed: bool):
-        return await self._run(self.ctl.answer_brightness_test, changed)
+    async def brightness_test_answer(self, answer: str):
+        return await self._run(self.ctl.answer_brightness_test, answer)
 
     async def set_display(self, group: str, enabled: bool):
         return await self._run(self.ctl.set_display, group, enabled)

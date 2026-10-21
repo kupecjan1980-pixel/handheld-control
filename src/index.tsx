@@ -71,7 +71,14 @@ type State = {
     backlight: string | null;
     bootloader: string | null;
     busy: boolean;
-    test: { running: boolean; verdict: string | null; report: string | null; answer: boolean | null };
+    test: {
+      running: boolean;
+      phase: number | null;
+      phases: number;
+      verdict: string | null;
+      report: string | null;
+      answer: string | null;
+    };
     message: string | null;
     toggles: Record<string, { params: string[]; configured: boolean; active: boolean; reboot: boolean }>;
   };
@@ -83,7 +90,7 @@ const getState = callable<[], State>("get_state");
 const setBrightness = callable<[number], State>("set_brightness");
 const setDisplay = callable<[string, boolean], State>("set_display");
 const brightnessTest = callable<[], State>("brightness_test");
-const brightnessTestAnswer = callable<[boolean], State>("brightness_test_answer");
+const brightnessTestAnswer = callable<[string], State>("brightness_test_answer");
 const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
   epp: callable<[object], State>("set_epp"),
@@ -547,10 +554,12 @@ function Content() {
                 <ButtonItem
                   layout="below"
                   disabled={display.test.running}
-                  description="Steps brightness to 25%, 75% and back, and saves a report. Watch the screen while it runs."
+                  description="Steps brightness to 25%, 75% and back, twice: normally, then with Panel Self Refresh off. Watch the screen during both passes."
                   onClick={async () => setState(await brightnessTest())}
                 >
-                  {display.test.running ? "Testing… watch the screen" : "Run brightness test"}
+                  {display.test.running
+                    ? `Pass ${display.test.phase ?? 1} of ${display.test.phases}… watch the screen`
+                    : "Run brightness test"}
                 </ButtonItem>
               </PanelSectionRow>
               {display.test.verdict && (
@@ -566,23 +575,31 @@ function Content() {
               {display.test.verdict && display.test.answer === null && (
                 <>
                   <PanelSectionRow>
-                    <Field label="Did the screen get darker, then brighter?" />
+                    <Field label="When did the screen get darker, then brighter?" />
                   </PanelSectionRow>
-                  <PanelSectionRow>
-                    <ButtonItem layout="below" onClick={async () => setState(await brightnessTestAnswer(true))}>
-                      Yes, it changed
-                    </ButtonItem>
-                  </PanelSectionRow>
-                  <PanelSectionRow>
-                    <ButtonItem layout="below" onClick={async () => setState(await brightnessTestAnswer(false))}>
-                      No, it stayed the same
-                    </ButtonItem>
-                  </PanelSectionRow>
+                  {(display.test.phases > 1
+                    ? [
+                        ["first", "Only in the first pass"],
+                        ["second", "Only in the second pass"],
+                        ["both", "In both passes"],
+                        ["neither", "Never"],
+                      ]
+                    : [
+                        ["first", "It changed"],
+                        ["neither", "It stayed the same"],
+                      ]
+                  ).map(([value, label]) => (
+                    <PanelSectionRow key={value}>
+                      <ButtonItem layout="below" onClick={async () => setState(await brightnessTestAnswer(value))}>
+                        {label}
+                      </ButtonItem>
+                    </PanelSectionRow>
+                  ))}
                 </>
               )}
               {display.test.answer !== null && (
                 <PanelSectionRow>
-                  <Field description={`Answer saved to the report (${display.test.answer ? "changed" : "no change"}).`} />
+                  <Field description={`Answer saved to the report (${display.test.answer}).`} />
                 </PanelSectionRow>
               )}
             </>

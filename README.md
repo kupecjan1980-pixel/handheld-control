@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.1/handheld-control-0.5.1.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.2/handheld-control-0.5.2.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -143,8 +143,11 @@ toggles help with the screen blanking or not waking:
 
 If the slider doesn't change the screen in Game Mode, press **Run brightness
 test**. It steps the backlight to 25%, 75% and back while checking whether
-the value sticks, saves a report to `~/handheld-control-brightness.txt`, and
-asks whether the screen visibly changed. Paste that file into an issue.
+the value sticks. On Intel it does this twice: once normally, and once with
+Panel Self Refresh and Panel Replay switched off at runtime (restored right
+after). It then asks in which pass the screen visibly changed, and saves a
+report with PSR status and driver settings to
+`~/handheld-control-brightness.txt`. Paste that file into an issue.
 
 The display toggles edit `KERNEL_CMDLINE[default]` in `/etc/default/limine` (then run
 `limine-update`), GRUB, or sdboot-manage, or use `rpm-ostree kargs` on
