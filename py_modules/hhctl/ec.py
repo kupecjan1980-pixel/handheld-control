@@ -18,10 +18,9 @@ blocked when the kernel is locked down (Secure Boot on Fedora/Bazzite).
 
 import mmap
 import os
-import subprocess
 import time
 
-from . import sysfs
+from . import proc, sysfs
 
 EC_IO = "/sys/kernel/debug/ec/ec0/io"
 WRITE_PARAM = "/sys/module/ec_sys/parameters/write_support"
@@ -151,11 +150,9 @@ def lockdown() -> str | None:
 
 def _try_ec_sys() -> tuple[EcSys | None, str]:
     if not os.path.ismount("/sys/kernel/debug"):
-        subprocess.run(["mount", "-t", "debugfs", "none", "/sys/kernel/debug"],
-                       capture_output=True, timeout=10)
+        proc.run(["mount", "-t", "debugfs", "none", "/sys/kernel/debug"], timeout=10)
     if not os.path.exists(EC_IO):
-        subprocess.run(["modprobe", "ec_sys", "write_support=1"],
-                       capture_output=True, timeout=10)
+        proc.run(["modprobe", "ec_sys", "write_support=1"], timeout=10)
     if not os.path.exists(EC_IO):
         return None, "ec_sys is not available in this kernel"
     if sysfs.read(WRITE_PARAM) not in ("Y", "1"):

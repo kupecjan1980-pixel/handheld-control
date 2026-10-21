@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.4/handheld-control-0.5.4.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.5/handheld-control-0.5.5.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -164,8 +164,13 @@ The display toggles edit `KERNEL_CMDLINE[default]` in `/etc/default/limine` (the
 `limine-update`), GRUB, or sdboot-manage, or use `rpm-ostree kargs` on
 Bazzite. Only those parameters are touched. The file is backed up first
 (`.hhctl-orig` once, `.hhctl.bak` each time) and restored if regenerating the
-boot entries fails. The panel shows *Reboot required* until the running
-kernel has the new values.
+boot entries fails. For Limine, the plugin then reads the generated
+`limine.conf` to check that a boot entry really carries the change. If
+`limine-update` didn't rebuild it, it tries `limine-mkinitcpio`. If neither
+works, the file is restored and the panel shows the error. The panel shows
+*Reboot required* until the running kernel has the new values, and *Saved, but
+not in the boot entries yet* with an **Apply to boot entries** button if the
+file and the entries disagree.
 
 **RGB on the NEXT 2**: the AYANEO RGB report also carries joystick
 sensitivity and vibration bytes. The plugin sends HHD's defaults (100%
@@ -188,9 +193,11 @@ py_modules/hhctl/
   backlight.py          brightness
   diag.py               brightness test + report
   kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree
+  proc.py               run system tools with the host environment, not Decky's
   watchdog.py           standalone fan watchdog (own systemd unit)
   controller.py         settings, apply, tick, resume detection, UI state
 src/index.tsx           Quick Access panel
+tests/                  backend test suites (tests/run.sh)
 ```
 
 Register maps and HID protocols are taken from the Linux `oxpec`,

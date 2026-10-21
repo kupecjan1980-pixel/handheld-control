@@ -10,9 +10,8 @@ import glob
 import logging
 import os
 import shutil
-import subprocess
 
-from . import sysfs
+from . import proc, sysfs
 from .device import Device
 
 log = logging.getLogger("hhctl")
@@ -154,15 +153,15 @@ class RyzenAdj:
 
     @classmethod
     def find(cls):
-        binary = shutil.which("ryzenadj")
+        binary = shutil.which("ryzenadj", path=proc.env()["PATH"])
         return cls(binary) if binary else None
 
     def apply(self, dev: Device, watts: int, boost: bool) -> None:
         fast, _ = boost_limits(dev, watts, boost)
         mw = watts * 1000
-        res = subprocess.run(
+        res = proc.run(
             [self.binary, f"--stapm-limit={mw}", f"--slow-limit={mw}", f"--fast-limit={fast * 1000}"],
-            capture_output=True, text=True, timeout=10,
+            text=True, timeout=10,
         )
         if res.returncode != 0:
             raise OSError(res.stderr.strip() or res.stdout.strip() or "ryzenadj failed")

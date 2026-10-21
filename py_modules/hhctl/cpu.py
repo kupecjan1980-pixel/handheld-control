@@ -13,9 +13,8 @@ scheduler to core capacities instead, so there is nothing to toggle.
 
 import glob
 import os
-import subprocess
 
-from . import sysfs
+from . import proc, sysfs
 
 CPUFREQ = "/sys/devices/system/cpu/cpufreq"
 NO_TURBO = "/sys/devices/system/cpu/intel_pstate/no_turbo"
@@ -58,8 +57,7 @@ class Boost:
 class Prefcore:
     def _ensure_debugfs(self) -> None:
         if not os.path.ismount("/sys/kernel/debug"):
-            subprocess.run(["mount", "-t", "debugfs", "none", "/sys/kernel/debug"],
-                           capture_output=True, timeout=10)
+            proc.run(["mount", "-t", "debugfs", "none", "/sys/kernel/debug"], timeout=10)
 
     def available(self) -> tuple[bool, str | None]:
         self._ensure_debugfs()

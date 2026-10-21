@@ -12,7 +12,7 @@ import platform
 import subprocess
 import time
 
-from . import sysfs
+from . import proc, sysfs
 
 STEPS = (25, 75)
 SAMPLES = (0.1, 0.5, 1.0, 2.0)  # seconds after each write
@@ -84,7 +84,7 @@ def context() -> list[str]:
         lines.append(f"psr status ({status}):")
         lines += [f"  {line}" for line in text]
     try:
-        log = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=10).stdout
+        log = proc.run(["dmesg"], text=True, timeout=10).stdout
         hits = [l for l in log.splitlines() if any(k in l.lower() for k in ("backlight", "dpcd", "psr", "panel replay"))]
         lines.append(f"dmesg backlight/psr lines: {len(hits)}")
         lines += [f"  {l}" for l in hits[-20:]]

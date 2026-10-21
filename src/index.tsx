@@ -80,7 +80,10 @@ type State = {
       answer: string | null;
     };
     message: string | null;
-    toggles: Record<string, { params: string[]; configured: boolean; active: boolean; reboot: boolean }>;
+    toggles: Record<
+      string,
+      { params: string[]; configured: boolean; active: boolean; in_entries: boolean | null; reboot: boolean }
+    >;
   };
 };
 
@@ -609,7 +612,13 @@ function Content() {
                 description={[
                   DISPLAY_TOGGLES[group]?.description,
                   t.params.join(" "),
-                  t.reboot ? "Reboot required" : t.active ? "Active" : null,
+                  t.in_entries === false
+                    ? "Saved, but not in the boot entries yet"
+                    : t.reboot
+                      ? "Reboot required"
+                      : t.active
+                        ? "Active"
+                        : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -619,6 +628,20 @@ function Content() {
               />
             </PanelSectionRow>
           ))}
+          {Object.entries(display.toggles)
+            .filter(([, t]) => t.in_entries === false)
+            .map(([group, t]) => (
+              <PanelSectionRow key={`${group}-apply`}>
+                <ButtonItem
+                  layout="below"
+                  disabled={display.busy}
+                  description={`Rebuilds the ${display.bootloader} boot entries so the change takes effect at the next boot`}
+                  onClick={async () => setState(await setDisplay(group, t.configured))}
+                >
+                  Apply to boot entries
+                </ButtonItem>
+              </PanelSectionRow>
+            ))}
           {display.message && (
             <PanelSectionRow>
               <Field description={display.message} />

@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import backlight, battery, cpu, diag, ec, epp, fan, gpu, kargs, rgb, sysfs, tdp, watchdog
+from . import backlight, battery, cpu, diag, ec, epp, fan, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -183,23 +183,24 @@ class Controller:
         if self._watchdog_alive():
             return
         # Decky's own interpreter is frozen, so use the system python.
-        py = shutil.which("python3")
+        path = proc.env()["PATH"]
+        py = shutil.which("python3", path=path)
         if not py:
             if not self.watchdog_warned:
                 log.warning("python3 not found; fan watchdog unavailable")
                 self.watchdog_warned = True
             return
         cmd = [py, "-I", watchdog.__file__]
-        if shutil.which("systemd-run"):
-            subprocess.run(["systemctl", "reset-failed", "hhctl-fan-watchdog"], capture_output=True)
-            res = subprocess.run(
+        if shutil.which("systemd-run", path=path):
+            proc.run(["systemctl", "reset-failed", "hhctl-fan-watchdog"], timeout=10)
+            res = proc.run(
                 ["systemd-run", "--unit=hhctl-fan-watchdog", "--collect", "--quiet", *cmd],
-                capture_output=True, text=True, timeout=10,
+                text=True, timeout=10,
             )
             if res.returncode == 0:
                 return
             log.warning("systemd-run failed (%s), starting watchdog directly", res.stderr.strip())
-        subprocess.Popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc.popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _watchdog_stop(self) -> None:
         # The watchdog exits by itself once the state file is gone.
@@ -408,11 +409,18 @@ class Controller:
                 for t in params
             )
             on = all(t in configured for t in params)
+            keys = {t.split("=", 1)[0] for t in params}
+            try:
+                # None when the bootloader's entries can't be read.
+                entries = self.kargs.in_entries(params, set()) if on else self.kargs.in_entries([], keys)
+            except Exception:
+                entries = None
             out["toggles"][group] = {
                 "params": params,
                 "configured": on,
                 "active": active,
-                "reboot": on != active,
+                "in_entries": entries,
+                "reboot": on != active and entries is not False,
             }
         return out
 
