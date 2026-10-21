@@ -1,0 +1,11 @@
+{
+  "name": "Handheld Control",
+  "author": "hanis",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["tdp", "fan", "rgb", "battery", "ayaneo", "onexplayer"],
+    "description": "TDP, fan curve, RGB and battery charge limit / bypass for AYANEO NEXT 2 and ONEXPLAYER 3.",
+    "image": ""
+  }
+}
