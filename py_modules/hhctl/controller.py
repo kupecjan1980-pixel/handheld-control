@@ -95,6 +95,10 @@ class Controller:
         self.gs_applied_pid: int | None = None
         self.gs_pending: dict | None = None  # {"mode", "prev", "deadline"}
         self.gs_last_check = 0.0
+        if self.dev.gamescope_hdr_blocked and self.settings["gamescope"]["hdr"] != "steam":
+            # A mode saved before this device was blocked must never be re-applied.
+            self.settings["gamescope"]["hdr"] = "steam"
+            self.save()
         self.backlight = backlight.Backlight.find()
         self.kargs = kargs.detect() if self.gpu.driver in ("xe", "i915") else None
         self.display_busy = False
@@ -330,6 +334,9 @@ class Controller:
 
     def set_gamescope_hdr(self, mode: str) -> dict:
         self._gs_refresh()
+        if self.dev.gamescope_hdr_blocked and mode != "steam":
+            self.errors["gamescope"] = self.dev.gamescope_hdr_blocked
+            return self.state()
         if not self.gs or mode not in self.gs.modes():
             self.errors["gamescope"] = "Game Mode (gamescope) is not running, or doesn't support this"
             return self.state()
@@ -386,7 +393,7 @@ class Controller:
             self.errors["gamescope"] = "Not confirmed within 20 s, so it was reverted."
             return
         mode = self.settings["gamescope"]["hdr"]
-        if not self.gs or p or mode == "steam" or mode not in self.gs.modes():
+        if self.dev.gamescope_hdr_blocked or not self.gs or p or mode == "steam" or mode not in self.gs.modes():
             return
         if self.gs.pid != self.gs_applied_pid:
             if now - self.gs_seen >= self.GS_SETTLE:
@@ -404,7 +411,8 @@ class Controller:
         p = self.gs_pending
         return {
             "running": bool(self.gs),
-            "modes": self.gs.modes() if self.gs else [],
+            "modes": self.gs.modes() if self.gs and not self.dev.gamescope_hdr_blocked else [],
+            "blocked": self.dev.gamescope_hdr_blocked,
             "mode": p["mode"] if p else self.settings["gamescope"]["hdr"],
             "saved": self.settings["gamescope"]["hdr"],
             "pending": {"mode": p["mode"], "seconds": max(0, round(p["deadline"] - time.monotonic()))} if p else None,

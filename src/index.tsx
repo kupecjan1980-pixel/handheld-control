@@ -56,6 +56,7 @@ type State = {
     saved: string;
     pending: { mode: string; seconds: number } | null;
     hdr_active: boolean | null;
+    blocked: string | null;
   };
   epp: {
     available: boolean;
@@ -668,6 +669,16 @@ function Content() {
           {display.message && (
             <PanelSectionRow>
               <Field description={display.message} />
+            </PanelSectionRow>
+          )}
+          {state.gamescope.running && state.gamescope.blocked && (
+            <PanelSectionRow>
+              <Field
+                label="Game Mode HDR"
+                description={`${
+                  state.gamescope.hdr_active === null ? "" : `HDR output is ${state.gamescope.hdr_active ? "on" : "off"}. `
+                }${state.gamescope.blocked}`}
+              />
             </PanelSectionRow>
           )}
           {state.gamescope.modes.length > 0 && (

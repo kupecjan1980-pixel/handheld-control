@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.6.1/handheld-control-0.6.1.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.6.2/handheld-control-0.6.2.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -145,6 +145,12 @@ toggles help with the screen blanking or not waking:
 > panel (Panel Replay with DSC) stays black after boot. Display C-states are
 > untested there and blocked too. The toggles can still be turned off, to
 > undo an earlier change.
+
+> **Game Mode HDR switching is blocked on the ONEXPLAYER 3** (since 0.6.2).
+> With HDR off, or when switching between HDR and SDR, its screen turned off
+> and only a long power press brought it back, the same blackouts seen on
+> Bazzite. HDR, Steam's default on CachyOS, keeps it stable. A mode saved by
+> 0.6.0/0.6.1 is reset to Steam default and never re-applied.
 
 **Game Mode HDR.** On the ONEXPLAYER 3, gamescope drives the internal OLED in
 HDR10 (connector colorspace `BT2020_RGB`) even though Steam shows no HDR toggle,

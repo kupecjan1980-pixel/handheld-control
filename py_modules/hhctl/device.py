@@ -69,6 +69,8 @@ class Device:
     notes: list[str] = field(default_factory=list)
     # Display toggles that must not be turned on for this device, with why.
     display_blocked: dict[str, str] = field(default_factory=dict)
+    # Why Game Mode HDR must be left to Steam on this device, if it must.
+    gamescope_hdr_blocked: str | None = None
     board: str = ""
     vendor: str = ""
 
@@ -137,6 +139,11 @@ def _oxp3(vendor: str, board: str) -> Device:
             "dc": "Blocked on this device: untested on this panel, and turning "
                   "off PSR already blanked it.",
         },
+        gamescope_hdr_blocked=(
+            "Blocked on this device: in SDR, or when switching between HDR and "
+            "SDR, the ONEXPLAYER 3's screen turns off and only a long power "
+            "press brings it back. HDR (Steam's default) keeps it stable."
+        ),
         board=board,
         vendor=vendor,
     )
