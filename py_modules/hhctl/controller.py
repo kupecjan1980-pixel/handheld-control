@@ -360,6 +360,11 @@ class Controller:
         params = self._display_params().get(group)
         if not self.kargs or not params or self.display_busy:
             return self.state()
+        blocked = self.dev.display_blocked.get(group)
+        if enabled and blocked:
+            # Turning a blocked toggle off is always allowed, never on.
+            self.errors["display"] = blocked
+            return self.state()
         self.display_busy = True
         self.display_msg = f"Updating {self.kargs.name} boot entries…"
 
@@ -421,6 +426,7 @@ class Controller:
                 "active": active,
                 "in_entries": entries,
                 "reboot": on != active and entries is not False,
+                "blocked": self.dev.display_blocked.get(group),
             }
         return out
 

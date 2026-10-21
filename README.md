@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.5/handheld-control-0.5.5.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.6/handheld-control-0.5.6.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -140,6 +140,11 @@ toggles help with the screen blanking or not waking:
 - **Fix screen blanking** adds `xe.enable_psr=0 xe.enable_panel_replay=0`.
 - **Disable display C-states** adds `xe.enable_dc=0`. Stronger, but uses more
   battery.
+
+> **Both are blocked on the ONEXPLAYER 3.** With PSR and Panel Replay off, its
+> panel (Panel Replay with DSC) stays black after boot. Display C-states are
+> untested there and blocked too. The toggles can still be turned off, to
+> undo an earlier change.
 
 If the slider doesn't change the screen in Game Mode, press **Run brightness
 test**. It steps the backlight to 25%, 75% and back while checking whether

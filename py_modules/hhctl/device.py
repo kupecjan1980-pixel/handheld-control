@@ -67,6 +67,8 @@ class Device:
     rgb: str | None = None  # "ayaneo_hid" | "oxp" | None
     ec_mmio: int | None = None  # physical address of memory-mapped EC RAM
     notes: list[str] = field(default_factory=list)
+    # Display toggles that must not be turned on for this device, with why.
+    display_blocked: dict[str, str] = field(default_factory=dict)
     board: str = ""
     vendor: str = ""
 
@@ -129,6 +131,12 @@ def _oxp3(vendor: str, board: str) -> Device:
             behaviour_extra=(0x02,),  # oxpec's "inhibit while off" bit alone
         ),
         rgb="oxp",
+        display_blocked={
+            "psr": "Blocked on this device: with PSR and Panel Replay off, the "
+                   "ONEXPLAYER 3's panel stays black after boot.",
+            "dc": "Blocked on this device: untested on this panel, and turning "
+                  "off PSR already blanked it.",
+        },
         board=board,
         vendor=vendor,
     )

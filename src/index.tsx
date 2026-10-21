@@ -82,7 +82,14 @@ type State = {
     message: string | null;
     toggles: Record<
       string,
-      { params: string[]; configured: boolean; active: boolean; in_entries: boolean | null; reboot: boolean }
+      {
+        params: string[];
+        configured: boolean;
+        active: boolean;
+        in_entries: boolean | null;
+        reboot: boolean;
+        blocked: string | null;
+      }
     >;
   };
 };
@@ -610,7 +617,7 @@ function Content() {
               <ToggleField
                 label={DISPLAY_TOGGLES[group]?.label ?? group}
                 description={[
-                  DISPLAY_TOGGLES[group]?.description,
+                  t.blocked ?? DISPLAY_TOGGLES[group]?.description,
                   t.params.join(" "),
                   t.in_entries === false
                     ? "Saved, but not in the boot entries yet"
@@ -623,13 +630,13 @@ function Content() {
                   .filter(Boolean)
                   .join(" · ")}
                 checked={t.configured}
-                disabled={display.busy}
+                disabled={display.busy || (!!t.blocked && !t.configured)}
                 onChange={async (v) => setState(await setDisplay(group, v))}
               />
             </PanelSectionRow>
           ))}
           {Object.entries(display.toggles)
-            .filter(([, t]) => t.in_entries === false)
+            .filter(([, t]) => t.in_entries === false && !(t.blocked && t.configured))
             .map(([group, t]) => (
               <PanelSectionRow key={`${group}-apply`}>
                 <ButtonItem
