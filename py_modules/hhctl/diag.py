@@ -17,13 +17,9 @@ from . import sysfs
 STEPS = (25, 75)
 SAMPLES = (0.1, 0.5, 1.0, 2.0)  # seconds after each write
 
-# Intel display debugfs: I915_PSR_DEBUG_DISABLE | I915_PSR_DEBUG_PANEL_REPLAY_DISABLE
-PSR_OFF = "0x41"
-
-
-def psr_debug_path() -> str | None:
-    found = sorted(glob.glob("/sys/kernel/debug/dri/*/i915_edp_psr_debug"))
-    return found[0] if found else None
+# Never toggle PSR at runtime (i915_edp_psr_debug): on the ONEXPLAYER 3's xe
+# driver it blanked the panel until a second reboot. PSR status below is
+# read-only.
 
 
 def _proc_args(names: tuple[str, ...]) -> list[str]:

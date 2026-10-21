@@ -554,12 +554,10 @@ function Content() {
                 <ButtonItem
                   layout="below"
                   disabled={display.test.running}
-                  description="Steps brightness to 25%, 75% and back, twice: normally, then with Panel Self Refresh off. Watch the screen during both passes."
+                  description="Steps brightness to 25%, 75% and back, and saves a report. Watch the screen while it runs."
                   onClick={async () => setState(await brightnessTest())}
                 >
-                  {display.test.running
-                    ? `Pass ${display.test.phase ?? 1} of ${display.test.phases}… watch the screen`
-                    : "Run brightness test"}
+                  {display.test.running ? "Testing… watch the screen" : "Run brightness test"}
                 </ButtonItem>
               </PanelSectionRow>
               {display.test.verdict && (

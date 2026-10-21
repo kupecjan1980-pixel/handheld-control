@@ -310,32 +310,16 @@ class Controller:
     def run_brightness_test(self) -> dict:
         if not self.backlight or self.btest["running"]:
             return self.state()
-        psr = diag.psr_debug_path()
-        # Pass 1 as-is; pass 2 with PSR + Panel Replay switched off at runtime.
-        phases = [("normal", None)] + ([("PSR and Panel Replay off", psr)] if psr else [])
-        self.btest = {"running": True, "phase": None, "phases": len(phases),
+        # Single pass only. A runtime PSR-off pass blanked the ONEXPLAYER 3's
+        # panel until a second reboot, so the test never touches PSR.
+        self.btest = {"running": True, "phase": 1, "phases": 1,
                       "verdict": None, "report": None, "answer": None}
 
         def run():
-            sections, verdicts = [], []
             try:
-                for i, (label, psr_path) in enumerate(phases, 1):
-                    self.btest["phase"] = i
-                    old = sysfs.read(psr_path) if psr_path else None
-                    try:
-                        if psr_path:
-                            sysfs.write(psr_path, diag.PSR_OFF)
-                            time.sleep(1.0)  # let the panel leave self-refresh
-                        verdict, lines = diag.brightness_test(self.backlight)
-                    finally:
-                        if psr_path and old is not None:
-                            sysfs.write(psr_path, old)
-                    verdicts.append(f"pass {i} ({label}): {verdict}")
-                    sections.append((f"test pass {i}: {label}", lines))
-                    if i < len(phases):
-                        time.sleep(2.0)  # visible gap between passes
-                self.btest_sections = [("verdict", verdicts), *sections, ("system", diag.context())]
-                self.btest["verdict"] = " ".join(verdicts) if len(verdicts) > 1 else verdicts[0].split(": ", 1)[1]
+                verdict, lines = diag.brightness_test(self.backlight)
+                self.btest_sections = [("verdict", [verdict]), ("test", lines), ("system", diag.context())]
+                self.btest["verdict"] = verdict
                 self.btest["report"] = diag.write_report(self.user_home, self.btest_sections)
             except Exception as e:
                 log.exception("brightness test failed")
@@ -344,7 +328,7 @@ class Controller:
                 self.btest["phase"] = None
                 self.btest["running"] = False
 
-        # ~7 s of sleeps per pass; don't block the fan loop.
+        # ~7 s of sleeps; don't block the fan loop.
         threading.Thread(target=run, daemon=True).start()
         return self.state()
 

@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.2/handheld-control-0.5.2.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.3/handheld-control-0.5.3.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -143,11 +143,20 @@ toggles help with the screen blanking or not waking:
 
 If the slider doesn't change the screen in Game Mode, press **Run brightness
 test**. It steps the backlight to 25%, 75% and back while checking whether
-the value sticks. On Intel it does this twice: once normally, and once with
-Panel Self Refresh and Panel Replay switched off at runtime (restored right
-after). It then asks in which pass the screen visibly changed, and saves a
-report with PSR status and driver settings to
-`~/handheld-control-brightness.txt`. Paste that file into an issue.
+the value sticks, asks whether the screen visibly changed, and saves a report
+with PSR status and driver settings to `~/handheld-control-brightness.txt`.
+Paste that file into an issue.
+
+> The test never switches PSR at runtime. Version 0.5.2 did, through the
+> driver's debugfs, and on the ONEXPLAYER 3 that turned the panel off until a
+> second reboot. Don't use 0.5.2's brightness test.
+
+**If the screen stays black after a reboot** with a display toggle on: hold the
+power button for about 10 s to power off fully, then boot again. If it's still
+black, press **E** at the Limine boot menu, delete `xe.enable_psr=0
+xe.enable_panel_replay=0` (and `xe.enable_dc=0`) from the kernel command line
+and boot. Then turn the toggle off in the plugin so the change is undone
+permanently.
 
 The display toggles edit `KERNEL_CMDLINE[default]` in `/etc/default/limine` (then run
 `limine-update`), GRUB, or sdboot-manage, or use `rpm-ostree kargs` on
