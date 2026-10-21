@@ -1,5 +1,6 @@
 import { callable, definePlugin, useQuickAccessVisible } from "@decky/api";
 import {
+  ButtonItem,
   DropdownItem,
   Field,
   PanelSection,
@@ -70,6 +71,7 @@ type State = {
     backlight: string | null;
     bootloader: string | null;
     busy: boolean;
+    test: { running: boolean; verdict: string | null; report: string | null; answer: boolean | null };
     message: string | null;
     toggles: Record<string, { params: string[]; configured: boolean; active: boolean; reboot: boolean }>;
   };
@@ -80,6 +82,8 @@ type Section = keyof Settings;
 const getState = callable<[], State>("get_state");
 const setBrightness = callable<[number], State>("set_brightness");
 const setDisplay = callable<[string, boolean], State>("set_display");
+const brightnessTest = callable<[], State>("brightness_test");
+const brightnessTestAnswer = callable<[boolean], State>("brightness_test_answer");
 const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
   epp: callable<[object], State>("set_epp"),
@@ -536,6 +540,52 @@ function Content() {
                 onChange={changeBrightness}
               />
             </PanelSectionRow>
+          )}
+          {display.backlight && (
+            <>
+              <PanelSectionRow>
+                <ButtonItem
+                  layout="below"
+                  disabled={display.test.running}
+                  description="Steps brightness to 25%, 75% and back, and saves a report. Watch the screen while it runs."
+                  onClick={async () => setState(await brightnessTest())}
+                >
+                  {display.test.running ? "Testing… watch the screen" : "Run brightness test"}
+                </ButtonItem>
+              </PanelSectionRow>
+              {display.test.verdict && (
+                <PanelSectionRow>
+                  <Field
+                    label="Result"
+                    description={[display.test.verdict, display.test.report ? `Report: ${display.test.report}` : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  />
+                </PanelSectionRow>
+              )}
+              {display.test.verdict && display.test.answer === null && (
+                <>
+                  <PanelSectionRow>
+                    <Field label="Did the screen get darker, then brighter?" />
+                  </PanelSectionRow>
+                  <PanelSectionRow>
+                    <ButtonItem layout="below" onClick={async () => setState(await brightnessTestAnswer(true))}>
+                      Yes, it changed
+                    </ButtonItem>
+                  </PanelSectionRow>
+                  <PanelSectionRow>
+                    <ButtonItem layout="below" onClick={async () => setState(await brightnessTestAnswer(false))}>
+                      No, it stayed the same
+                    </ButtonItem>
+                  </PanelSectionRow>
+                </>
+              )}
+              {display.test.answer !== null && (
+                <PanelSectionRow>
+                  <Field description={`Answer saved to the report (${display.test.answer ? "changed" : "no change"}).`} />
+                </PanelSectionRow>
+              )}
+            </>
           )}
           {Object.entries(display.toggles).map(([group, t]) => (
             <PanelSectionRow key={group}>

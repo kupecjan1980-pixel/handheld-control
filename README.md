@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.0/handheld-control-0.5.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.1/handheld-control-0.5.1.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -141,7 +141,12 @@ toggles help with the screen blanking or not waking:
 - **Disable display C-states** adds `xe.enable_dc=0`. Stronger, but uses more
   battery.
 
-They edit `KERNEL_CMDLINE[default]` in `/etc/default/limine` (then run
+If the slider doesn't change the screen in Game Mode, press **Run brightness
+test**. It steps the backlight to 25%, 75% and back while checking whether
+the value sticks, saves a report to `~/handheld-control-brightness.txt`, and
+asks whether the screen visibly changed. Paste that file into an issue.
+
+The display toggles edit `KERNEL_CMDLINE[default]` in `/etc/default/limine` (then run
 `limine-update`), GRUB, or sdboot-manage, or use `rpm-ostree kargs` on
 Bazzite. Only those parameters are touched. The file is backed up first
 (`.hhctl-orig` once, `.hhctl.bak` each time) and restored if regenerating the
@@ -167,6 +172,7 @@ py_modules/hhctl/
   ec.py                 guarded EC access: ec_sys / MMIO / port I/O
   gpu.py                GPU + package power, GPU memory, clock
   backlight.py          brightness
+  diag.py               brightness test + report
   kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree
   watchdog.py           standalone fan watchdog (own systemd unit)
   controller.py         settings, apply, tick, resume detection, UI state

@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import backlight, battery, cpu, ec, epp, fan, gpu, kargs, rgb, sysfs, tdp, watchdog
+from . import backlight, battery, cpu, diag, ec, epp, fan, gpu, kargs, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -73,8 +73,11 @@ def _sleep_offset() -> float:
 
 
 class Controller:
-    def __init__(self, settings_path: str):
+    def __init__(self, settings_path: str, user_home: str | None = None):
         self.settings_path = settings_path
+        self.user_home = user_home
+        self.btest = {"running": False, "verdict": None, "report": None, "answer": None}
+        self.btest_sections: list[tuple[str, list[str]]] = []
         self.dev = detect()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
@@ -304,6 +307,34 @@ class Controller:
             self._guard("display", lambda: self.backlight.set_percent(pct))
         return self.state()
 
+    def run_brightness_test(self) -> dict:
+        if not self.backlight or self.btest["running"]:
+            return self.state()
+        self.btest = {"running": True, "verdict": None, "report": None, "answer": None}
+
+        def run():
+            try:
+                verdict, lines = diag.brightness_test(self.backlight)
+                self.btest_sections = [("verdict", [verdict]), ("test", lines), ("system", diag.context())]
+                self.btest["verdict"] = verdict
+                self.btest["report"] = diag.write_report(self.user_home, self.btest_sections)
+            except Exception as e:
+                log.exception("brightness test failed")
+                self.btest["verdict"] = f"Test failed: {e}"
+            finally:
+                self.btest["running"] = False
+
+        # ~7 s of sleeps; don't block the fan loop.
+        threading.Thread(target=run, daemon=True).start()
+        return self.state()
+
+    def answer_brightness_test(self, changed: bool) -> dict:
+        if self.btest_sections and self.btest["answer"] is None:
+            self.btest["answer"] = changed
+            self.btest_sections.insert(1, ("user", [f"screen visibly changed during test: {'yes' if changed else 'no'}"]))
+            self.btest["report"] = diag.write_report(self.user_home, self.btest_sections)
+        return self.state()
+
     def _display_params(self) -> dict[str, list[str]]:
         """Kernel parameters behind each display toggle, for the bound driver."""
         drv = self.gpu.driver
@@ -347,6 +378,7 @@ class Controller:
             "backlight": self.backlight.name if self.backlight else None,
             "bootloader": self.kargs.name if self.kargs else None,
             "busy": self.display_busy,
+            "test": self.btest,
             "message": self.display_msg,
             "toggles": {},
         }

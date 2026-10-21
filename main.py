@@ -27,7 +27,7 @@ class Plugin:
 
     async def _main(self):
         settings = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
-        self.ctl = await asyncio.to_thread(Controller, settings)
+        self.ctl = await asyncio.to_thread(Controller, settings, decky.DECKY_USER_HOME)
         self.ctl.install_exit_hooks()
         await self._run(self.ctl.apply_all)
         self.loop_task = asyncio.get_event_loop().create_task(self._loop())
@@ -69,6 +69,12 @@ class Plugin:
 
     async def set_brightness(self, percent: int):
         return await self._run(self.ctl.set_brightness, percent)
+
+    async def brightness_test(self):
+        return await self._run(self.ctl.run_brightness_test)
+
+    async def brightness_test_answer(self, changed: bool):
+        return await self._run(self.ctl.answer_brightness_test, changed)
 
     async def set_display(self, group: str, enabled: bool):
         return await self._run(self.ctl.set_display, group, enabled)
