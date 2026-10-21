@@ -99,7 +99,12 @@ def _next2(vendor: str, board: str) -> Device:
             mode_reg=0x4A, manual=0x01, auto=0x00,
             pwm_reg=0x4B, pwm_max=100, tach_reg=0x76,
         ),
-        ec_charge=EcCharge(behaviour_reg=0x1E, auto=0xAA, inhibit=0x55),
+        ec_charge=EcCharge(
+            behaviour_reg=0x1E, auto=0xAA, inhibit=0x55,
+            # 0x00 until something sets it after power-on; ayaneo-ec treats
+            # every value but 0x55 as auto (seen on a NEXT 2, 2026-10-21).
+            behaviour_extra=(0x00,),
+        ),
         rgb="ayaneo_hid",
         # From a NEXT 2 EC map: ports 0x62/0x66 mirror this window. Only
         # used after it matches port reads register for register.

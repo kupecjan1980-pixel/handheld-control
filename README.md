@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.7.0/handheld-control-0.7.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.7.1/handheld-control-0.7.1.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
