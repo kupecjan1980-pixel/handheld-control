@@ -142,10 +142,14 @@ class Battery:
         if power is None:
             cur = sysfs.read_int(f"{self.bat}/current_now")
             volt = sysfs.read_int(f"{self.bat}/voltage_now")
-            power = cur * volt // 1_000_000 if cur and volt else None
+            power = cur * volt // 1_000_000 if cur is not None and volt is not None else None
         return {
             "capacity": self.capacity(),
             "status": sysfs.read(f"{self.bat}/status"),
-            "power_w": round(power / 1_000_000, 1) if power else None,
+            # 0 W is real information (bypass working), so only None hides it.
+            "power_w": round(abs(power) / 1_000_000, 1) if power is not None else None,
             "ac": ac_online(),
+            # Charging held off by us. Some firmware (AYANEO NEXT 2) keeps
+            # reporting "Charging" while bypassed; the 0 W reading is the truth.
+            "inhibited": self.inhibited,
         }

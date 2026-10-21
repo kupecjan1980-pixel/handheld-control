@@ -46,6 +46,7 @@ type State = {
     capacity?: number | null;
     status?: string | null;
     power_w?: number | null;
+    inhibited?: boolean;
     ac?: boolean;
   };
   rgb: { backend: string | null; modes: string[]; effects: string[] };
@@ -447,8 +448,10 @@ function Content() {
             label="Status"
             description={[
               battery.capacity != null ? `${battery.capacity}%` : null,
-              battery.status,
-              battery.power_w ? `${battery.power_w} W` : null,
+              battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1
+                ? "Not charging (held by the plugin)"
+                : battery.status,
+              battery.power_w != null ? `${battery.power_w} W` : null,
               battery.ac ? "on AC" : null,
             ]
               .filter(Boolean)
