@@ -52,6 +52,9 @@ class Plugin:
     async def set_epp(self, values: dict):
         return await self._run(self.ctl.update, "epp", values)
 
+    async def set_cpu(self, values: dict):
+        return await self._run(self.ctl.update, "cpu", values)
+
     async def set_fan(self, values: dict):
         return await self._run(self.ctl.update, "fan", values)
 

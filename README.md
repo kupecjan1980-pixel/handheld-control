@@ -8,6 +8,8 @@ stability control for:
 | DMI | vendor `AYA`, board `AB09` | vendor `ONE-NETBOOK`, board `ONEXPLAYER 3` |
 | TDP | firmware-attributes (`amd-dptc`) → `ryzenadj` fallback, 10–80 W, boost up to 85 W | Intel RAPL powercap (MSR and MMIO package zones), 3–40 W, PL2 up to 42 W |
 | EPP | `amd-pstate-epp` | `intel_pstate` (HWP) |
+| CPU boost | cpufreq `boost` | `intel_pstate/no_turbo` |
+| Preferred cores | scheduler ITMT switch (amd-pstate prefcore) | not applicable on hybrid CPUs |
 | Fan | hwmon `ayaneo_ec` → raw EC fallback (0x4A/0x4B, 0–100) | hwmon `oxp_ec` → raw EC fallback (0x4A/0x4B, 0–184) |
 | Charge limit | **emulated**: the EC can only inhibit charging, so the plugin inhibits at the limit and resumes 3% below it | native `charge_control_end_threshold` → EC 0xA3 |
 | Charge bypass | Off / Always (EC 0x1E, `0xAA`/`0x55`) | Off / While awake / Always (`charge_behaviour` → EC 0xA4) |
@@ -36,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.4.0/handheld-control-0.4.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.0/handheld-control-0.5.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -106,6 +108,24 @@ the plugin started. power-profiles-daemon and tuned rewrite EPP when the
 profile or AC state changes, so the plugin checks every 10 s and re-applies
 your choice.
 
+**Three different "boosts"** live in the TDP section:
+
+- **Power boost** lets the package briefly exceed the sustained limit
+  (PL2 / fast PPT).
+- **CPU boost (turbo)** allows clocks above base frequency. Turning it off
+  saves a lot of power and heat, at the cost of single-thread speed.
+- **EPP** is a hint for how eagerly the CPU ramps up within those limits. It
+  isn't a boost switch.
+
+**Preferred cores** turns on the scheduler's ITMT switch
+(`/sys/kernel/debug/x86/sched_itmt_enabled`), which places work on the cores
+the firmware ranks fastest through CPPC. On AMD this needs amd-pstate's
+prefcore (`/sys/devices/system/cpu/amd_pstate/prefcore` = enabled). Hybrid
+Intel CPUs, such as the ONEXPLAYER 3's Panther Lake, don't use ITMT; the
+scheduler uses core capacities instead, so the toggle shows as unavailable.
+It's also blocked under Secure Boot lockdown. Boost and preferred cores are
+left alone until you change them, then re-applied at boot and every 10 s.
+
 **GPU readout.** The TDP section shows package power, GPU power, GPU memory
 and GPU clock. The TDP limit is a package limit, so CPU and GPU share it.
 Steam's overlay runs unprivileged, so on Intel it can't read GPU power (RAPL
@@ -140,6 +160,7 @@ py_modules/hhctl/
   device.py             DMI detection and per-device register maps
   tdp.py                firmware-attributes / RAPL / ryzenadj
   epp.py                energy performance preference (amd-pstate / intel_pstate)
+  cpu.py                CPU boost (turbo) and preferred-core scheduling
   fan.py                hwmon / EC fan, curves, temperature source
   battery.py            charge limit (native/EC/emulated) and bypass
   rgb.py                AYANEO HID, hid-oxp LED, OXP HID v1

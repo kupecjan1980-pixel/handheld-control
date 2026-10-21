@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import backlight, battery, ec, epp, fan, gpu, kargs, rgb, sysfs, tdp, watchdog
+from . import backlight, battery, cpu, ec, epp, fan, gpu, kargs, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -21,6 +21,8 @@ DEFAULTS = {
     # Nothing is touched until the user enables a section.
     "tdp": {"enabled": False, "watts": None, "boost": True},
     "epp": {"enabled": False, "value": "balance_performance"},
+    # None = leave as the system set it; True/False once the user toggles.
+    "cpu": {"boost": None, "prefcore": None},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None},
     "battery": {"limit": 100, "bypass": "off"},
@@ -80,6 +82,8 @@ class Controller:
         self.gpu = gpu.Gpu()
         self.epp = epp.Epp()  # snapshots the original EPP before anything is applied
         self.last_epp_check = 0.0
+        self.boost = cpu.Boost()
+        self.prefcore = cpu.Prefcore()
         self.backlight = backlight.Backlight.find()
         self.kargs = kargs.detect() if self.gpu.driver in ("xe", "i915") else None
         self.display_busy = False
@@ -222,6 +226,7 @@ class Controller:
     def apply_all(self) -> None:
         self.apply_tdp()
         self.apply_epp()
+        self.apply_cpu()
         self.apply_fan()
         self.apply_battery()
         self.apply_rgb()
@@ -243,6 +248,12 @@ class Controller:
             self._guard("epp", lambda: self.epp.apply(s["value"]))
         else:
             self._guard("epp", self.epp.restore)
+
+    def apply_cpu(self) -> None:
+        s = self.settings["cpu"]
+        for key, ctl in (("boost", self.boost), ("prefcore", self.prefcore)):
+            if s[key] is not None and ctl.available()[0]:
+                self._guard("cpu", lambda: ctl.set(bool(s[key])))
 
     def apply_fan(self) -> None:
         if not self.fan:
@@ -405,13 +416,15 @@ class Controller:
         # limits also drift, so re-assert them every minute.
         if ac_changed or (isinstance(self.tdp, tdp.RyzenAdj) and time.monotonic() - self.last_tdp_apply > 60):
             self.apply_tdp()
-        # power-profiles-daemon / tuned rewrite EPP on profile or AC changes.
-        e = self.settings["epp"]
-        if e["enabled"] and time.monotonic() - self.last_epp_check > 10:
+        # power-profiles-daemon / tuned rewrite EPP (and sometimes boost) on
+        # profile or AC changes, so re-assert our CPU choices every 10 s.
+        if time.monotonic() - self.last_epp_check > 10:
             self.last_epp_check = time.monotonic()
-            if self.epp.available()[0] and self.epp.drifted(e["value"]):
+            e = self.settings["epp"]
+            if e["enabled"] and self.epp.available()[0] and self.epp.drifted(e["value"]):
                 log.info("EPP changed behind our back, re-applying %s", e["value"])
                 self.apply_epp()
+            self.apply_cpu()
         self.tick_fan()
         b = self.settings["battery"]
         self._guard("battery", lambda: self.bat.tick(int(b["limit"]), b["bypass"]))
@@ -477,6 +490,15 @@ class Controller:
                 "driver": self.epp.driver,
                 "options": self.epp.options() if self.epp.available()[0] else [],
                 "current": self.epp.current(),
+            },
+            "cpu": {
+                name: {
+                    "available": ok,
+                    "unavailable": why,
+                    "on": ctl.on() if ok else None,
+                }
+                for name, ctl in (("boost", self.boost), ("prefcore", self.prefcore))
+                for ok, why in [ctl.available()]
             },
             "gpu": self.gpu.state(),
             "display": self._display_state(),

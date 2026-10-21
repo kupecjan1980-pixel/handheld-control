@@ -14,6 +14,7 @@ import { FaMicrochip } from "react-icons/fa";
 type Settings = {
   tdp: { enabled: boolean; watts: number | null; boost: boolean };
   epp: { enabled: boolean; value: string };
+  cpu: { boost: boolean | null; prefcore: boolean | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
@@ -54,6 +55,7 @@ type State = {
     options: string[];
     current: string | null;
   };
+  cpu: Record<"boost" | "prefcore", { available: boolean; unavailable: string | null; on: boolean | null }>;
   gpu: {
     driver: string | null;
     gpu_w: number | null;
@@ -81,6 +83,7 @@ const setDisplay = callable<[string, boolean], State>("set_display");
 const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
   epp: callable<[object], State>("set_epp"),
+  cpu: callable<[object], State>("set_cpu"),
   fan: callable<[object], State>("set_fan"),
   rgb: callable<[object], State>("set_rgb"),
   battery: callable<[object], State>("set_battery"),
@@ -251,8 +254,8 @@ function Content() {
                 </PanelSectionRow>
                 <PanelSectionRow>
                   <ToggleField
-                    label="Boost"
-                    description="Allow short bursts above the sustained limit"
+                    label="Power boost"
+                    description="Allow short bursts above the sustained power limit (PL2 / fast PPT)"
                     checked={t.boost}
                     onChange={(v) => change("tdp", { boost: v }, 0)}
                   />
@@ -286,6 +289,33 @@ function Content() {
             <ErrorRow msg={state.errors.epp} />
           </>
         )}
+        <PanelSectionRow>
+          <ToggleField
+            label="CPU boost (turbo)"
+            description={
+              state.cpu.boost.available
+                ? "Clocks above base frequency. Off saves a lot of power and heat."
+                : `Unavailable: ${state.cpu.boost.unavailable}`
+            }
+            checked={draft.cpu.boost ?? state.cpu.boost.on ?? false}
+            disabled={!state.cpu.boost.available}
+            onChange={(v) => change("cpu", { boost: v }, 0)}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Preferred cores"
+            description={
+              state.cpu.prefcore.available
+                ? "Schedule work on the cores the firmware ranks fastest (CPPC)"
+                : `Unavailable: ${state.cpu.prefcore.unavailable}`
+            }
+            checked={draft.cpu.prefcore ?? state.cpu.prefcore.on ?? false}
+            disabled={!state.cpu.prefcore.available}
+            onChange={(v) => change("cpu", { prefcore: v }, 0)}
+          />
+        </PanelSectionRow>
+        <ErrorRow msg={state.errors.cpu} />
       </PanelSection>
 
       <PanelSection title="Fan">
