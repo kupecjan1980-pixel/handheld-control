@@ -32,7 +32,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.1.0/handheld-control-0.1.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.2.0/handheld-control-0.2.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -49,7 +49,8 @@ applies to PowerStation/InputPlumber on CachyOS Handheld. The plugin shows a
 warning when it sees one of them running.
 
 **Kernel drivers vs raw EC.** The plugin prefers kernel interfaces. If they
-are missing, it writes the EC through `ec_sys`:
+are missing, it can write the EC through `ec_sys`, but only after you turn on
+**Advanced → Allow raw EC writes** (off by default):
 
 - `oxpec` supports the ONEXPLAYER 3 in pdx86 `for-next` (mapped like the G1 i).
   Older CachyOS kernels fall back to EC.
@@ -58,6 +59,21 @@ are missing, it writes the EC through `ec_sys`:
   need the EC fallback.
 - The EC fallback **does not work with Secure Boot enabled**, because kernel
   lockdown blocks `ec_sys`. The panel shows why when a section is unavailable.
+
+**EC safety.** Raw EC writes are guarded:
+
+- At startup each mapped register is read. If it holds a value the map
+  doesn't expect (for example, the NEXT 2 charge register 0x1E isn't
+  `0xAA`/`0x55`), EC control for that feature is disabled and the panel says
+  why. Nothing is written.
+- Before every write the register is checked again, and afterwards it is
+  read back. A mismatch turns EC control off for that feature.
+- While the fan is in manual mode, a separate watchdog runs as the systemd
+  unit `hhctl-fan-watchdog`. It puts the fan back to firmware auto if the
+  plugin stops sending heartbeats for 20 s (crash, hang, kill or Decky
+  restart). The timer uses the monotonic clock, so suspend doesn't trigger
+  it. The plugin also returns the fan to auto on unload, on exit and on
+  SIGTERM.
 
 **TDP on the NEXT 2** uses whichever `firmware-attributes` device exposes
 `ppt_pl1_spl` (the `amd-dptc` driver), and switches the platform profile to
@@ -78,7 +94,8 @@ py_modules/hhctl/
   fan.py                hwmon / EC fan, curves, temperature source
   battery.py            charge limit (native/EC/emulated) and bypass
   rgb.py                AYANEO HID, hid-oxp LED, OXP HID v1
-  ec.py                 ec_sys access with lockdown checks
+  ec.py                 guarded ec_sys access (lockdown, value checks, read-back)
+  watchdog.py           standalone fan watchdog (own systemd unit)
   controller.py         settings, apply, tick, resume detection, UI state
 src/index.tsx           Quick Access panel
 ```

@@ -16,6 +16,7 @@ type Settings = {
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
+  ec: { enabled: boolean };
 };
 
 type State = {
@@ -32,6 +33,7 @@ type State = {
     percent: number | null;
     temp: number | null;
     safety: boolean;
+    watchdog: boolean;
   };
   battery: {
     limit_mode: string | null;
@@ -43,6 +45,7 @@ type State = {
     ac?: boolean;
   };
   rgb: { backend: string | null; modes: string[]; effects: string[] };
+  ec: { supported: boolean; lockdown: string | null };
 };
 
 type Section = keyof Settings;
@@ -53,6 +56,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   fan: callable<[object], State>("set_fan"),
   rgb: callable<[object], State>("set_rgb"),
   battery: callable<[object], State>("set_battery"),
+  ec: callable<[object], State>("set_ec"),
 };
 
 const BYPASS_LABELS: Record<string, string> = {
@@ -200,6 +204,7 @@ function Content() {
                   fan.percent != null ? `${fan.percent}%` : null,
                   fan.safety ? "safety override: 100%" : null,
                   `via ${fan.backend}`,
+                  fan.watchdog ? "watchdog armed" : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -386,6 +391,23 @@ function Content() {
           </>
         )}
       </PanelSection>
+
+      {state.ec.supported && (
+        <PanelSection title="Advanced">
+          <PanelSectionRow>
+            <ToggleField
+              label="Allow raw EC writes"
+              description={
+                state.ec.lockdown && state.ec.lockdown !== "none"
+                  ? `Blocked: kernel lockdown is '${state.ec.lockdown}' (Secure Boot).`
+                  : "Fallback for fan and charging when no kernel driver is loaded. Registers are checked before and after every write; anything unexpected turns EC control off."
+              }
+              checked={draft.ec.enabled}
+              onChange={(v) => change("ec", { enabled: v }, 0)}
+            />
+          </PanelSectionRow>
+        </PanelSection>
+      )}
     </>
   );
 }

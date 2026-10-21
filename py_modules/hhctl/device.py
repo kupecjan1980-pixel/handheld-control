@@ -22,6 +22,12 @@ class EcFan:
     pwm_max: int  # EC duty range is 0..pwm_max
     tach_reg: int
 
+    def mode_values(self) -> set[int]:
+        return {self.manual, self.auto}
+
+    def pwm_values(self) -> range:
+        return range(self.pwm_max + 1)
+
 
 @dataclass
 class EcCharge:
@@ -32,6 +38,18 @@ class EcCharge:
     inhibit_awake: int | None = None
     # OneXPlayer style: native % threshold register
     limit_reg: int | None = None
+    # Other values the behaviour register may legitimately hold
+    behaviour_extra: tuple[int, ...] = ()
+
+    def behaviour_values(self) -> set[int]:
+        vals = {self.auto, self.inhibit, *self.behaviour_extra}
+        if self.inhibit_awake is not None:
+            vals.add(self.inhibit_awake)
+        return vals
+
+    @staticmethod
+    def limit_values() -> range:
+        return range(101)
 
 
 @dataclass
@@ -95,6 +113,7 @@ def _oxp3(vendor: str, board: str) -> Device:
         ec_charge=EcCharge(
             behaviour_reg=0xA4, auto=0x00, inhibit=0x03, inhibit_awake=0x01,
             limit_reg=0xA3,
+            behaviour_extra=(0x02,),  # oxpec's "inhibit while off" bit alone
         ),
         rgb="oxp",
         board=board,

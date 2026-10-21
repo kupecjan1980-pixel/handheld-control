@@ -29,7 +29,7 @@ def ac_online() -> bool:
 
 
 class Battery:
-    def __init__(self, dev: Device):
+    def __init__(self, dev: Device, allow_ec: bool):
         self.dev = dev
         self.bat = find_battery()
         self.ec_ok = False
@@ -37,8 +37,27 @@ class Battery:
         self.native_limit = bool(self.bat) and sysfs.writable(f"{self.bat}/charge_control_end_threshold")
         self.native_behaviour = bool(self.bat) and sysfs.writable(f"{self.bat}/charge_behaviour")
         if not (self.native_limit and self.native_behaviour) and dev.ec_charge:
-            self.ec_ok, self.ec_why = ec.available()
+            if not allow_ec:
+                self.ec_why = "no kernel charge driver; enable raw EC writes under Advanced to use the EC fallback"
+            else:
+                self.ec_ok, self.ec_why = ec.available()
+                if self.ec_ok:
+                    try:
+                        self._probe()
+                    except OSError as e:
+                        self.disable_ec(str(e))
         self.inhibited = False
+
+    def _probe(self) -> None:
+        c = self.dev.ec_charge
+        if not self.native_behaviour:
+            ec.check(c.behaviour_reg, c.behaviour_values())
+        if not self.native_limit and c.limit_reg is not None:
+            ec.check(c.limit_reg, c.limit_values())
+
+    def disable_ec(self, why: str) -> None:
+        self.ec_ok = False
+        self.ec_why = why
 
     # --- capabilities -----------------------------------------------------
 
@@ -79,7 +98,7 @@ class Battery:
         elif self.ec_ok and self.dev.ec_charge:
             c = self.dev.ec_charge
             raw = {"auto": c.auto, "inhibit-charge": c.inhibit, "inhibit-charge-awake": c.inhibit_awake}[value]
-            ec.write(c.behaviour_reg, raw)
+            ec.write(c.behaviour_reg, raw, c.behaviour_values())
         else:
             raise OSError("charge behaviour not supported")
         self.inhibited = value != "auto"
@@ -92,7 +111,8 @@ class Battery:
         if mode == "native":
             sysfs.write(f"{self.bat}/charge_control_end_threshold", pct)
         elif mode == "ec":
-            ec.write(self.dev.ec_charge.limit_reg, pct)
+            c = self.dev.ec_charge
+            ec.write(c.limit_reg, pct, c.limit_values())
         # emulated: enforced by tick()
 
     def tick(self, limit: int, bypass: str) -> None:

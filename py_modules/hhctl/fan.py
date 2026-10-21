@@ -55,6 +55,9 @@ class HwmonFan:
     def rpm(self) -> int | None:
         return sysfs.read_int(f"{self.path}/fan1_input")
 
+    def restore_spec(self) -> dict:
+        return {"kind": "hwmon", "path": self.path}
+
 
 class EcFanCtl:
     name = "ec_sys"
@@ -62,13 +65,17 @@ class EcFanCtl:
     def __init__(self, cfg):
         self.cfg = cfg
 
+    def probe(self) -> None:
+        """Refuse to drive the fan if the registers don't look as mapped."""
+        ec.check(self.cfg.mode_reg, self.cfg.mode_values())
+        ec.check(self.cfg.pwm_reg, self.cfg.pwm_values())
+
     def set_auto(self) -> None:
-        ec.write(self.cfg.mode_reg, self.cfg.auto)
+        ec.write(self.cfg.mode_reg, self.cfg.auto, self.cfg.mode_values())
 
     def set_percent(self, pct: int) -> None:
-        if ec.read(self.cfg.mode_reg) != self.cfg.manual:
-            ec.write(self.cfg.mode_reg, self.cfg.manual)
-        ec.write(self.cfg.pwm_reg, round(pct * self.cfg.pwm_max / 100))
+        ec.write(self.cfg.mode_reg, self.cfg.manual, self.cfg.mode_values())
+        ec.write(self.cfg.pwm_reg, round(pct * self.cfg.pwm_max / 100), self.cfg.pwm_values())
 
     def rpm(self) -> int | None:
         try:
@@ -76,14 +83,29 @@ class EcFanCtl:
         except OSError:
             return None
 
+    def restore_spec(self) -> dict:
+        return {
+            "kind": "ec",
+            "mode_reg": self.cfg.mode_reg,
+            "manual": self.cfg.manual,
+            "auto": self.cfg.auto,
+        }
 
-def find_backend(dev: Device):
+
+def find_backend(dev: Device, allow_ec: bool):
     hw = sysfs.find_hwmon(dev.hwmon_names) if dev.hwmon_names else None
     if hw and sysfs.writable(f"{hw}/pwm1_enable"):
         return HwmonFan(hw), None
-    if dev.ec_fan:
-        ok, why = ec.available()
-        if ok:
-            return EcFanCtl(dev.ec_fan), None
+    if not dev.ec_fan:
+        return None, "no fan driver for this device"
+    if not allow_ec:
+        return None, "no kernel fan driver; enable raw EC writes under Advanced to use the EC fallback"
+    ok, why = ec.available()
+    if not ok:
         return None, why
-    return None, "no fan driver for this device"
+    ctl = EcFanCtl(dev.ec_fan)
+    try:
+        ctl.probe()
+    except OSError as e:
+        return None, str(e)
+    return ctl, None
