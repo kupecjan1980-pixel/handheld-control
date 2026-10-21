@@ -76,5 +76,11 @@ class Plugin:
     async def brightness_test_answer(self, answer: str):
         return await self._run(self.ctl.answer_brightness_test, answer)
 
+    async def set_gamescope_hdr(self, mode: str):
+        return await self._run(self.ctl.set_gamescope_hdr, mode)
+
+    async def confirm_gamescope_hdr(self, keep: bool):
+        return await self._run(self.ctl.confirm_gamescope_hdr, keep)
+
     async def set_display(self, group: str, enabled: bool):
         return await self._run(self.ctl.set_display, group, enabled)

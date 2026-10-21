@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import backlight, battery, cpu, diag, ec, epp, fan, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
+from . import backlight, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -23,6 +23,8 @@ DEFAULTS = {
     "epp": {"enabled": False, "value": "balance_performance"},
     # None = leave as the system set it; True/False once the user toggles.
     "cpu": {"boost": None, "prefcore": None},
+    # Game Mode HDR: "steam" leaves gamescope alone; others only after confirm.
+    "gamescope": {"hdr": "steam"},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None},
     "battery": {"limit": 100, "bypass": "off"},
@@ -88,6 +90,11 @@ class Controller:
         self.last_epp_check = 0.0
         self.boost = cpu.Boost()
         self.prefcore = cpu.Prefcore()
+        self.gs: gamescope.Gamescope | None = None
+        self.gs_seen = 0.0  # when the current gamescope process was first seen
+        self.gs_applied_pid: int | None = None
+        self.gs_pending: dict | None = None  # {"mode", "prev", "deadline"}
+        self.gs_last_check = 0.0
         self.backlight = backlight.Backlight.find()
         self.kargs = kargs.detect() if self.gpu.driver in ("xe", "i915") else None
         self.display_busy = False
@@ -309,6 +316,84 @@ class Controller:
             self._guard("display", lambda: self.backlight.set_percent(pct))
         return self.state()
 
+    # --- Game Mode HDR -------------------------------------------------------
+
+    GS_CONFIRM = 20.0  # seconds to confirm before a change is reverted
+    GS_SETTLE = 15.0  # wait after gamescope starts so Steam sets its own HDR first
+
+    def _gs_refresh(self) -> None:
+        if self.gs and self.gs.alive():
+            return
+        self.gs = gamescope.Gamescope.find()
+        self.gs_seen = time.monotonic()
+        self.gs_pending = None  # a new session already runs Steam's defaults
+
+    def set_gamescope_hdr(self, mode: str) -> dict:
+        self._gs_refresh()
+        if not self.gs or mode not in self.gs.modes():
+            self.errors["gamescope"] = "Game Mode (gamescope) is not running, or doesn't support this"
+            return self.state()
+        prev = self.gs_pending["prev"] if self.gs_pending else self.settings["gamescope"]["hdr"]
+        if mode == prev:
+            self.gs_pending = None
+            self._guard("gamescope", lambda: self.gs.apply(mode))
+            return self.state()
+        self._guard("gamescope", lambda: self.gs.apply(mode))
+        if "gamescope" not in self.errors:
+            # Not saved until confirmed: a black screen means no confirm, so it reverts.
+            self.gs_pending = {"mode": mode, "prev": prev, "deadline": time.monotonic() + self.GS_CONFIRM}
+        return self.state()
+
+    def confirm_gamescope_hdr(self, keep: bool) -> dict:
+        p = self.gs_pending
+        if not p:
+            return self.state()
+        self.gs_pending = None
+        if keep:
+            self.settings["gamescope"]["hdr"] = p["mode"]
+            self.save()
+            self.gs_applied_pid = self.gs.pid if self.gs else None
+            self.gs_last_check = time.monotonic()
+        elif self.gs:
+            self._guard("gamescope", lambda: self.gs.apply(p["prev"]))
+        return self.state()
+
+    def tick_gamescope(self) -> None:
+        self._gs_refresh()
+        now = time.monotonic()
+        p = self.gs_pending
+        if p and now > p["deadline"]:
+            self.gs_pending = None
+            if self.gs:
+                self._guard("gamescope", lambda: self.gs.apply(p["prev"]))
+            self.errors["gamescope"] = "Not confirmed within 20 s, so it was reverted."
+            return
+        mode = self.settings["gamescope"]["hdr"]
+        if not self.gs or p or mode == "steam" or mode not in self.gs.modes():
+            return
+        if self.gs.pid != self.gs_applied_pid:
+            if now - self.gs_seen >= self.GS_SETTLE:
+                self._guard("gamescope", lambda: self.gs.apply(mode))
+                self.gs_applied_pid = self.gs.pid
+                self.gs_last_check = now  # give gamescope time to switch first
+        elif mode == "off" and now - self.gs_last_check > 10:
+            # Steam can switch HDR back on (e.g. after its display settings).
+            self.gs_last_check = now
+            if gamescope.hdr_output_active():
+                log.info("Game Mode HDR came back on, turning it off again")
+                self._guard("gamescope", lambda: self.gs.apply("off"))
+
+    def _gamescope_state(self) -> dict:
+        p = self.gs_pending
+        return {
+            "running": bool(self.gs),
+            "modes": self.gs.modes() if self.gs else [],
+            "mode": p["mode"] if p else self.settings["gamescope"]["hdr"],
+            "saved": self.settings["gamescope"]["hdr"],
+            "pending": {"mode": p["mode"], "seconds": max(0, round(p["deadline"] - time.monotonic()))} if p else None,
+            "hdr_active": gamescope.hdr_output_active() if self.gs else None,
+        }
+
     def run_brightness_test(self) -> dict:
         if not self.backlight or self.btest["running"]:
             return self.state()
@@ -457,6 +542,7 @@ class Controller:
 
     def tick(self) -> None:
         self.gpu.sample()
+        self.tick_gamescope()
         offset = _sleep_offset()
         resumed = offset - self.sleep_offset > 2
         self.sleep_offset = offset
@@ -558,6 +644,7 @@ class Controller:
             },
             "gpu": self.gpu.state(),
             "display": self._display_state(),
+            "gamescope": self._gamescope_state(),
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),

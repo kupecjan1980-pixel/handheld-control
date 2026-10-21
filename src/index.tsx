@@ -49,6 +49,14 @@ type State = {
   };
   rgb: { backend: string | null; modes: string[]; effects: string[] };
   ec: { supported: boolean; lockdown: string | null };
+  gamescope: {
+    running: boolean;
+    modes: string[];
+    mode: string;
+    saved: string;
+    pending: { mode: string; seconds: number } | null;
+    hdr_active: boolean | null;
+  };
   epp: {
     available: boolean;
     unavailable: string | null;
@@ -99,6 +107,14 @@ type Section = keyof Settings;
 const getState = callable<[], State>("get_state");
 const setBrightness = callable<[number], State>("set_brightness");
 const setDisplay = callable<[string, boolean], State>("set_display");
+const setGamescopeHdr = callable<[string], State>("set_gamescope_hdr");
+const confirmGamescopeHdr = callable<[boolean], State>("confirm_gamescope_hdr");
+
+const HDR_MODES: Record<string, string> = {
+  steam: "Steam default",
+  content: "Only for HDR games",
+  off: "Off",
+};
 const brightnessTest = callable<[], State>("brightness_test");
 const brightnessTestAnswer = callable<[string], State>("brightness_test_answer");
 const setters: Record<Section, (v: object) => Promise<State>> = {
@@ -541,7 +557,7 @@ function Content() {
         )}
       </PanelSection>
 
-      {(display.backlight || display.bootloader) && (
+      {(display.backlight || display.bootloader || state.gamescope.running) && (
         <PanelSection title="Display">
           {display.backlight && bright != null && (
             <PanelSectionRow>
@@ -653,6 +669,47 @@ function Content() {
             <PanelSectionRow>
               <Field description={display.message} />
             </PanelSectionRow>
+          )}
+          {state.gamescope.modes.length > 0 && (
+            <>
+              <PanelSectionRow>
+                <DropdownItem
+                  label="Game Mode HDR"
+                  description={[
+                    state.gamescope.hdr_active === null
+                      ? null
+                      : `HDR output is ${state.gamescope.hdr_active ? "on" : "off"} right now`,
+                    "In HDR this panel ignores brightness. Off or Only for HDR games lets the slider work.",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  rgOptions={state.gamescope.modes.map((m) => ({ data: m, label: HDR_MODES[m] ?? m }))}
+                  selectedOption={state.gamescope.mode}
+                  onChange={async (o) => setState(await setGamescopeHdr(o.data))}
+                />
+              </PanelSectionRow>
+              {state.gamescope.pending && (
+                <>
+                  <PanelSectionRow>
+                    <Field
+                      label="Keep this setting?"
+                      description={`Reverting in ${state.gamescope.pending.seconds} s unless you keep it.`}
+                    />
+                  </PanelSectionRow>
+                  <PanelSectionRow>
+                    <ButtonItem layout="below" onClick={async () => setState(await confirmGamescopeHdr(true))}>
+                      Keep
+                    </ButtonItem>
+                  </PanelSectionRow>
+                  <PanelSectionRow>
+                    <ButtonItem layout="below" onClick={async () => setState(await confirmGamescopeHdr(false))}>
+                      Revert now
+                    </ButtonItem>
+                  </PanelSectionRow>
+                </>
+              )}
+              <ErrorRow msg={state.errors.gamescope} />
+            </>
           )}
           <ErrorRow msg={state.errors.display} />
         </PanelSection>

@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.6/handheld-control-0.5.6.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.6.0/handheld-control-0.6.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -146,6 +146,23 @@ toggles help with the screen blanking or not waking:
 > untested there and blocked too. The toggles can still be turned off, to
 > undo an earlier change.
 
+**Game Mode HDR.** On the ONEXPLAYER 3, gamescope drives the internal OLED in
+HDR10 (connector colorspace `BT2020_RGB`) even though Steam shows no HDR toggle,
+and in HDR the panel ignores the backlight. That's why brightness works in
+Desktop Mode but not Game Mode. The **Game Mode HDR** option changes gamescope's
+`hdr_enabled` / `hdr_content_driven` settings through `gamescopectl`:
+
+- **Steam default:** leave it to Steam.
+- **Only for HDR games:** SDR for Steam's UI and SDR games, so brightness works,
+  and HDR only while an HDR game shows HDR content. Needs a gamescope with
+  `hdr_content_driven`.
+- **Off:** always SDR. Re-applied if Steam turns HDR back on.
+
+Every change has to be confirmed within 20 s or it reverts by itself, so a
+black screen fixes itself. The settings only last as long as gamescope runs, so
+a reboot always returns to Steam's defaults. A confirmed choice is re-applied
+about 15 s after each new Game Mode session starts.
+
 If the slider doesn't change the screen in Game Mode, press **Run brightness
 test**. It steps the backlight to 25%, 75% and back while checking whether
 the value sticks, asks whether the screen visibly changed, and saves a report
@@ -197,6 +214,7 @@ py_modules/hhctl/
   gpu.py                GPU + package power, GPU memory, clock
   backlight.py          brightness
   diag.py               brightness test + report
+  gamescope.py          Game Mode HDR via gamescopectl
   kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree
   proc.py               run system tools with the host environment, not Decky's
   watchdog.py           standalone fan watchdog (own systemd unit)
