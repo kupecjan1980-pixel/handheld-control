@@ -28,6 +28,7 @@ DEFAULTS = {
     # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
     # change is a trial that must be confirmed; after that it applies directly.
     "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
+    "ui": {"theme": "default"},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None},
     "battery": {"limit": 100, "bypass": "off"},
@@ -78,9 +79,10 @@ def _sleep_offset() -> float:
 
 
 class Controller:
-    def __init__(self, settings_path: str, user_home: str | None = None):
+    def __init__(self, settings_path: str, user_home: str | None = None, version: str | None = None):
         self.settings_path = settings_path
         self.user_home = user_home
+        self.version = version
         self.btest = {"running": False, "phase": None, "phases": 0, "verdict": None, "report": None, "answer": None}
         self.btest_sections: list[tuple[str, list[str]]] = []
         self.btest_mode = "desktop"
@@ -244,6 +246,9 @@ class Controller:
             pass  # not on the main thread; atexit and the watchdog still cover us
 
     # --- apply ------------------------------------------------------------
+
+    def apply_ui(self) -> None:
+        pass  # purely cosmetic; the frontend reads it from settings
 
     def apply_all(self) -> None:
         self.apply_tdp()
@@ -787,6 +792,7 @@ class Controller:
             },
             "gpu": self.gpu.state(),
             "display": self._display_state(),
+            "version": self.version,
             "gamescope": self._gamescope_state(),
             "sdr_brightness": self._sdr_brightness_state(),
             "ec": {

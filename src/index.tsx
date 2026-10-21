@@ -20,6 +20,7 @@ type Settings = {
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
+  ui: { theme: string };
   sdr_brightness: { enabled: boolean; nits: number };
 };
 
@@ -51,6 +52,7 @@ type State = {
   };
   rgb: { backend: string | null; modes: string[]; effects: string[] };
   ec: { supported: boolean; lockdown: string | null };
+  version: string | null;
   gamescope: {
     running: boolean;
     modes: string[];
@@ -135,6 +137,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
   epp: callable<[object], State>("set_epp"),
   cpu: callable<[object], State>("set_cpu"),
+  ui: callable<[object], State>("set_ui"),
   sdr_brightness: callable<[object], State>("set_sdr_brightness"),
   fan: callable<[object], State>("set_fan"),
   rgb: callable<[object], State>("set_rgb"),
@@ -164,6 +167,30 @@ const DISPLAY_TOGGLES: Record<string, { label: string; description: string }> = 
     label: "Disable display C-states",
     description: "Stronger fix if the screen still fails to wake. Uses more battery.",
   },
+};
+
+// Purely cosmetic: tints the plugin's own panel and its section titles.
+const THEMES: Record<string, { label: string; bg?: string; title?: string }> = {
+  default: { label: "Default (black)" },
+  red: {
+    label: "Red",
+    bg: "linear-gradient(180deg, rgba(170, 25, 35, 0.40) 0%, rgba(70, 10, 15, 0.25) 100%)",
+    title: "#ff7a7a",
+  },
+  blue: {
+    label: "Blue",
+    bg: "linear-gradient(180deg, rgba(25, 80, 190, 0.40) 0%, rgba(10, 30, 80, 0.25) 100%)",
+    title: "#7ab4ff",
+  },
+};
+
+const themeCss = (name: string) => {
+  const t = THEMES[name];
+  if (!t?.bg) return "";
+  return `
+    .hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }
+    .hhctl-root .${staticClasses.PanelSectionTitle} { color: ${t.title}; }
+  `;
 };
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
@@ -263,24 +290,11 @@ function Content() {
   const b = draft.battery;
   const r = draft.rgb;
 
-  return (
-    <>
-      <PanelSection title={state.device.name}>
-        {state.conflicts.length > 0 && (
-          <PanelSectionRow>
-            <Field
-              label="Conflict"
-              description={`${state.conflicts.join(", ")} is running and may override these settings. Disable its TDP/RGB/fan options or stop it.`}
-            />
-          </PanelSectionRow>
-        )}
-        {state.device.notes.map((n) => (
-          <PanelSectionRow key={n}>
-            <Field description={n} />
-          </PanelSectionRow>
-        ))}
-      </PanelSection>
+  const theme = draft.ui?.theme ?? "default";
 
+  return (
+    <div className="hhctl-root">
+      <style>{themeCss(theme)}</style>
       <PanelSection title="TDP">
         {perf.length > 0 && (
           <PanelSectionRow>
@@ -821,7 +835,36 @@ function Content() {
           </PanelSectionRow>
         </PanelSection>
       )}
-    </>
+
+      <PanelSection title="About">
+        <PanelSectionRow>
+          <DropdownItem
+            label="Theme color"
+            rgOptions={Object.entries(THEMES).map(([data, t]) => ({ data, label: t.label }))}
+            selectedOption={theme}
+            onChange={(o) => change("ui", { theme: o.data }, 0)}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Field
+            label={state.device.name}
+            description={`Handheld Control ${state.version ? `v${state.version}` : ""}`.trim()}
+          />
+        </PanelSectionRow>
+        {state.device.notes.map((n) => (
+          <PanelSectionRow key={n}>
+            <Field description={n} />
+          </PanelSectionRow>
+        ))}
+        {state.conflicts.length > 0 && (
+          <PanelSectionRow>
+            <Field
+              description={`${state.conflicts.join(", ")} is running. If it also controls TDP, RGB or the fan, it may override these settings.`}
+            />
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+    </div>
   );
 }
 

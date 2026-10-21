@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 
 import decky
@@ -6,6 +7,17 @@ import decky
 from hhctl.controller import Controller
 
 TICK = 2.0
+
+
+def _version() -> str | None:
+    v = getattr(decky, "DECKY_PLUGIN_VERSION", None)
+    if v:
+        return v
+    try:
+        with open(os.path.join(decky.DECKY_PLUGIN_DIR, "package.json")) as f:
+            return json.load(f).get("version")
+    except (OSError, ValueError):
+        return None
 
 
 class Plugin:
@@ -27,7 +39,7 @@ class Plugin:
 
     async def _main(self):
         settings = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
-        self.ctl = await asyncio.to_thread(Controller, settings, decky.DECKY_USER_HOME)
+        self.ctl = await asyncio.to_thread(Controller, settings, decky.DECKY_USER_HOME, _version())
         self.ctl.install_exit_hooks()
         await self._run(self.ctl.apply_all)
         self.loop_task = asyncio.get_event_loop().create_task(self._loop())
@@ -63,6 +75,9 @@ class Plugin:
 
     async def set_battery(self, values: dict):
         return await self._run(self.ctl.update, "battery", values)
+
+    async def set_ui(self, values: dict):
+        return await self._run(self.ctl.update, "ui", values)
 
     async def set_ec(self, values: dict):
         return await self._run(self.ctl.update, "ec", values)
