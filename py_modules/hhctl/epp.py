@@ -62,9 +62,16 @@ class Epp:
             sysfs.write(self.status_path, "active")
             self.policies = _policies()  # policies are recreated on a mode switch
 
+    @staticmethod
+    def _active(policy: str) -> bool:
+        # Policies of offline CPUs stay listed but take no writes.
+        return bool((sysfs.read(f"{policy}/affected_cpus") or "").strip())
+
     def apply(self, value: str) -> None:
         self._ensure_active()
         for p in self.policies:
+            if not self._active(p):
+                continue
             gov = sysfs.read(f"{p}/scaling_governor")
             if value != "performance" and gov == "performance":
                 sysfs.write(f"{p}/scaling_governor", "powersave")
@@ -72,7 +79,9 @@ class Epp:
         self.changed = True
 
     def drifted(self, value: str) -> bool:
-        return any(sysfs.read(f"{p}/energy_performance_preference") != value for p in self.policies)
+        return any(
+            sysfs.read(f"{p}/energy_performance_preference") != value for p in self.policies if self._active(p)
+        )
 
     def restore(self) -> None:
         if not self.changed:

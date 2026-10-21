@@ -22,7 +22,7 @@ DEFAULTS = {
     "tdp": {"enabled": False, "watts": None, "boost": True},
     "epp": {"enabled": False, "value": "balance_performance"},
     # None = leave as the system set it; True/False once the user toggles.
-    "cpu": {"boost": None, "prefcore": None},
+    "cpu": {"boost": None, "prefcore": None, "ccx_off": None},
     # Game Mode HDR: "steam" leaves gamescope alone; others only after confirm.
     "gamescope": {"hdr": "steam"},
     # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
@@ -95,6 +95,7 @@ class Controller:
         self.last_epp_check = 0.0
         self.boost = cpu.Boost()
         self.prefcore = cpu.Prefcore()
+        self.ccx = cpu.Ccx(os.path.join(os.path.dirname(settings_path), "ccx-groups.json"))
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
         self.gs_applied_pid: int | None = None
@@ -229,12 +230,12 @@ class Controller:
             pass
 
     def install_exit_hooks(self) -> None:
-        atexit.register(self.restore)
+        atexit.register(lambda: self.restore(unload=True))
         try:
             prev = signal.getsignal(signal.SIGTERM)
 
             def on_term(signum, frame):
-                self.restore()
+                self.restore(unload=True)
                 if callable(prev):
                     prev(signum, frame)
                 else:
@@ -304,6 +305,11 @@ class Controller:
 
     def apply_cpu(self) -> None:
         s = self.settings["cpu"]
+        if s.get("ccx_off") is not None and self.ccx.available()[0]:
+            changed = []
+            self._guard("cpu", lambda: changed.append(self.ccx.set(bool(s["ccx_off"]))))
+            if any(changed) and not s["ccx_off"]:
+                self.apply_epp()  # CPUs coming back online start with default EPP
         for key, ctl in (("boost", self.boost), ("prefcore", self.prefcore)):
             if s[key] is not None and ctl.available()[0]:
                 self._guard("cpu", lambda: ctl.set(bool(s[key])))
@@ -745,8 +751,10 @@ class Controller:
         b = self.settings["battery"]
         self._guard("battery", lambda: self.bat.tick(int(b["limit"]), b["bypass"]))
 
-    def restore(self) -> None:
+    def restore(self, unload: bool = False) -> None:
         """Hand control back to firmware (unload, exit, EC switch)."""
+        if unload and self.settings["cpu"].get("ccx_off") and self.ccx.on():
+            self._guard("cpu", lambda: self.ccx.set(False))
         if self.fan and self.settings["fan"]["mode"] != "auto":
             try:
                 self.fan.set_auto()
@@ -813,9 +821,10 @@ class Controller:
                     "unavailable": why,
                     "on": ctl.on() if ok else None,
                 }
-                for name, ctl in (("boost", self.boost), ("prefcore", self.prefcore))
+                for name, ctl in (("boost", self.boost), ("prefcore", self.prefcore), ("ccx", self.ccx))
                 for ok, why in [ctl.available()]
-            },
+            }
+            | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()},
             "gpu": self.gpu.state(),
             "display": self._display_state(),
             "version": self.version,

@@ -48,7 +48,7 @@ class Plugin:
         if self.loop_task:
             self.loop_task.cancel()
         if self.ctl:
-            await self._run(self.ctl.restore)
+            await self._run(self.ctl.restore, True)
 
     async def _uninstall(self):
         pass

@@ -12,10 +12,12 @@ scheduler to core capacities instead, so there is nothing to toggle.
 """
 
 import glob
+import json
 import os
 
 from . import proc, sysfs
 
+CPU_ROOT = "/sys/devices/system/cpu"
 CPUFREQ = "/sys/devices/system/cpu/cpufreq"
 NO_TURBO = "/sys/devices/system/cpu/intel_pstate/no_turbo"
 ITMT = "/sys/kernel/debug/x86/sched_itmt_enabled"
@@ -82,3 +84,98 @@ class Prefcore:
     def set(self, on: bool) -> None:
         if self.on() != on:
             sysfs.write(ITMT, int(on))
+
+
+def parse_cpulist(text: str) -> list[int]:
+    """'0-7,16-23' -> [0..7, 16..23]"""
+    out = []
+    for part in (text or "").strip().split(","):
+        if not part:
+            continue
+        lo, _, hi = part.partition("-")
+        out += range(int(lo), int(hi or lo) + 1)
+    return out
+
+
+class Ccx:
+    """Take every CCX except CPU 0's offline (e.g. the second CCD on Strix Halo).
+
+    CCXs are told apart by their shared L3 cache. Offline CPUs lose their
+    cache/topology files, so the grouping is cached while all are online.
+    """
+
+    def __init__(self, cache_path: str):
+        self.cache_path = cache_path
+        self.groups = self._detect()
+
+    @staticmethod
+    def _cpus() -> list[int]:
+        return sorted(int(os.path.basename(p)[3:]) for p in glob.glob(f"{CPU_ROOT}/cpu[0-9]*"))
+
+    @staticmethod
+    def _l3(cpu: int) -> list[int] | None:
+        for idx in glob.glob(f"{CPU_ROOT}/cpu{cpu}/cache/index*"):
+            if sysfs.read(f"{idx}/level") == "3":
+                return parse_cpulist(sysfs.read(f"{idx}/shared_cpu_list") or "")
+        return None
+
+    def _detect(self) -> list[list[int]]:
+        cpus = self._cpus()
+        offline = [c for c in cpus if sysfs.read(f"{CPU_ROOT}/cpu{c}/online") == "0"]
+        if not offline:
+            groups = []
+            for c in cpus:
+                l3 = self._l3(c)
+                if l3 and l3 not in groups:
+                    groups.append(l3)
+            try:
+                os.makedirs(os.path.dirname(self.cache_path), exist_ok=True)
+                with open(self.cache_path, "w") as f:
+                    json.dump(groups, f)
+            except OSError:
+                pass
+            return groups
+        try:
+            with open(self.cache_path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return []  # can't tell the CCXs apart with CPUs already offline
+
+    def _first(self) -> list[int]:
+        return next((g for g in self.groups if 0 in g), [])
+
+    def others(self) -> list[int]:
+        keep = set(self._first())
+        return sorted(c for g in self.groups for c in g if c not in keep)
+
+    def available(self) -> tuple[bool, str | None]:
+        if len(self.groups) < 2:
+            if not self.groups:
+                return False, "CPU layout unknown (some CPUs were already offline)"
+            return False, "this CPU has a single CCX (one shared L3 cache)"
+        if not all(os.path.exists(f"{CPU_ROOT}/cpu{c}/online") for c in self.others()):
+            return False, "CPU hotplug isn't available for these cores"
+        return True, None
+
+    def on(self) -> bool | None:
+        others = self.others()
+        if not others:
+            return None
+        return all(sysfs.read(f"{CPU_ROOT}/cpu{c}/online") == "0" for c in others)
+
+    def set(self, off: bool) -> bool:
+        """Returns True if any CPU changed state."""
+        changed = False
+        for c in self.others():
+            path = f"{CPU_ROOT}/cpu{c}/online"
+            want = "0" if off else "1"
+            if sysfs.read(path) != want:
+                sysfs.write(path, want)
+                changed = True
+        return changed
+
+    def keep_count(self) -> int:
+        return len(self._first())
+
+    def total(self) -> int:
+        return sum(len(g) for g in self.groups)

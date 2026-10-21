@@ -9,7 +9,8 @@ def mk(status, gov="performance", pref="performance", avail="performance"):
         p = f"{cf}/policy{i}"; os.makedirs(p)
         for k, v in {"scaling_driver": "amd-pstate-epp", "scaling_governor": gov,
                      "energy_performance_preference": pref,
-                     "energy_performance_available_preferences": avail}.items():
+                     "energy_performance_available_preferences": avail,
+                     "affected_cpus": str(i)}.items():
             open(f"{p}/{k}", "w").write(v + "\n")
     open(st, "w").write(status + "\n")
 epp.CPUFREQ = cf
@@ -40,4 +41,10 @@ for k in epp.STATUS: epp.STATUS[k] = st
 e = epp.Epp(); open(f"{cf}/policy0/scaling_driver", "w").write("acpi-cpufreq\n"); e = epp.Epp()
 assert e.available()[0] is False
 print("options / unsupported driver ok")
+# offline CPU's policy (empty affected_cpus) is skipped, not written
+mk("active"); open(f"{cf}/policy10/affected_cpus", "w").write("\n")
+e = epp.Epp(); e.apply("power")
+assert sysfs.read(f"{cf}/policy10/energy_performance_preference") == "performance"
+assert sysfs.read(f"{cf}/policy0/energy_performance_preference") == "power" and not e.drifted("power")
+print("offline policies skipped")
 shutil.rmtree(tmp); print("all epp tests passed")

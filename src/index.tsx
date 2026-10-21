@@ -16,7 +16,7 @@ import { FaMicrochip } from "react-icons/fa";
 type Settings = {
   tdp: { enabled: boolean; watts: number | null; boost: boolean };
   epp: { enabled: boolean; value: string };
-  cpu: { boost: boolean | null; prefcore: boolean | null };
+  cpu: { boost: boolean | null; prefcore: boolean | null; ccx_off: boolean | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
@@ -81,7 +81,10 @@ type State = {
     options: string[];
     current: string | null;
   };
-  cpu: Record<"boost" | "prefcore", { available: boolean; unavailable: string | null; on: boolean | null }>;
+  cpu: Record<"boost" | "prefcore" | "ccx", { available: boolean; unavailable: string | null; on: boolean | null }> & {
+    ccx_keep: number;
+    ccx_total: number;
+  };
   gpu: {
     driver: string | null;
     gpu_w: number | null;
@@ -419,6 +422,16 @@ function Content() {
             onChange={(v) => change("cpu", { prefcore: v }, 0)}
           />
         </PanelSectionRow>
+        {state.cpu.ccx.available && (
+          <PanelSectionRow>
+            <ToggleField
+              label="First CCX only"
+              description={`Takes the other CCX offline: ${state.cpu.ccx_keep} of ${state.cpu.ccx_total} threads stay on. Saves some power in light games; heavily threaded games run slower.`}
+              checked={draft.cpu.ccx_off ?? state.cpu.ccx.on ?? false}
+              onChange={(v) => change("cpu", { ccx_off: v }, 0)}
+            />
+          </PanelSectionRow>
+        )}
         <ErrorRow msg={state.errors.cpu} />
       </PanelSection>
 

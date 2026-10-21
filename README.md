@@ -40,7 +40,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.8.1/handheld-control-0.8.1.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.9.0/handheld-control-0.9.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -118,6 +118,14 @@ your choice.
   saves a lot of power and heat, at the cost of single-thread speed.
 - **EPP** is a hint for how eagerly the CPU ramps up within those limits. It
   isn't a boost switch.
+
+**First CCX only** (Ryzen chips with more than one CCX, such as the NEXT 2's
+Strix Halo with two 8-core CCDs) takes every CPU outside CPU 0's CCX offline,
+SMT siblings included. CCXs are told apart by their shared L3 cache; the layout
+is cached so it's still known while CPUs are offline. It saves some power at
+light loads, and heavily threaded games run slower. EPP is re-applied when the
+cores come back, and unloading the plugin brings them back online. Not shown
+on single-CCX CPUs (including the ONEXPLAYER 3).
 
 **Preferred cores** turns on the scheduler's ITMT switch
 (`/sys/kernel/debug/x86/sched_itmt_enabled`), which places work on the cores
@@ -227,7 +235,7 @@ py_modules/hhctl/
   device.py             DMI detection and per-device register maps
   tdp.py                firmware-attributes / RAPL / ryzenadj
   epp.py                energy performance preference (amd-pstate / intel_pstate)
-  cpu.py                CPU boost (turbo) and preferred-core scheduling
+  cpu.py                CPU boost (turbo), preferred cores, first-CCX-only
   fan.py                hwmon / EC fan, curves, temperature source
   battery.py            charge limit (native/EC/emulated) and bypass
   rgb.py                AYANEO HID, hid-oxp LED, OXP HID v1
