@@ -13,6 +13,7 @@ import { FaMicrochip } from "react-icons/fa";
 
 type Settings = {
   tdp: { enabled: boolean; watts: number | null; boost: boolean };
+  epp: { enabled: boolean; value: string };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
@@ -46,6 +47,13 @@ type State = {
   };
   rgb: { backend: string | null; modes: string[]; effects: string[] };
   ec: { supported: boolean; lockdown: string | null };
+  epp: {
+    available: boolean;
+    unavailable: string | null;
+    driver: string | null;
+    options: string[];
+    current: string | null;
+  };
   gpu: {
     driver: string | null;
     gpu_w: number | null;
@@ -72,6 +80,7 @@ const setBrightness = callable<[number], State>("set_brightness");
 const setDisplay = callable<[string, boolean], State>("set_display");
 const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
+  epp: callable<[object], State>("set_epp"),
   fan: callable<[object], State>("set_fan"),
   rgb: callable<[object], State>("set_rgb"),
   battery: callable<[object], State>("set_battery"),
@@ -82,6 +91,13 @@ const BYPASS_LABELS: Record<string, string> = {
   off: "Off",
   awake: "While awake",
   always: "Always",
+};
+
+const EPP_LABELS: Record<string, string> = {
+  performance: "Performance",
+  balance_performance: "Balance performance",
+  balance_power: "Balance power",
+  power: "Power saver",
 };
 
 const DISPLAY_TOGGLES: Record<string, { label: string; description: string }> = {
@@ -168,6 +184,7 @@ function Content() {
   };
 
   const { tdp, fan, battery, rgb, gpu, display } = state;
+  const e = draft.epp;
   const perf = [
     gpu.pkg_w != null ? `Package ${gpu.pkg_w} W` : null,
     gpu.gpu_w != null ? `GPU ${gpu.gpu_w} W` : null,
@@ -243,6 +260,30 @@ function Content() {
               </>
             )}
             <ErrorRow msg={state.errors.tdp} />
+          </>
+        )}
+        {state.epp.available && (
+          <>
+            <PanelSectionRow>
+              <ToggleField
+                label="Energy preference (EPP)"
+                description={`${state.epp.driver}${state.epp.current ? ` · now ${EPP_LABELS[state.epp.current] ?? state.epp.current}` : ""}`}
+                checked={e.enabled}
+                onChange={(v) => change("epp", { enabled: v }, 0)}
+              />
+            </PanelSectionRow>
+            {e.enabled && (
+              <PanelSectionRow>
+                <DropdownItem
+                  label="Preference"
+                  description="Anything but Performance switches the CPU governor to powersave"
+                  rgOptions={state.epp.options.map((o) => ({ data: o, label: EPP_LABELS[o] ?? titleCase(o) }))}
+                  selectedOption={e.value}
+                  onChange={(o) => change("epp", { value: o.data }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            <ErrorRow msg={state.errors.epp} />
           </>
         )}
       </PanelSection>

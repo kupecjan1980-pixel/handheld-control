@@ -1,12 +1,13 @@
 # Handheld Control (Decky plugin)
 
-TDP, fan, RGB, battery (charge limit + charge bypass), brightness and display
+TDP, EPP, fan, RGB, battery (charge limit + charge bypass), brightness and display
 stability control for:
 
 | | AYANEO NEXT 2 (Bazzite 44) | ONEXPLAYER 3 (CachyOS) |
 |---|---|---|
 | DMI | vendor `AYA`, board `AB09` | vendor `ONE-NETBOOK`, board `ONEXPLAYER 3` |
 | TDP | firmware-attributes (`amd-dptc`) → `ryzenadj` fallback, 10–80 W, boost up to 85 W | Intel RAPL powercap (MSR and MMIO package zones), 3–40 W, PL2 up to 42 W |
+| EPP | `amd-pstate-epp` | `intel_pstate` (HWP) |
 | Fan | hwmon `ayaneo_ec` → raw EC fallback (0x4A/0x4B, 0–100) | hwmon `oxp_ec` → raw EC fallback (0x4A/0x4B, 0–184) |
 | Charge limit | **emulated**: the EC can only inhibit charging, so the plugin inhibits at the limit and resumes 3% below it | native `charge_control_end_threshold` → EC 0xA3 |
 | Charge bypass | Off / Always (EC 0x1E, `0xAA`/`0x55`) | Off / While awake / Always (`charge_behaviour` → EC 0xA4) |
@@ -35,7 +36,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.3.0/handheld-control-0.3.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.4.0/handheld-control-0.4.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -95,6 +96,16 @@ Driver notes:
 `custom` first. Without it, the plugin uses `ryzenadj` if it is installed.
 Strix Halo support in ryzenadj depends on its version.
 
+**EPP (Energy Performance Preference)** tells the CPU how to trade speed for
+power inside the TDP limit: Performance, Balance performance, Balance power or
+Power saver. Both drivers pin EPP to `performance` under the `performance`
+governor, so any other choice switches the governor to `powersave`. If the
+pstate driver is in passive/guided mode, it's switched to active first.
+Turning the toggle off restores the mode, governors and EPP values from when
+the plugin started. power-profiles-daemon and tuned rewrite EPP when the
+profile or AC state changes, so the plugin checks every 10 s and re-applies
+your choice.
+
 **GPU readout.** The TDP section shows package power, GPU power, GPU memory
 and GPU clock. The TDP limit is a package limit, so CPU and GPU share it.
 Steam's overlay runs unprivileged, so on Intel it can't read GPU power (RAPL
@@ -128,6 +139,7 @@ main.py                 Decky entry point (async API + 2 s background loop)
 py_modules/hhctl/
   device.py             DMI detection and per-device register maps
   tdp.py                firmware-attributes / RAPL / ryzenadj
+  epp.py                energy performance preference (amd-pstate / intel_pstate)
   fan.py                hwmon / EC fan, curves, temperature source
   battery.py            charge limit (native/EC/emulated) and bypass
   rgb.py                AYANEO HID, hid-oxp LED, OXP HID v1

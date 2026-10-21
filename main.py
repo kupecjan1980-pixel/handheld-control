@@ -49,6 +49,9 @@ class Plugin:
     async def set_tdp(self, values: dict):
         return await self._run(self.ctl.update, "tdp", values)
 
+    async def set_epp(self, values: dict):
+        return await self._run(self.ctl.update, "epp", values)
+
     async def set_fan(self, values: dict):
         return await self._run(self.ctl.update, "fan", values)
 
