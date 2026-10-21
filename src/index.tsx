@@ -1,4 +1,5 @@
-import { callable, definePlugin, toaster, useQuickAccessVisible } from "@decky/api";
+import { callable, definePlugin, openFilePicker, toaster, useQuickAccessVisible } from "@decky/api";
+import type { FileSelectionType } from "@decky/api/dist/types";
 import {
   ButtonItem,
   DropdownItem,
@@ -20,7 +21,7 @@ type Settings = {
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
-  ui: { theme: string };
+  ui: { theme: string; bg: string | null; bg_dim: number };
   sdr_brightness: { enabled: boolean; nits: number };
 };
 
@@ -53,6 +54,7 @@ type State = {
   rgb: { backend: string | null; modes: string[]; effects: string[] };
   ec: { supported: boolean; lockdown: string | null };
   version: string | null;
+  home: string | null;
   gamescope: {
     running: boolean;
     modes: string[];
@@ -124,6 +126,9 @@ const setBrightness = callable<[number], State>("set_brightness");
 const setDisplay = callable<[string, boolean], State>("set_display");
 const setGamescopeHdr = callable<[string], State>("set_gamescope_hdr");
 const confirmSdrBrightness = callable<[boolean], State>("confirm_sdr_brightness");
+const setBackground = callable<[string], State>("set_background");
+const clearBackground = callable<[], State>("clear_background");
+const getBackground = callable<[], string | null>("get_background");
 const confirmGamescopeHdr = callable<[boolean], State>("confirm_gamescope_hdr");
 
 const HDR_MODES: Record<string, string> = {
@@ -184,13 +189,25 @@ const THEMES: Record<string, { label: string; bg?: string; title?: string }> = {
   },
 };
 
-const themeCss = (name: string) => {
+const themeCss = (name: string, hasImage: boolean) => {
   const t = THEMES[name];
   if (!t?.bg) return "";
+  // With a background picture, keep the picture and only color the titles.
   return `
-    .hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }
+    ${hasImage ? "" : `.hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }`}
     .hhctl-root .${staticClasses.PanelSectionTitle} { color: ${t.title}; }
   `;
+};
+
+const imageStyle = (url: string, dimPct: number) => {
+  const a = Math.max(0, Math.min(90, dimPct)) / 100;
+  return {
+    backgroundImage: `linear-gradient(rgba(0, 0, 0, ${a}), rgba(0, 0, 0, ${a})), url("${url}")`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    borderRadius: "8px",
+    paddingBottom: "4px",
+  };
 };
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
@@ -231,6 +248,17 @@ function Content() {
     if (Date.now() - lastEdit.current > 1500) setDraft(s.settings);
     if (Date.now() - lastBrightEdit.current > 1500) setBright(s.display.brightness);
   };
+
+  // The picture is fetched once per change, not on every 2 s refresh.
+  const bgName = state?.settings.ui?.bg ?? null;
+  const [bgUrl, setBgUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bgName) {
+      setBgUrl(null);
+      return;
+    }
+    getBackground().then(setBgUrl);
+  }, [bgName]);
 
   // Make the trial's Keep prompt hard to miss, even outside this panel.
   const sbPending = !!state?.sdr_brightness.pending;
@@ -293,8 +321,8 @@ function Content() {
   const theme = draft.ui?.theme ?? "default";
 
   return (
-    <div className="hhctl-root">
-      <style>{themeCss(theme)}</style>
+    <div className="hhctl-root" style={bgUrl ? imageStyle(bgUrl, draft.ui?.bg_dim ?? 55) : undefined}>
+      <style>{themeCss(theme, !!bgUrl)}</style>
       <PanelSection title="TDP">
         {perf.length > 0 && (
           <PanelSectionRow>
@@ -845,6 +873,52 @@ function Content() {
             onChange={(o) => change("ui", { theme: o.data }, 0)}
           />
         </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            description="PNG, JPG or WebP, up to 8 MB. It's copied into the plugin's settings."
+            onClick={async () => {
+              try {
+                const res = await openFilePicker(
+                  0 as FileSelectionType, // FILE
+                  state.home ?? "/home",
+                  true,
+                  true,
+                  undefined,
+                  ["png", "jpg", "jpeg", "webp"],
+                );
+                setState(await setBackground(res.realpath || res.path));
+              } catch {
+                // picker closed without choosing
+              }
+            }}
+          >
+            {draft.ui?.bg ? "Change background picture" : "Choose background picture"}
+          </ButtonItem>
+        </PanelSectionRow>
+        {draft.ui?.bg && (
+          <>
+            <PanelSectionRow>
+              <SliderField
+                label="Picture dimming"
+                description="Darkens the picture so text stays readable"
+                value={draft.ui.bg_dim ?? 55}
+                min={0}
+                max={90}
+                step={5}
+                showValue
+                valueSuffix="%"
+                onChange={(v) => change("ui", { bg_dim: v })}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem layout="below" onClick={async () => setState(await clearBackground())}>
+                Remove background picture
+              </ButtonItem>
+            </PanelSectionRow>
+          </>
+        )}
+        <ErrorRow msg={state.errors.ui} />
         <PanelSectionRow>
           <Field
             label={state.device.name}

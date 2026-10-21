@@ -79,6 +79,15 @@ class Plugin:
     async def set_ui(self, values: dict):
         return await self._run(self.ctl.update, "ui", values)
 
+    async def set_background(self, path: str):
+        return await self._run(self.ctl.set_background, path)
+
+    async def clear_background(self):
+        return await self._run(self.ctl.clear_background)
+
+    async def get_background(self):
+        return await self._run(self.ctl.background_data)
+
     async def set_ec(self, values: dict):
         return await self._run(self.ctl.update, "ec", values)
 

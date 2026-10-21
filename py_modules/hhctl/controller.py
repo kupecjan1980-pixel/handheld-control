@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import backlight, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
+from . import background, backlight, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -28,7 +28,7 @@ DEFAULTS = {
     # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
     # change is a trial that must be confirmed; after that it applies directly.
     "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
-    "ui": {"theme": "default"},
+    "ui": {"theme": "default", "bg": None, "bg_dim": 55},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None},
     "battery": {"limit": 100, "bypass": "off"},
@@ -249,6 +249,32 @@ class Controller:
 
     def apply_ui(self) -> None:
         pass  # purely cosmetic; the frontend reads it from settings
+
+    def _ui_dir(self) -> str:
+        return os.path.dirname(self.settings_path)
+
+    def set_background(self, path: str) -> dict:
+        try:
+            self.settings["ui"]["bg"] = background.save(self._ui_dir(), path)
+            self.save()
+            self.errors.pop("ui", None)
+        except OSError as e:
+            self.errors["ui"] = str(e)
+        return self.state()
+
+    def clear_background(self) -> dict:
+        background.clear(self._ui_dir())
+        self.settings["ui"]["bg"] = None
+        self.save()
+        return self.state()
+
+    def background_data(self) -> str | None:
+        if not self.settings["ui"]["bg"]:
+            return None
+        try:
+            return background.data_url(self._ui_dir())
+        except OSError:
+            return None
 
     def apply_all(self) -> None:
         self.apply_tdp()
@@ -793,6 +819,7 @@ class Controller:
             "gpu": self.gpu.state(),
             "display": self._display_state(),
             "version": self.version,
+            "home": self.user_home,
             "gamescope": self._gamescope_state(),
             "sdr_brightness": self._sdr_brightness_state(),
             "ec": {

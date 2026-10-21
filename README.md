@@ -21,7 +21,7 @@ Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
 released below 80 °C.
 
-The **About** section at the bottom shows the device, the plugin version, device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue) that tints the plugin's panel.
+The **About** section at the bottom shows the device, the plugin version, device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue) that tints the plugin's panel. You can also choose a **background picture** (PNG, JPG or WebP, up to 8 MB) with adjustable dimming; it's copied into the plugin's settings folder.
 
 Nothing is changed until you enable a section. Settings persist in
 `~/homebrew/settings/Handheld Control/settings.json` and are re-applied at
@@ -40,7 +40,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.8.0/handheld-control-0.8.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.8.1/handheld-control-0.8.1.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -234,6 +234,7 @@ py_modules/hhctl/
   ec.py                 guarded EC access: ec_sys / MMIO / port I/O
   gpu.py                GPU + package power, GPU memory, clock
   backlight.py          brightness
+  background.py         custom panel background picture
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)
   kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree
