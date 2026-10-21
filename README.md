@@ -21,15 +21,23 @@ boot, after resume, and (for TDP) when AC is plugged or unplugged. When the
 plugin unloads, the fan goes back to firmware auto and the emulated charge
 inhibit is cleared.
 
+> **Status: untested on hardware.** Packet formats and register maps were
+> checked against the kernel drivers and HHD, but the plugin has not yet run on
+> a NEXT 2 or ONEXPLAYER 3. Enable one section at a time and watch the result.
+> Please report what works in an issue.
+
 ## Install
 
-```sh
-./package.sh            # needs node + npm, zip
+In Decky, enable **Settings → General → Developer mode**, then use
+**Developer → Install plugin from URL** with:
+
+```
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.1.0/handheld-control-0.1.0.zip
 ```
 
-Copy `out/handheld-control-<version>.zip` to the device. In Decky, enable
-**Settings → General → Developer mode**, then use **Developer → Install
-plugin from ZIP**.
+To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
+`out/handheld-control-<version>.zip` to the device and use **Install plugin
+from ZIP**.
 
 ## Before you use it
 
