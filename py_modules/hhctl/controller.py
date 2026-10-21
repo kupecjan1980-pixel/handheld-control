@@ -358,8 +358,25 @@ class Controller:
             self._guard("gamescope", lambda: self.gs.apply(p["prev"]))
         return self.state()
 
+    def _brightness_floor(self) -> None:
+        """Keep the panel visible while we hold Game Mode in SDR.
+
+        With HDR off, Steam's brightness slider reaches this panel for the
+        first time and can set it to (near) zero, which looks like the screen
+        turned off. Only acts while the plugin has changed gamescope's HDR.
+        """
+        if not self.backlight or not self.gs:
+            return
+        if not self.gs_pending and self.settings["gamescope"]["hdr"] == "steam":
+            return
+        pct = self.backlight.percent()
+        if pct is not None and pct < backlight.MIN_PCT:
+            log.info("Backlight at %s%% in Game Mode SDR, raising to %s%%", pct, backlight.MIN_PCT)
+            self._guard("display", lambda: self.backlight.set_percent(backlight.MIN_PCT))
+
     def tick_gamescope(self) -> None:
         self._gs_refresh()
+        self._brightness_floor()
         now = time.monotonic()
         p = self.gs_pending
         if p and now > p["deadline"]:

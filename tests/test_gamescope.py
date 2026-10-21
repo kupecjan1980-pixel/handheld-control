@@ -73,3 +73,37 @@ open(exe, "wb").write(b"hdr_enabled\0hdr_content_driven"); g._convars = g._scan_
 assert g.modes() == ["steam", "content", "off"]
 print("convar detection ok")
 shutil.rmtree(tmp); print("all gamescope tests passed")
+
+# --- control socket discovery: skip names that don't connect ---------------
+calls = []
+def fake_ctl(args, name):
+    calls.append((tuple(args), name))
+    ok = name == "gamescope-1"
+    return types.SimpleNamespace(returncode=0 if ok else 1, stdout="",
+                                 stderr="" if ok else "Failed to open GAMESCOPE_WAYLAND_DISPLAY.")
+g = gs2.Gamescope.__new__(gs2.Gamescope)
+g.uid, g.gid, g.runtime_dir, g.display, g.ctl = 1000, 1000, "/run/user/1000", None, "/usr/bin/gamescopectl"
+g._convars = {"hdr_enabled"}
+g._candidates = lambda: ["gamescope-0", "gamescope-1"]   # stale name first
+g._ctl = fake_ctl
+g.apply("off")
+assert g.display == "gamescope-1" and calls[-1] == (("hdr_enabled", "0"), "gamescope-1"), calls
+g._candidates = lambda: ["gamescope-0"]; g.display = None
+try:
+    g.apply("off"); raise SystemExit("should fail")
+except OSError as e:
+    assert "couldn't reach" in str(e) and "gamescope-0" in str(e), e
+print("socket discovery: stale name skipped, clear error when none works")
+
+# --- brightness floor only while the plugin overrides HDR ---------------------
+class FakeBL:
+    def __init__(self, pct): self.pct, self.set = pct, []
+    def percent(self): return self.pct
+    def set_percent(self, p): self.set.append(p)
+ctl.gs = FakeGS(400); ctl.gs_pending = None
+ctl.backlight = FakeBL(0)
+ctl.settings["gamescope"]["hdr"] = "steam"; ctl._brightness_floor(); assert ctl.backlight.set == []
+ctl.settings["gamescope"]["hdr"] = "off"; ctl._brightness_floor(); assert ctl.backlight.set == [5]
+ctl.backlight = FakeBL(40); ctl._brightness_floor(); assert ctl.backlight.set == []
+print("brightness floor: raises 0% to 5% only while HDR is overridden")
+print("all gamescope tests passed")

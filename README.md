@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.6.0/handheld-control-0.6.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.6.1/handheld-control-0.6.1.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -159,7 +159,10 @@ Desktop Mode but not Game Mode. The **Game Mode HDR** option changes gamescope's
 - **Off:** always SDR. Re-applied if Steam turns HDR back on.
 
 Every change has to be confirmed within 20 s or it reverts by itself, so a
-black screen fixes itself. The settings only last as long as gamescope runs, so
+black screen fixes itself. While the plugin has HDR changed, it also keeps the
+backlight at 5% or more: with HDR off, Steam's own slider reaches the panel for
+the first time and can set it to near zero, which looks like the screen
+turning off. The settings only last as long as gamescope runs, so
 a reboot always returns to Steam's defaults. A confirmed choice is re-applied
 about 15 s after each new Game Mode session starts.
 

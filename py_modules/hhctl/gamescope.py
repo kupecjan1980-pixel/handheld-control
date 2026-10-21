@@ -17,7 +17,10 @@ gamescope's own log, so success is judged from the DRM connector colorspace.
 import glob
 import os
 import pwd
+import re
 import shutil
+import stat
+from collections import Counter
 
 from . import proc, sysfs
 
@@ -76,10 +79,10 @@ class Gamescope:
         self.uid, self.gid = st.st_uid, st.st_gid
         env = _environ(pid)
         self.runtime_dir = env.get("XDG_RUNTIME_DIR") or f"/run/user/{self.uid}"
-        self.display = env.get("GAMESCOPE_WAYLAND_DISPLAY") or self._find_socket()
         self.exe = os.path.realpath(f"/proc/{pid}/exe")
         self.ctl = shutil.which("gamescopectl", path=proc.env()["PATH"])
         self._convars = self._scan_convars()
+        self.display: str | None = None  # found lazily: gamescope may still be starting
 
     @classmethod
     def find(cls):
@@ -91,10 +94,63 @@ class Gamescope:
         except OSError:
             return None
 
-    def _find_socket(self) -> str:
-        socks = sorted(glob.glob(f"{self.runtime_dir}/gamescope-*"))
-        socks = [s for s in socks if not s.endswith(".lock")]
-        return os.path.basename(socks[0]) if socks else "gamescope-0"
+    def _candidates(self) -> list[str]:
+        """Possible GAMESCOPE_WAYLAND_DISPLAY names, most likely first.
+
+        Gamescope sets the variable for the programs it starts (Steam and
+        games), not reliably for itself, so the session's own processes are
+        the best source; the sockets in the runtime dir are the fallback.
+        """
+        seen = Counter()
+        for environ in glob.glob("/proc/[0-9]*/environ"):
+            try:
+                if os.stat(environ).st_uid != self.uid:
+                    continue
+                with open(environ, "rb") as f:
+                    m = re.search(rb"(?:^|\0)GAMESCOPE_WAYLAND_DISPLAY=([^\0]+)", f.read())
+            except OSError:
+                continue
+            if m:
+                seen[m.group(1).decode(errors="replace")] += 1
+        names = [n for n, _ in seen.most_common()]
+        for path in sorted(glob.glob(f"{self.runtime_dir}/gamescope-*")):
+            name = os.path.basename(path)
+            try:
+                is_sock = stat.S_ISSOCK(os.stat(path).st_mode)
+            except OSError:
+                continue
+            if is_sock and re.fullmatch(r"gamescope-\d+", name) and name not in names:
+                names.append(name)
+        return names
+
+    def _env(self, display: str) -> dict[str, str]:
+        env = proc.env()
+        env.update({"XDG_RUNTIME_DIR": self.runtime_dir, "GAMESCOPE_WAYLAND_DISPLAY": display})
+        try:
+            env["HOME"] = pwd.getpwuid(self.uid).pw_dir
+        except KeyError:
+            pass
+        return env
+
+    def _ctl(self, args: list[str], display: str):
+        return proc.run([self.ctl, *args], text=True, timeout=10, env=self._env(display),
+                        user=self.uid, group=self.gid)
+
+    def _connect(self) -> str:
+        """Find the display name gamescopectl can actually talk to."""
+        if self.display:
+            return self.display
+        tried = []
+        for name in self._candidates():
+            res = self._ctl([], name)  # no command: just prints info if it connects
+            if res.returncode == 0:
+                self.display = name
+                return name
+            tried.append(name)
+        raise OSError(
+            "couldn't reach gamescope's control socket"
+            + (f" (tried {', '.join(tried)})" if tried else f" (no gamescope sockets in {self.runtime_dir})")
+        )
 
     def _scan_convars(self) -> set[str]:
         try:
@@ -117,15 +173,9 @@ class Gamescope:
         return out
 
     def _set(self, convar: str, value: str) -> None:
-        env = proc.env()
-        env.update({"XDG_RUNTIME_DIR": self.runtime_dir, "GAMESCOPE_WAYLAND_DISPLAY": self.display})
-        try:
-            env["HOME"] = pwd.getpwuid(self.uid).pw_dir
-        except KeyError:
-            pass
-        res = proc.run([self.ctl, convar, value], text=True, timeout=10, env=env,
-                       user=self.uid, group=self.gid)
+        res = self._ctl([convar, value], self._connect())
         if res.returncode != 0:
+            self.display = None  # rediscover next time
             raise OSError(f"gamescopectl {convar} {value}: {(res.stderr or res.stdout).strip() or res.returncode}")
 
     def apply(self, mode: str) -> None:
