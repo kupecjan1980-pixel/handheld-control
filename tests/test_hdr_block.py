@@ -10,6 +10,7 @@ applied = []
 class FakeGS:
     pid = 100
     def alive(self): return True
+    def sdr_brightness_supported(self): return False
     def modes(self): return ["steam", "off"]
     def apply(self, mode): applied.append(mode)
 gamescope.Gamescope.find = classmethod(lambda cls: FakeGS())

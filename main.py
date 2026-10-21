@@ -79,6 +79,12 @@ class Plugin:
     async def set_gamescope_hdr(self, mode: str):
         return await self._run(self.ctl.set_gamescope_hdr, mode)
 
+    async def set_sdr_brightness(self, values: dict):
+        return await self._run(self.ctl.update, "sdr_brightness", values)
+
+    async def confirm_sdr_brightness(self, keep: bool):
+        return await self._run(self.ctl.confirm_sdr_brightness, keep)
+
     async def confirm_gamescope_hdr(self, keep: bool):
         return await self._run(self.ctl.confirm_gamescope_hdr, keep)
 

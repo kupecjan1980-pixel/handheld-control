@@ -1,4 +1,4 @@
-import { callable, definePlugin, useQuickAccessVisible } from "@decky/api";
+import { callable, definePlugin, toaster, useQuickAccessVisible } from "@decky/api";
 import {
   ButtonItem,
   DropdownItem,
@@ -20,6 +20,7 @@ type Settings = {
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
+  sdr_brightness: { enabled: boolean; nits: number };
 };
 
 type State = {
@@ -57,6 +58,16 @@ type State = {
     pending: { mode: string; seconds: number } | null;
     hdr_active: boolean | null;
     blocked: string | null;
+  };
+  sdr_brightness: {
+    available: boolean;
+    enabled: boolean;
+    nits: number;
+    confirmed: boolean;
+    min: number;
+    max: number;
+    current: number | null;
+    pending: { seconds: number } | null;
   };
   epp: {
     available: boolean;
@@ -109,6 +120,7 @@ const getState = callable<[], State>("get_state");
 const setBrightness = callable<[number], State>("set_brightness");
 const setDisplay = callable<[string, boolean], State>("set_display");
 const setGamescopeHdr = callable<[string], State>("set_gamescope_hdr");
+const confirmSdrBrightness = callable<[boolean], State>("confirm_sdr_brightness");
 const confirmGamescopeHdr = callable<[boolean], State>("confirm_gamescope_hdr");
 
 const HDR_MODES: Record<string, string> = {
@@ -122,6 +134,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
   epp: callable<[object], State>("set_epp"),
   cpu: callable<[object], State>("set_cpu"),
+  sdr_brightness: callable<[object], State>("set_sdr_brightness"),
   fan: callable<[object], State>("set_fan"),
   rgb: callable<[object], State>("set_rgb"),
   battery: callable<[object], State>("set_battery"),
@@ -190,6 +203,16 @@ function Content() {
     if (Date.now() - lastEdit.current > 1500) setDraft(s.settings);
     if (Date.now() - lastBrightEdit.current > 1500) setBright(s.display.brightness);
   };
+
+  // Make the trial's Keep prompt hard to miss, even outside this panel.
+  const sbPending = !!state?.sdr_brightness.pending;
+  useEffect(() => {
+    if (sbPending)
+      toaster.toast({
+        title: "Keep the new Game Mode brightness?",
+        body: "Press Keep in Handheld Control within 20 s, or it reverts.",
+      });
+  }, [sbPending]);
 
   useEffect(() => {
     if (!visible) return;
@@ -670,6 +693,59 @@ function Content() {
             <PanelSectionRow>
               <Field description={display.message} />
             </PanelSectionRow>
+          )}
+          {state.sdr_brightness.available && (
+            <>
+              <PanelSectionRow>
+                <ToggleField
+                  label="Game Mode brightness"
+                  description={[
+                    "Dims or brightens the picture through gamescope while HDR stays on, which this panel needs.",
+                    state.sdr_brightness.current != null ? `Now ${state.sdr_brightness.current} nits` : "Now at gamescope's default",
+                    !state.sdr_brightness.confirmed ? "The first change must be confirmed within 20 s." : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  checked={draft.sdr_brightness.enabled}
+                  onChange={(v) => change("sdr_brightness", { enabled: v, nits: draft.sdr_brightness.nits }, 0)}
+                />
+              </PanelSectionRow>
+              {draft.sdr_brightness.enabled && (
+                <PanelSectionRow>
+                  <SliderField
+                    label="Brightness"
+                    value={draft.sdr_brightness.nits}
+                    min={state.sdr_brightness.min}
+                    max={state.sdr_brightness.max}
+                    step={10}
+                    showValue
+                    valueSuffix=" nits"
+                    onChange={(v) => change("sdr_brightness", { enabled: true, nits: v })}
+                  />
+                </PanelSectionRow>
+              )}
+              {state.sdr_brightness.pending && (
+                <>
+                  <PanelSectionRow>
+                    <Field
+                      label="Keep this brightness?"
+                      description={`Reverting in ${state.sdr_brightness.pending.seconds} s unless you keep it.`}
+                    />
+                  </PanelSectionRow>
+                  <PanelSectionRow>
+                    <ButtonItem layout="below" onClick={async () => setState(await confirmSdrBrightness(true))}>
+                      Keep
+                    </ButtonItem>
+                  </PanelSectionRow>
+                  <PanelSectionRow>
+                    <ButtonItem layout="below" onClick={async () => setState(await confirmSdrBrightness(false))}>
+                      Revert now
+                    </ButtonItem>
+                  </PanelSectionRow>
+                </>
+              )}
+              <ErrorRow msg={state.errors.sdr_brightness} />
+            </>
           )}
           {state.gamescope.running && state.gamescope.blocked && (
             <PanelSectionRow>

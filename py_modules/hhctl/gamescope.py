@@ -12,6 +12,12 @@ convars, changeable at runtime through `gamescopectl`:
 Convars live only as long as the gamescope process, so a reboot or session
 restart always returns to Steam's defaults. gamescopectl's replies go to
 gamescope's own log, so success is judged from the DRM connector colorspace.
+
+SDR-in-HDR brightness: while the output is HDR, gamescope draws SDR content
+(Steam's UI, normal games) at GAMESCOPE_SDR_ON_HDR_CONTENT_BRIGHTNESS nits,
+an X root-window property holding a float's bit pattern. Changing it dims or
+brightens the picture without any display mode change. Removing it returns
+gamescope to its built-in default.
 """
 
 import glob
@@ -20,9 +26,21 @@ import pwd
 import re
 import shutil
 import stat
+import struct
 from collections import Counter
 
 from . import proc, sysfs
+
+SDR_ATOM = "GAMESCOPE_SDR_ON_HDR_CONTENT_BRIGHTNESS"
+
+
+def nits_to_cardinal(nits: float) -> int:
+    return struct.unpack("<I", struct.pack("<f", float(nits)))[0]
+
+
+def cardinal_to_nits(value: int) -> float:
+    return struct.unpack("<f", struct.pack("<I", value & 0xFFFFFFFF))[0]
+
 
 MODES = {
     # mode: convar values to set (only those the running gamescope has)
@@ -158,7 +176,7 @@ class Gamescope:
                 blob = f.read()
         except OSError:
             return set()
-        return {c for c in ("hdr_enabled", "hdr_content_driven") if c.encode() in blob}
+        return {c for c in ("hdr_enabled", "hdr_content_driven", SDR_ATOM) if c.encode() in blob}
 
     def alive(self) -> bool:
         return os.path.exists(f"/proc/{self.pid}")
@@ -177,6 +195,57 @@ class Gamescope:
         if res.returncode != 0:
             self.display = None  # rediscover next time
             raise OSError(f"gamescopectl {convar} {value}: {(res.stderr or res.stdout).strip() or res.returncode}")
+
+    # --- SDR-in-HDR brightness (X root property on Steam's Xwayland) -------
+
+    def _x_env(self) -> dict[str, str] | None:
+        """DISPLAY / XAUTHORITY of the Xwayland Steam runs on."""
+        fallback = None
+        for comm in glob.glob("/proc/[0-9]*/comm"):
+            try:
+                if os.stat(comm).st_uid != self.uid:
+                    continue
+                with open(comm) as f:
+                    name = f.read().strip()
+            except OSError:
+                continue
+            env = _environ(int(comm.split("/")[2]))
+            if not env.get("DISPLAY") or "GAMESCOPE_WAYLAND_DISPLAY" not in env:
+                continue
+            x = {"DISPLAY": env["DISPLAY"]}
+            if env.get("XAUTHORITY"):
+                x["XAUTHORITY"] = env["XAUTHORITY"]
+            if name == "steam":
+                return x
+            fallback = fallback or x
+        return fallback
+
+    def sdr_brightness_supported(self) -> bool:
+        return SDR_ATOM in self._convars and bool(shutil.which("xprop", path=proc.env()["PATH"]))
+
+    def _xprop(self, args: list[str]):
+        x = self._x_env()
+        if not x:
+            raise OSError("couldn't find Steam's X display in the Game Mode session")
+        env = self._env(self.display or "gamescope-0")
+        env.update(x)
+        return proc.run(["xprop", "-root", *args], text=True, timeout=10, env=env,
+                        user=self.uid, group=self.gid)
+
+    def sdr_brightness(self) -> float | None:
+        """Current SDR-in-HDR brightness in nits, or None if unset (default)."""
+        res = self._xprop([SDR_ATOM])
+        m = re.search(r"=\s*(\d+)", res.stdout or "")
+        return cardinal_to_nits(int(m.group(1))) if res.returncode == 0 and m else None
+
+    def set_sdr_brightness(self, nits: float | None) -> None:
+        """Set it in nits, or None to remove it (gamescope's default)."""
+        if nits is None:
+            res = self._xprop(["-remove", SDR_ATOM])
+        else:
+            res = self._xprop(["-f", SDR_ATOM, "32c", "-set", SDR_ATOM, str(nits_to_cardinal(nits))])
+        if res.returncode != 0:
+            raise OSError(f"xprop {SDR_ATOM}: {(res.stderr or res.stdout).strip() or res.returncode}")
 
     def apply(self, mode: str) -> None:
         for convar, value in MODES[mode].items():

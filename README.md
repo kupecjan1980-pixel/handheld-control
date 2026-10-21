@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.6.2/handheld-control-0.6.2.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.7.0/handheld-control-0.7.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -152,6 +152,16 @@ toggles help with the screen blanking or not waking:
 > Bazzite. HDR, Steam's default on CachyOS, keeps it stable. A mode saved by
 > 0.6.0/0.6.1 is reset to Steam default and never re-applied.
 
+**Game Mode brightness** (since 0.7.0) is how brightness works in Game Mode
+on the ONEXPLAYER 3. HDR has to stay on there, and in HDR the panel ignores
+the backlight. Instead, the slider sets gamescope's brightness for SDR content
+inside HDR output (`GAMESCOPE_SDR_ON_HDR_CONTENT_BRIGHTNESS`, in nits; 40–500),
+which covers Steam's UI and normal games. No display mode changes. It's set with
+`xprop` on Steam's X display, as the session user. The first change is a trial
+that must be confirmed with **Keep** within 20 s, or it reverts; after that the
+slider applies directly. The value is re-applied after each new Game Mode
+session and if Steam resets it. Turning it off returns to gamescope's default.
+
 **Game Mode HDR.** On the ONEXPLAYER 3, gamescope drives the internal OLED in
 HDR10 (connector colorspace `BT2020_RGB`) even though Steam shows no HDR toggle,
 and in HDR the panel ignores the backlight. That's why brightness works in
@@ -223,7 +233,7 @@ py_modules/hhctl/
   gpu.py                GPU + package power, GPU memory, clock
   backlight.py          brightness
   diag.py               brightness test + report
-  gamescope.py          Game Mode HDR via gamescopectl
+  gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)
   kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree
   proc.py               run system tools with the host environment, not Decky's
   watchdog.py           standalone fan watchdog (own systemd unit)

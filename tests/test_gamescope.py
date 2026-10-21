@@ -11,6 +11,7 @@ class FakeGS:
     def __init__(self, pid, modes=("steam", "content", "off")):
         self.pid, self._modes, self.dead = pid, list(modes), False
     def alive(self): return not self.dead
+    def sdr_brightness_supported(self): return False
     def modes(self): return self._modes
     def apply(self, mode): applied.append((self.pid, mode))
 current = [FakeGS(100)]

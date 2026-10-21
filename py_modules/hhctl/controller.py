@@ -25,6 +25,9 @@ DEFAULTS = {
     "cpu": {"boost": None, "prefcore": None},
     # Game Mode HDR: "steam" leaves gamescope alone; others only after confirm.
     "gamescope": {"hdr": "steam"},
+    # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
+    # change is a trial that must be confirmed; after that it applies directly.
+    "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None},
     "battery": {"limit": 100, "bypass": "off"},
@@ -95,6 +98,9 @@ class Controller:
         self.gs_applied_pid: int | None = None
         self.gs_pending: dict | None = None  # {"mode", "prev", "deadline"}
         self.gs_last_check = 0.0
+        self.sb_pending: dict | None = None  # {"prev": nits|None, "deadline"}
+        self.sb_applied_pid: int | None = None
+        self.sb_last_check = 0.0
         if self.dev.gamescope_hdr_blocked and self.settings["gamescope"]["hdr"] != "steam":
             # A mode saved before this device was blocked must never be re-applied.
             self.settings["gamescope"]["hdr"] = "steam"
@@ -331,6 +337,11 @@ class Controller:
         self.gs = gamescope.Gamescope.find()
         self.gs_seen = time.monotonic()
         self.gs_pending = None  # a new session already runs Steam's defaults
+        if self.sb_pending:
+            # The trial's session is gone, and it was never confirmed.
+            self.sb_pending = None
+            self.settings["sdr_brightness"]["enabled"] = False
+            self.save()
 
     def set_gamescope_hdr(self, mode: str) -> dict:
         self._gs_refresh()
@@ -385,6 +396,7 @@ class Controller:
         self._gs_refresh()
         self._brightness_floor()
         now = time.monotonic()
+        self.tick_sdr_brightness(now)
         p = self.gs_pending
         if p and now > p["deadline"]:
             self.gs_pending = None
@@ -406,6 +418,112 @@ class Controller:
             if gamescope.hdr_output_active():
                 log.info("Game Mode HDR came back on, turning it off again")
                 self._guard("gamescope", lambda: self.gs.apply("off"))
+
+    # --- Game Mode brightness (SDR-in-HDR nits) ----------------------------
+
+    SB_MIN, SB_MAX = 40, 500  # keep well away from black, and within the panel
+
+    def _sb_ready(self) -> bool:
+        self._gs_refresh()
+        return bool(self.gs and self.gs.sdr_brightness_supported())
+
+    def _sb_nits(self) -> int:
+        return max(self.SB_MIN, min(self.SB_MAX, int(self.settings["sdr_brightness"]["nits"])))
+
+    def apply_sdr_brightness(self) -> None:
+        s = self.settings["sdr_brightness"]
+        if not self._sb_ready():
+            if s["enabled"]:
+                self.errors["sdr_brightness"] = "Only works in Game Mode (gamescope with HDR brightness support)"
+            return
+        if not s["enabled"]:
+            self.sb_pending = None
+            self._guard("sdr_brightness", lambda: self.gs.set_sdr_brightness(None))
+            return
+        nits = self._sb_nits()
+        if s["confirmed"]:
+            self._guard("sdr_brightness", lambda: self.gs.set_sdr_brightness(nits))
+            self.sb_applied_pid = self.gs.pid
+            return
+        # Trial: remember what was there, apply, and wait for Keep.
+        if self.sb_pending:
+            prev = self.sb_pending["prev"]
+        else:
+            try:
+                prev = self.gs.sdr_brightness()
+            except OSError:
+                prev = None
+        self._guard("sdr_brightness", lambda: self.gs.set_sdr_brightness(nits))
+        if "sdr_brightness" not in self.errors:
+            self.sb_pending = {"prev": prev, "deadline": time.monotonic() + self.GS_CONFIRM}
+
+    def _sb_revert(self, p: dict) -> None:
+        if self.gs:
+            self._guard("sdr_brightness", lambda: self.gs.set_sdr_brightness(p["prev"]))
+        self.settings["sdr_brightness"]["enabled"] = False
+        self.save()
+
+    def confirm_sdr_brightness(self, keep: bool) -> dict:
+        p = self.sb_pending
+        if not p:
+            return self.state()
+        self.sb_pending = None
+        if keep:
+            self.settings["sdr_brightness"]["confirmed"] = True
+            self.save()
+            self.sb_applied_pid = self.gs.pid if self.gs else None
+            self.sb_last_check = time.monotonic()
+        else:
+            self._sb_revert(p)
+        return self.state()
+
+    def tick_sdr_brightness(self, now: float) -> None:
+        p = self.sb_pending
+        if p and now > p["deadline"]:
+            self.sb_pending = None
+            self._sb_revert(p)
+            self.errors["sdr_brightness"] = "Not confirmed within 20 s, so it was reverted."
+            return
+        s = self.settings["sdr_brightness"]
+        if not (s["enabled"] and s["confirmed"]) or not self.gs or not self.gs.sdr_brightness_supported():
+            return
+        nits = self._sb_nits()
+        if self.gs.pid != self.sb_applied_pid:
+            if now - self.gs_seen >= self.GS_SETTLE:
+                self._guard("sdr_brightness", lambda: self.gs.set_sdr_brightness(nits))
+                self.sb_applied_pid = self.gs.pid
+                self.sb_last_check = now
+            return
+        if now - self.sb_last_check > 10:
+            self.sb_last_check = now
+            try:
+                cur = self.gs.sdr_brightness()
+            except OSError:
+                return
+            if cur is None or abs(cur - nits) > 0.5:
+                log.info("Game Mode brightness was reset (%s), re-applying %s nits", cur, nits)
+                self._guard("sdr_brightness", lambda: self.gs.set_sdr_brightness(nits))
+
+    def _sdr_brightness_state(self) -> dict:
+        s = self.settings["sdr_brightness"]
+        ok = bool(self.gs and self.gs.sdr_brightness_supported())
+        current = None
+        if ok:
+            try:
+                current = self.gs.sdr_brightness()
+            except OSError:
+                pass
+        p = self.sb_pending
+        return {
+            "available": ok,
+            "enabled": s["enabled"],
+            "nits": self._sb_nits(),
+            "confirmed": s["confirmed"],
+            "min": self.SB_MIN,
+            "max": self.SB_MAX,
+            "current": round(current) if current is not None else None,
+            "pending": {"seconds": max(0, round(p["deadline"] - time.monotonic()))} if p else None,
+        }
 
     def _gamescope_state(self) -> dict:
         p = self.gs_pending
@@ -670,6 +788,7 @@ class Controller:
             "gpu": self.gpu.state(),
             "display": self._display_state(),
             "gamescope": self._gamescope_state(),
+            "sdr_brightness": self._sdr_brightness_state(),
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),
