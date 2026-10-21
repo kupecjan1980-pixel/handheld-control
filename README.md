@@ -38,7 +38,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.3/handheld-control-0.5.3.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.5.4/handheld-control-0.5.4.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -144,8 +144,10 @@ toggles help with the screen blanking or not waking:
 If the slider doesn't change the screen in Game Mode, press **Run brightness
 test**. It steps the backlight to 25%, 75% and back while checking whether
 the value sticks, asks whether the screen visibly changed, and saves a report
-with PSR status and driver settings to `~/handheld-control-brightness.txt`.
-Paste that file into an issue.
+with PSR status, driver settings and a read-only dump of the DRM display state
+to `~/handheld-control-brightness-game.txt` or `-desktop.txt`, depending on
+the mode. Running it in both modes and comparing the two shows what gamescope
+sets differently. Paste both files into an issue.
 
 > The test never switches PSR at runtime. Version 0.5.2 did, through the
 > driver's debugfs, and on the ONEXPLAYER 3 that turned the panel off until a

@@ -78,6 +78,7 @@ class Controller:
         self.user_home = user_home
         self.btest = {"running": False, "phase": None, "phases": 0, "verdict": None, "report": None, "answer": None}
         self.btest_sections: list[tuple[str, list[str]]] = []
+        self.btest_mode = "desktop"
         self.dev = detect()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
@@ -314,13 +315,17 @@ class Controller:
         # panel until a second reboot, so the test never touches PSR.
         self.btest = {"running": True, "phase": 1, "phases": 1,
                       "verdict": None, "report": None, "answer": None}
+        self.btest_mode = "game" if diag.game_mode() else "desktop"
 
         def run():
             try:
                 verdict, lines = diag.brightness_test(self.backlight)
-                self.btest_sections = [("verdict", [verdict]), ("test", lines), ("system", diag.context())]
+                self.btest_sections = [
+                    ("verdict", [verdict]), ("test", lines), ("system", diag.context()),
+                    ("drm state", diag.drm_state()),
+                ]
                 self.btest["verdict"] = verdict
-                self.btest["report"] = diag.write_report(self.user_home, self.btest_sections)
+                self.btest["report"] = diag.write_report(self.user_home, self.btest_sections, self.btest_mode)
             except Exception as e:
                 log.exception("brightness test failed")
                 self.btest["verdict"] = f"Test failed: {e}"
@@ -337,7 +342,7 @@ class Controller:
         if self.btest_sections and self.btest["answer"] is None:
             self.btest["answer"] = answer
             self.btest_sections.insert(1, ("user", [f"screen visibly changed in: {answer}"]))
-            self.btest["report"] = diag.write_report(self.user_home, self.btest_sections)
+            self.btest["report"] = diag.write_report(self.user_home, self.btest_sections, self.btest_mode)
         return self.state()
 
     def _display_params(self) -> dict[str, list[str]]:

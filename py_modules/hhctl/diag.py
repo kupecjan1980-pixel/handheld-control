@@ -18,8 +18,31 @@ STEPS = (25, 75)
 SAMPLES = (0.1, 0.5, 1.0, 2.0)  # seconds after each write
 
 # Never toggle PSR at runtime (i915_edp_psr_debug): on the ONEXPLAYER 3's xe
-# driver it blanked the panel until a second reboot. PSR status below is
-# read-only.
+# driver it blanked the panel until a second reboot. Everything collected
+# below is read-only.
+
+STATE_MAX_LINES = 400
+
+
+def game_mode() -> bool:
+    return bool(_proc_args(("gamescope", "gamescope-wl")))
+
+
+def drm_state() -> list[str]:
+    """Read-only dump of the DRM atomic state and display info (debugfs).
+
+    Compared between Desktop and Game Mode, this shows what gamescope sets
+    differently on the eDP connector (colorspace, HDR metadata, VRR, bpc...).
+    """
+    lines = []
+    for name in ("state", "i915_display_info"):
+        for path in sorted(glob.glob(f"/sys/kernel/debug/dri/*/{name}")):
+            text = (sysfs.read(path) or "").splitlines()
+            lines.append(f"--- {path} ({len(text)} lines)")
+            lines += text[:STATE_MAX_LINES]
+            if len(text) > STATE_MAX_LINES:
+                lines.append(f"... {len(text) - STATE_MAX_LINES} more lines")
+    return lines or ["no DRM debugfs state available"]
 
 
 def _proc_args(names: tuple[str, ...]) -> list[str]:
@@ -109,10 +132,10 @@ def brightness_test(bl) -> tuple[str, list[str]]:
     return verdict, lines
 
 
-def write_report(home: str | None, sections: list[tuple[str, list[str]]]) -> str | None:
+def write_report(home: str | None, sections: list[tuple[str, list[str]]], mode: str) -> str | None:
     if not home or not os.path.isdir(home):
         return None
-    path = os.path.join(home, "handheld-control-brightness.txt")
+    path = os.path.join(home, f"handheld-control-brightness-{mode}.txt")
     with open(path, "w") as f:
         f.write(f"Handheld Control brightness report, {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         for title, lines in sections:
