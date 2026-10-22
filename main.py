@@ -122,6 +122,9 @@ class Plugin:
     async def set_brightness(self, percent: int):
         return await self._run(self.ctl.set_brightness, percent)
 
+    async def rgb_ring_test(self):
+        return await self._run(self.ctl.rgb_ring_test)
+
     async def rgb_zone_test(self):
         return await self._run(self.ctl.rgb_zone_test)
 

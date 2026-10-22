@@ -94,6 +94,7 @@ class Controller:
         self.icap = {"running": False, "left": 0, "summary": None, "report": None}
         self.upd = {"busy": False, "releases": [], "error": None, "message": None}
         self.zone_test: str | None = None  # legend of the last OXP light zone test
+        self.ring_step: int | None = None  # power ring test: last step sent
         self.plugin_dir: str | None = None  # set by main.py; where updates are installed
         self.dev = detect()
         self.settings = self._load()
@@ -793,6 +794,22 @@ class Controller:
             self.errors["rgb"] = f"Zone test: {e}"
         return self.state()
 
+    def rgb_ring_test(self) -> dict:
+        """Next power ring test step; after the last one, the lights go back."""
+        self.errors.pop("rgb", None)
+        nxt = 0 if self.ring_step is None else self.ring_step + 1
+        if nxt >= len(rgb.RING_STEPS):
+            self.ring_step = None
+            self.apply_rgb()
+            return self.state()
+        try:
+            rgb.oxp_ring_step(nxt)
+            self.ring_step = nxt
+        except OSError as e:
+            self.errors["rgb"] = f"Power ring test: {e}"
+            self.ring_step = None
+        return self.state()
+
     def answer_brightness_test(self, answer: str) -> dict:
         """answer: which passes visibly changed the screen: first/second/both/neither."""
         if self.btest_sections and self.btest["answer"] is None:
@@ -1121,5 +1138,8 @@ class Controller:
                 "effects": getattr(self.rgb, "effects", []),
                 "zone_test": self.zone_test,
                 "zone_test_available": self.dev.rgb == "oxp",
+                "ring_test": None if self.ring_step is None else {
+                    "step": self.ring_step + 1, "total": len(rgb.RING_STEPS), "what": rgb.RING_STEPS[self.ring_step][0],
+                },
             },
         }

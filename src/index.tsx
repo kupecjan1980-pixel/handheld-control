@@ -105,6 +105,7 @@ type State = {
     effects: string[];
     zone_test: string | null;
     zone_test_available: boolean;
+    ring_test: { step: number; total: number; what: string } | null;
   };
   ec: { supported: boolean; lockdown: string | null };
   version: string | null;
@@ -247,6 +248,7 @@ const brightnessTest = callable<[], State>("brightness_test");
 const inputCapture = callable<[], State>("input_capture");
 const checkUpdates = callable<[], State>("check_updates");
 const rgbZoneTest = callable<[], State>("rgb_zone_test");
+const rgbRingTest = callable<[], State>("rgb_ring_test");
 const installUpdate = callable<[string], State>("install_update");
 
 const versionKey = (v: string) => v.replace(/^v/, "").split(".").map((p) => parseInt(p, 10) || 0);
@@ -1479,6 +1481,25 @@ function Content() {
                   onClick={async () => setState(await rgbZoneTest())}
                 >
                   Light zone test
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            {rgb.zone_test_available && (
+              <PanelSectionRow>
+                <ButtonItem
+                  layout="below"
+                  description={
+                    rgb.ring_test
+                      ? `Step ${rgb.ring_test.step} of ${rgb.ring_test.total}: ${rgb.ring_test.what}. Note the power ring's color, then press for the next step.`
+                      : "Tries 8 ways of setting the power button ring, one per press; note its color at each step"
+                  }
+                  onClick={async () => setState(await rgbRingTest())}
+                >
+                  {!rgb.ring_test
+                    ? "Power ring test"
+                    : rgb.ring_test.step < rgb.ring_test.total
+                      ? `Next step (${rgb.ring_test.step + 1} of ${rgb.ring_test.total})`
+                      : "Finish (lights go back)"}
                 </ButtonItem>
               </PanelSectionRow>
             )}

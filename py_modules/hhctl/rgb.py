@@ -216,6 +216,41 @@ def oxp_zone_test() -> str:
     return ", ".join(f"zone {z}: {name}" for z, name, _ in ZONE_TEST)
 
 
+# Power ring test (ONEXPLAYER 3): the ring stays magenta when every zone gets
+# the theme color, yet showed cyan once, so it is RGB. Each step tries one way
+# of making it red (plus a green and an off step); the user notes its color.
+def _on(z: int, on: int = 1) -> bytes:
+    return _oxp_v1_cmd(0xB8, [0xFD, z, 0x02, on, 0x05, 0x04])
+
+
+def _frame(z: int, rgb: tuple[int, int, int], kind: int = 0x02, idx: int = 0x01, leds: int = 18) -> bytes:
+    r, g, b = rgb
+    body = leds * [r, g, b]
+    return _oxp_v1_cmd(0xB8, [0xFE, z, kind] + (body + [r, g] if leds == 18 else body), idx)
+
+
+RED, GREEN = (255, 0, 0), (0, 255, 0)
+RING_STEPS = [
+    ("zone 5 red", lambda: [_on(5), _frame(5, RED)]),
+    ("zone 6 red", lambda: [_on(6), _frame(6, RED)]),
+    ("zones 5 and 6 red", lambda: [_on(5), _frame(5, RED), _on(6), _frame(6, RED)]),
+    ("zone 5 red, one LED's worth of color", lambda: [_on(5), _frame(5, RED, leds=1)]),
+    ("zone 5 red, frame type 1", lambda: [_on(5), _frame(5, RED, kind=0x01)]),
+    ("zone 5 red, second report index", lambda: [_on(5), _frame(5, RED, idx=0x02)]),
+    ("zone 5 green", lambda: [_on(5), _frame(5, GREEN)]),
+    ("zones 5 and 6 switched off", lambda: [_on(5, 0), _on(6, 0)]),
+]
+
+
+def oxp_ring_step(step: int) -> str:
+    dev = OxpHidV1.find()
+    if not dev:
+        raise OSError("OneXPlayer vendor HID interface not found")
+    what, build = RING_STEPS[step]
+    dev.send(build())
+    return what
+
+
 def find_backend(dev: Device):
     if dev.rgb == "ayaneo_hid":
         return AyaneoHid.find()
