@@ -1595,14 +1595,14 @@ function Content() {
             <PanelSectionRow>
               <Field
                 label="Remapping is coming"
-                description="Back buttons as paddles, ☰ as Quick Access and the touchpads need a virtual controller; that's next. To help, record what the buttons and touchpads send: start recording, close this menu, then press each button a few times and swipe and click each touchpad. Recording only reads."
+                description="Back buttons as paddles and the touchpads need a virtual controller; that's next. To help, record what the buttons and touchpads send: start recording, close this menu, then press each button a few times and swipe and click each touchpad. Recording only reads."
               />
             </PanelSectionRow>
             {state.buttons.available && (
               <PanelSectionRow>
                 <ToggleField
                   label="Extra buttons"
-                  description={`AYN opens Handheld Control, the button next to it opens the Steam keyboard · ${
+                  description={`AYN: tap opens Handheld Control, hold opens Quick Access · the button next to it opens the Steam keyboard · ${
                     state.buttons.listening ? "active" : draft.controller.buttons ? "looking for the buttons…" : "off"
                   }`}
                   checked={draft.controller.buttons}
@@ -1760,6 +1760,8 @@ const onButton = (action: string) => {
     } catch {
       // the Decky tab opens on its plugin list instead
     }
+  } else if (action === "qam") {
+    Navigation.OpenQuickAccessMenu();
   } else if (action === "keyboard") {
     (window.SteamClient as any).URL.ExecuteSteamURL("steam://open/keyboard");
   }

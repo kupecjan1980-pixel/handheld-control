@@ -2,12 +2,14 @@
 
 The NEXT 2's extra buttons are keys on the 'AYANEO COMPOSITE DEVICE'
 keyboard (input report 2026-10-22): AYN sends F23, the button next to it
-sends LEFTMETA+D. This listener only reads that keyboard (no EVIOCGRAB), so
+sends LEFTMETA+D. A key can have a tap and a hold action: tapping AYN opens
+this plugin, holding it opens the regular Quick Access Menu (☰ stays Start,
+so games keep it). This listener only reads that keyboard (no EVIOCGRAB), so
 nothing is taken away from Steam or games, and there's nothing to restore.
 Actions go to the panel, which opens the Quick Access Menu or the keyboard.
 
-The back buttons (F17-F20) and ☰ (the gamepad's own Start button) need a
-virtual controller to become paddles / QAM; that comes later.
+The back buttons (F17-F20) need a virtual controller to become paddles;
+that comes later.
 """
 
 import logging
@@ -15,6 +17,7 @@ import os
 import select
 import struct
 import threading
+import time
 
 from . import sysfs
 from .device import Device
@@ -28,9 +31,11 @@ EV_KEY = 0x01
 KEY_D, KEY_LEFTMETA, KEY_RIGHTMETA = 32, 125, 126
 KEY_F23 = 193
 
-# board -> (vendor, product, {key: action}, {key with Meta held: action})
+HOLD = 0.5  # seconds held before a key's hold action fires (while still held)
+
+# board -> (vendor, product, {key: action or (tap, hold)}, {key with Meta held: action})
 MAPS = {
-    "AB09": ("1c4f", "0002", {KEY_F23: "open_plugin"}, {KEY_D: "keyboard"}),
+    "AB09": ("1c4f", "0002", {KEY_F23: ("open_plugin", "qam")}, {KEY_D: "keyboard"}),
 }
 
 
@@ -105,10 +110,24 @@ class Buttons:
                 self.node = None
             self._stop.wait(1.0)  # gone (resume, unplug): don't spin while it comes back
 
+    def _fire(self, action: str) -> None:
+        log.info("buttons: %s", action)
+        try:
+            self.emit(action)
+        except Exception:
+            log.exception("buttons: emit failed")
+
     def _read(self, fd: int, keys: dict, meta_keys: dict) -> None:
         meta = set()
+        held: dict[int, float | None] = {}  # tap/hold key -> pressed at (None once hold fired)
         while not self._stop.is_set():
-            ready, _, _ = select.select([fd], [], [], 0.5)
+            now = time.monotonic()
+            for code, t in list(held.items()):
+                if t is not None and now - t >= HOLD:
+                    held[code] = None
+                    self._fire(keys[code][1])
+            waits = [t + HOLD - now for t in held.values() if t is not None]
+            ready, _, _ = select.select([fd], [], [], max(0.01, min(waits)) if waits else 0.5)
             if not ready:
                 continue
             try:
@@ -126,12 +145,13 @@ class Buttons:
                 if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                     (meta.add if value else meta.discard)(code)
                     continue
-                if value != 1:  # presses only, not release or repeat
-                    continue
                 action = meta_keys.get(code) if meta else keys.get(code)
-                if action:
-                    log.info("buttons: key %d -> %s", code, action)
-                    try:
-                        self.emit(action)
-                    except Exception:
-                        log.exception("buttons: emit failed")
+                if isinstance(action, tuple):
+                    if value == 1:
+                        held[code] = time.monotonic()
+                    elif value == 0 and code in held:
+                        if held.pop(code) is not None:  # released before the hold fired
+                            self._fire(action[0])
+                    continue
+                if action and value == 1:  # presses only, not release or repeat
+                    self._fire(action)

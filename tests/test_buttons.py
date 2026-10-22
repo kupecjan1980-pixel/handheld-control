@@ -27,7 +27,7 @@ assert not buttons.Buttons(device._oxp3("ONE-NETBOOK", "ONEXPLAYER 3"), got.appe
 b.start()
 wfd = os.open(node, os.O_WRONLY)  # blocks until the listener has it open
 ev = lambda code, value: struct.pack("llHHi", 0, 0, 1, code, value) + struct.pack("llHHi", 0, 0, 0, 0, 0)
-os.write(wfd, ev(193, 1) + ev(193, 0))  # AYN
+os.write(wfd, ev(193, 1) + ev(193, 0))  # AYN tap
 os.write(wfd, ev(125, 1) + ev(32, 1) + ev(32, 0) + ev(125, 0))  # Win+D
 os.write(wfd, ev(32, 1) + ev(32, 2) + ev(32, 0))  # plain D, with repeat: nothing
 os.write(wfd, ev(187, 1) + ev(187, 0))  # F17 back button: not mapped yet
@@ -37,7 +37,14 @@ for _ in range(50):
     time.sleep(0.05)
 time.sleep(0.2)
 assert got == ["open_plugin", "keyboard"], got
+# hold AYN: QAM fires while still held, and the release adds nothing
+os.write(wfd, ev(193, 1) + ev(193, 2)); time.sleep(buttons.HOLD + 0.25)
+assert got[-1] == "qam" and len(got) == 3, got
+os.write(wfd, ev(193, 2) + ev(193, 0)); time.sleep(0.2)
+assert len(got) == 3, got
+os.write(wfd, ev(193, 1)); time.sleep(0.1); os.write(wfd, ev(193, 0)); time.sleep(0.2)
+assert got[-1] == "open_plugin" and len(got) == 4, "short press is still a tap"
 assert b.node == node
 b.stop(); os.close(wfd); b._thread.join(3); assert not b._thread.is_alive()
-print("find keyboard, AYN / Win+D actions, presses only, stop ok")
+print("find keyboard, AYN tap / hold, Win+D, presses only, stop ok")
 shutil.rmtree(tmp); print("all buttons tests passed")
