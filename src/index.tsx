@@ -121,6 +121,7 @@ type State = {
     temp_c: number | null;
     freq_mhz: number | null;
     vram_mb: number | null;
+    vram_total_mb: number | null;
     gtt_mb: number | null;
     mem_mb: number | null;
     clock: {
@@ -165,6 +166,7 @@ type State = {
 type Section = keyof Settings;
 
 const getState = callable<[], State>("get_state");
+const getVersion = callable<[], string | null>("get_version");
 const setBrightness = callable<[number], State>("set_brightness");
 const setDisplay = callable<[string, boolean], State>("set_display");
 const setGamescopeHdr = callable<[string], State>("set_gamescope_hdr");
@@ -235,8 +237,15 @@ const THROTTLE_LABELS: Record<string, string> = {
 
 const reasons = (xs: string[]) => xs.map((r) => THROTTLE_LABELS[r] ?? r).join(", ");
 
-// CPU/GPU table at the top of the TDP section; header and cap rows are dimmer.
+// Pinned header (device name + CPU/GPU table) at the top of the panel; it stays
+// in view while scrolling. Table header and cap rows are dimmer.
 const READOUT_CSS = `
+  .hhctl-header {
+    position: sticky; top: 0; z-index: 10; padding: 6px 16px 4px; margin-bottom: 4px;
+    background: rgba(14, 20, 27, 0.94); backdrop-filter: blur(6px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .hhctl-device { font-size: 14px; font-weight: bold; color: #ffffff; }
   .hhctl-readout {
     display: grid; grid-template-columns: auto auto auto auto minmax(0, 1fr); gap: 2px 8px;
     font-size: 12px; line-height: 16px; color: #dcdedf; padding: 4px 0; white-space: nowrap;
@@ -437,7 +446,15 @@ function Content() {
       clock: gpu.freq_mhz != null ? `${gpu.freq_mhz} MHz` : dash,
       power: gpu.gpu_w != null ? `${gpu.gpu_w} W` : dash,
       temp: gpu.temp_c != null ? `${gpu.temp_c}°C` : dash,
-      mem: gpu.vram_mb != null ? gb(gpu.vram_mb) : gpu.mem_mb != null ? gb(gpu.mem_mb) : dash,
+      // Integrated Intel has no dedicated VRAM: GPU memory used out of system RAM.
+      mem:
+        gpu.vram_mb != null
+          ? gpu.vram_total_mb
+            ? `${(gpu.vram_mb / 1024).toFixed(1)}/${Math.round(gpu.vram_total_mb / 1024)} GB`
+            : gb(gpu.vram_mb)
+          : gpu.mem_mb != null
+            ? gb(gpu.mem_mb)
+            : dash,
       capped: perf.limits.gpu,
     },
   ];
@@ -455,34 +472,35 @@ function Content() {
       <style>{READOUT_CSS}</style>
       <style>{themeCss(theme, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
-      <PanelSection title="TDP">
+      <div className="hhctl-header">
+        <div className="hhctl-device">{state.device.name}</div>
         {showReadout && (
-          <PanelSectionRow>
-            <div className="hhctl-readout">
-              <span />
-              <span>Clock</span>
-              <span>Power</span>
-              <span>Temp</span>
-              <span>Memory</span>
-              {rows.map((r) => (
-                <Fragment key={r.name}>
-                  <b>{r.name}</b>
-                  <span>{r.clock}</span>
-                  <span>{r.power}</span>
-                  <span>{r.temp}</span>
-                  <span>{r.mem}</span>
-                  {r.capped.length > 0 && <i className="hhctl-capped">capped by {reasons(r.capped)}</i>}
-                </Fragment>
-              ))}
-              {gpu.pkg_w != null && (
-                <span className="hhctl-total">
-                  TDP {gpu.pkg_w}
-                  {perf.tdp_w ? ` / ${perf.tdp_w}` : ""} W
-                </span>
-              )}
-            </div>
-          </PanelSectionRow>
+          <div className="hhctl-readout">
+            <span />
+            <span>Clock</span>
+            <span>Power</span>
+            <span>Temp</span>
+            <span>Memory</span>
+            {rows.map((r) => (
+              <Fragment key={r.name}>
+                <b>{r.name}</b>
+                <span>{r.clock}</span>
+                <span>{r.power}</span>
+                <span>{r.temp}</span>
+                <span>{r.mem}</span>
+                {r.capped.length > 0 && <i className="hhctl-capped">capped by {reasons(r.capped)}</i>}
+              </Fragment>
+            ))}
+            {gpu.pkg_w != null && (
+              <span className="hhctl-total">
+                TDP {gpu.pkg_w}
+                {perf.tdp_w ? ` / ${perf.tdp_w}` : ""} W
+              </span>
+            )}
+          </div>
         )}
+      </div>
+      <PanelSection title="TDP">
         {!tdp.backend ? (
           <Unavailable why="No TDP interface found (firmware-attributes, RAPL or ryzenadj)." />
         ) : (
@@ -1199,12 +1217,6 @@ function Content() {
           </>
         )}
         <ErrorRow msg={state.errors.ui} />
-        <PanelSectionRow>
-          <Field
-            label={state.device.name}
-            description={`Handheld Control ${state.version ? `v${state.version}` : ""}`.trim()}
-          />
-        </PanelSectionRow>
         {state.device.notes.map((n) => (
           <PanelSectionRow key={n}>
             <Field description={n} />
@@ -1222,9 +1234,23 @@ function Content() {
   );
 }
 
+// Decky keeps the title bar fixed above the panel; the version sits next to the name.
+function TitleView() {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    getVersion().then(setVersion);
+  }, []);
+  return (
+    <div className={staticClasses.Title}>
+      Handheld Control
+      {version && <span style={{ fontSize: "0.65em", opacity: 0.6, marginLeft: "8px" }}>v{version}</span>}
+    </div>
+  );
+}
+
 export default definePlugin(() => ({
   name: "Handheld Control",
-  titleView: <div className={staticClasses.Title}>Handheld Control</div>,
+  titleView: <TitleView />,
   content: <Content />,
   icon: <FaMicrochip />,
 }));

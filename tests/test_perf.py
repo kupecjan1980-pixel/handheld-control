@@ -32,7 +32,12 @@ hw = os.path.join(tmp, "hwmon"); os.makedirs(hw)
 open(f"{hw}/temp1_input", "w").write("64500\n"); g.hwmon = hw
 assert g.state()["temp_c"] == 64
 g.hwmon = None; assert g.state()["temp_c"] is None, "integrated Intel: no GPU hwmon"
-print("cpu watts: RAPL core, or package - GPU estimate ok; GPU temp from hwmon ok")
+dev = os.path.join(tmp, "card"); os.makedirs(dev); g.dev = dev
+for k, v in {"mem_info_vram_used": 3 << 30, "mem_info_vram_total": 16 << 30, "mem_info_gtt_used": 1 << 30}.items():
+    open(f"{dev}/{k}", "w").write(f"{v}\n")
+st = g.state(); assert (st["vram_mb"], st["vram_total_mb"]) == (3072, 16384)
+g.dev = None
+print("cpu watts: RAPL core, or package - GPU estimate ok; GPU temp from hwmon ok; VRAM used / total ok")
 
 # controller reasons
 from hhctl import controller, fan

@@ -55,6 +55,9 @@ class Plugin:
 
     # --- frontend API -----------------------------------------------------
 
+    async def get_version(self):
+        return _version()
+
     async def get_state(self):
         return await self._run(self.ctl.state)
 

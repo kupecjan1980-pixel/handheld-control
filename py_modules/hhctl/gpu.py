@@ -185,6 +185,7 @@ class Gpu:
             "cpu_w_est": False,
             "freq_mhz": self._freq_mhz(),
             "vram_mb": None,
+            "vram_total_mb": None,
             "gtt_mb": None,
             "mem_mb": None,
         }
@@ -192,6 +193,8 @@ class Gpu:
             vram = sysfs.read_int(f"{self.dev}/mem_info_vram_used")
             gtt = sysfs.read_int(f"{self.dev}/mem_info_gtt_used")
             out["vram_mb"] = vram >> 20 if vram is not None else None
+            total = sysfs.read_int(f"{self.dev}/mem_info_vram_total")
+            out["vram_total_mb"] = total >> 20 if total else None
             out["gtt_mb"] = gtt >> 20 if gtt is not None else None
         elif self.driver:
             mem = drm_client_memory(self.driver)

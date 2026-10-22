@@ -38,7 +38,7 @@ Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
 released below 80 °C.
 
-The **About** section at the bottom shows the device, the plugin version, device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue) that tints the plugin's panel and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch). The games' own lettering can't be redistributed.
+The title bar shows the plugin version. A header pinned at the top of the panel shows the device name and a CPU/GPU table (clock, power, temperature, RAM and VRAM used / total, and what caps each). The **About** section at the bottom shows device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue) that tints the plugin's panel and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch). The games' own lettering can't be redistributed.
 
 Nothing is changed until you enable a section. Settings persist in
 `~/homebrew/settings/Handheld Control/settings.json` and are re-applied at
@@ -57,7 +57,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.2/handheld-control-0.10.2.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.3/handheld-control-0.10.3.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
