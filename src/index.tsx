@@ -233,6 +233,8 @@ const clearBackground = callable<[], State>("clear_background");
 const getBackground = callable<[], string | null>("get_background");
 const listPictures = callable<[string | null], Listing>("list_pictures");
 const pictureThumb = callable<[string], string | null>("picture_thumb");
+const pictureData = callable<[string], string | null>("picture_data");
+const setBackgroundData = callable<[string], State>("set_background_data");
 const getFont = callable<[string], string | null>("get_font");
 const confirmGamescopeHdr = callable<[boolean], State>("confirm_gamescope_hdr");
 
@@ -367,30 +369,59 @@ const DISPLAY_TOGGLES: Record<string, { label: string; description: string }> = 
 // filter turns Steam's blue (#1a9fff) on toggles and sliders into the theme
 // color; fitted per theme (hue-rotate alone gives orange for red). A filter
 // works whatever the controls look like inside, unlike recoloring their parts.
-const THEMES: Record<string, { label: string; bg?: string; title?: string; filter?: string }> = {
+// title: headlines (section titles, device name, status rows, panel title);
+// label: setting names; text: values and buttons; desc: descriptions and dim rows.
+// font: the font a theme brings along (Font can still be changed afterwards).
+type Theme = {
+  label: string;
+  bg?: string;
+  title?: string;
+  label2?: string;
+  text?: string;
+  desc?: string;
+  filter?: string;
+  font?: string;
+};
+const THEMES: Record<string, Theme> = {
   default: { label: "Default (black)" },
   red: {
     label: "Red",
     bg: "linear-gradient(180deg, rgba(170, 25, 35, 0.40) 0%, rgba(70, 10, 15, 0.25) 100%)",
-    title: "#ff7a7a",
+    title: "#ff6b6b",
+    label2: "#ff9e9e",
+    text: "#ffd6d6",
+    desc: "#d49a9a",
     filter: "hue-rotate(150deg) saturate(1.6) brightness(0.94)",
+    font: "diablo",
   },
   blue: {
     label: "Blue",
     bg: "linear-gradient(180deg, rgba(25, 80, 190, 0.40) 0%, rgba(10, 30, 80, 0.25) 100%)",
-    title: "#7ab4ff",
+    title: "#6aa8ff",
+    label2: "#9cc4ff",
+    text: "#d6e6ff",
+    desc: "#93a9c9",
+    font: "doom",
   },
   green: {
     label: "Green",
     bg: "linear-gradient(180deg, rgba(25, 140, 60, 0.40) 0%, rgba(10, 60, 25, 0.25) 100%)",
-    title: "#7ee08a",
+    title: "#5fd877",
+    label2: "#92e6a0",
+    text: "#d4f5da",
+    desc: "#8fb898",
     filter: "hue-rotate(-84deg) saturate(0.7) brightness(1.06)",
+    font: "matrix",
   },
   gold: {
     label: "Gold",
     bg: "linear-gradient(180deg, rgba(185, 140, 20, 0.40) 0%, rgba(80, 60, 10, 0.25) 100%)",
-    title: "#ffd166",
+    title: "#ffc940",
+    label2: "#ffd97a",
+    text: "#fff0cc",
+    desc: "#c9b07a",
     filter: "hue-rotate(-156deg) saturate(0.8) brightness(1.24)",
+    font: "quake",
   },
 };
 
@@ -405,6 +436,12 @@ const THEME_RGB: Record<string, [number, number]> = {
 // Free (OFL) fonts in the style of each game; the originals can't be bundled.
 const FONTS: Record<string, { label: string; family?: string; fallback?: string; about?: string }> = {
   default: { label: "Default" },
+  fraktur: {
+    label: "Fraktur",
+    family: "HHUnifraktur",
+    fallback: "serif",
+    about: "UnifrakturMaguntia, German blackletter (Fraktur)",
+  },
   diablo: {
     label: "Diablo",
     family: "HHCinzel",
@@ -447,6 +484,16 @@ const themeCss = (name: string, hasImage: boolean) => {
   // Steam's module class names look like gamepaddialog_Toggle_9Ql-o; the
   // [class*=] forms still match if a class map lookup comes back empty.
   const labels = `.hhctl-root .${dlg.FieldLabel}, .hhctl-root [class*="gamepaddialog_FieldLabel_"]`;
+  const descs = `.hhctl-root .${dlg.FieldDescription}, .hhctl-root [class*="gamepaddialog_FieldDescription_"]`;
+  const texts = [
+    ".hhctl-root",
+    `.hhctl-root [class*="gamepaddialog_FieldChildren_"]`,
+    `.hhctl-root [class*="gamepadslider_"]`,
+    `.hhctl-root [class*="DialogButton"]`,
+    `.hhctl-root [class*="DropDownControlButton"]`,
+    ".hhctl-root .hhctl-readout",
+    ".hhctl-root .hhctl-tdp",
+  ].join(", ");
   const controls = [
     `.hhctl-root .${dlg.Toggle}`,
     `.hhctl-root [class*="gamepaddialog_Toggle_"]`,
@@ -455,7 +502,11 @@ const themeCss = (name: string, hasImage: boolean) => {
   ].join(", ");
   return `
     ${hasImage ? "" : `.hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }`}
-    .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel, ${labels} { color: ${t.title}; }
+    ${texts} { color: ${t.text}; }
+    ${descs}, .hhctl-root .hhctl-readout > span:nth-child(-n + 5), .hhctl-root .hhctl-readout .hhctl-free { color: ${t.desc}; }
+    ${labels} { color: ${t.label2}; }
+    .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel,
+    .hhctl-root .hhctl-readout b, .hhctl-root .hhctl-readout .hhctl-capped:not(.hhctl-free) { color: ${t.title}; }
     ${t.filter ? `${controls} { filter: ${t.filter}; }` : ""}
   `;
 };
@@ -504,19 +555,30 @@ function ErrorRow({ msg }: { msg?: string }) {
 
 const DEFAULT_POS: BgPos = { x: 50, y: 50, zoom: 100 };
 
+// The title bar lives outside the panel; it follows the theme through this.
+let themeNow = "gold";
+const themeListeners = new Set<() => void>();
+
+// Where the settings were scrolled to: kept while picking a picture and
+// while the Quick Access Menu is closed.
+let savedScroll = 0;
+
 // Thumbnails survive closing the picker; each is a small JPEG.
 const thumbCache = new Map<string, string | null>();
 
-const shrink = (url: string) =>
+// Downscale to `max` px on the long side as JPEG (thumbnails, and pictures
+// over BIG_PICTURE before they become the background).
+const BIG_PICTURE = 8 * 1024 * 1024;
+const shrink = (url: string, max = 360, quality = 0.8) =>
   new Promise<string>((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const k = Math.min(1, 360 / Math.max(img.width, img.height));
+      const k = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement("canvas");
       c.width = Math.max(1, Math.round(img.width * k));
       c.height = Math.max(1, Math.round(img.height * k));
       c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height);
-      resolve(c.toDataURL("image/jpeg", 0.8));
+      resolve(c.toDataURL("image/jpeg", quality));
     };
     img.onerror = () => resolve(url);
     img.src = url;
@@ -550,7 +612,7 @@ function PicturePicker({
   onClose,
 }: {
   aspect: number;
-  onPick: (path: string) => void;
+  onPick: (path: string, size: number) => void;
   onClose: () => void;
 }) {
   const [list, setList] = useState<Listing | null>(null);
@@ -630,7 +692,7 @@ function PicturePicker({
           {list.files.map((f) => {
             const t = thumbCache.get(f.path);
             return (
-              <Focusable key={f.path} style={tile} {...focusProps(f.path, () => onPick(f.path))}>
+              <Focusable key={f.path} style={tile} {...focusProps(f.path, () => onPick(f.path, f.size))}>
                 {t ? <img src={t} /> : <div className="hhctl-folder">{t === null ? "?" : "…"}</div>}
                 <span>{f.name}</span>
               </Focusable>
@@ -653,7 +715,20 @@ function Content() {
   const lastBrightEdit = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const [fitHeight, setFitHeight] = useState<number | null>(null);
-  const [view, setView] = useState<"main" | "pick" | "adjust">("main");
+  const [view, setViewRaw] = useState<"main" | "pick" | "adjust">("main");
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const backTo = useRef<HTMLElement | null>(null);
+  // Leaving the settings remembers the spot (and the focused button); coming
+  // back restores both, so there's no scrolling back down.
+  const setView = (v: "main" | "pick" | "adjust") => {
+    if (view === "main" && v !== "main") backTo.current = document.activeElement as HTMLElement | null;
+    setViewRaw(v);
+    if (v === "main")
+      requestAnimationFrame(() => {
+        if (bodyRef.current) bodyRef.current.scrollTop = savedScroll;
+        backTo.current?.focus?.();
+      });
+  };
   const [pickTag, setPickTag] = useState<string | null>(null);
   useEffect(() => {
     panelShown = true;
@@ -712,6 +787,12 @@ function Content() {
 
   // Size the panel to the QAM's visible area: the header stays put and only
   // the settings below it scroll.
+  const themeName = state?.settings.ui?.theme ?? "default";
+  useEffect(() => {
+    themeNow = themeName;
+    themeListeners.forEach((f) => f());
+  }, [themeName]);
+
   const loaded = !!state;
   useEffect(() => {
     const root = rootRef.current;
@@ -735,6 +816,7 @@ function Content() {
       setFitHeight(fitted);
     };
     fit();
+    if (bodyRef.current) bodyRef.current.scrollTop = savedScroll; // reopened: back where it was
     const ro = new ResizeObserver(fit);
     ro.observe(sc);
     return () => ro.disconnect();
@@ -875,7 +957,11 @@ function Content() {
         )}
       </div>
       <div
+        ref={bodyRef}
         className="hhctl-body"
+        onScroll={(ev) => {
+          if (view === "main") savedScroll = (ev.target as HTMLElement).scrollTop;
+        }}
         // D-pad focus: keep the focused setting inside the scroll area.
         onFocus={(ev) => fitHeight && (ev.target as HTMLElement).scrollIntoView?.({ block: "nearest" })}
       >
@@ -883,9 +969,15 @@ function Content() {
           <PicturePicker
             aspect={box ? box.w / box.h : 0.55}
             onClose={() => setView("main")}
-            onPick={async (path) => {
-              setState(await setBackground(path));
-              setView("adjust");
+            onPick={async (path, size) => {
+              if (size > BIG_PICTURE) {
+                // Too big to keep as is: shrink it here and send it back.
+                const raw = await pictureData(path);
+                if (raw) setState(await setBackgroundData(await shrink(raw, 2400, 0.9)));
+              } else {
+                setState(await setBackground(path));
+              }
+              setViewRaw("adjust");
             }}
           />
         )}
@@ -1750,7 +1842,8 @@ function Content() {
                   label: t.label,
                 }))}
                 selectedOption={theme}
-                onChange={(o) => change("ui", { theme: o.data }, 0)}
+                description={THEMES[theme]?.font ? `Brings the ${FONTS[THEMES[theme].font!]?.label} font; change it below` : undefined}
+                onChange={(o) => change("ui", { theme: o.data, font: THEMES[o.data]?.font ?? draft.ui.font }, 0)}
               />
             </PanelSectionRow>
             <PanelSectionRow>
@@ -1824,6 +1917,14 @@ function Content() {
 // Decky keeps the title bar fixed above the panel; the version sits next to the name.
 function TitleView() {
   const [version, setVersion] = useState<string | null>(null);
+  const [color, setColor] = useState(THEMES[themeNow]?.title);
+  useEffect(() => {
+    const on = () => setColor(THEMES[themeNow]?.title);
+    themeListeners.add(on);
+    return () => {
+      themeListeners.delete(on);
+    };
+  }, []);
   useEffect(() => {
     getVersion().then(setVersion);
   }, []);
@@ -1837,6 +1938,7 @@ function TitleView() {
         gap: "6px",
         whiteSpace: "nowrap",
         minWidth: 0,
+        color,
       }}
     >
       <span
@@ -1869,9 +1971,22 @@ const quickAccessOpen = () => {
   }
 };
 
+// Steam's menu store: which Quick Access tab is showing, and whether it's open.
+const QAM_PERF_TAB = 5; // EQuickAccessTab.Perf
+const menuStore = () => (window as any).SteamUIStore?.WindowStore?.GamepadUIMainWindowInstance?.MenuStore;
+const qamVisible = () => menuStore()?.IsSideMenuVisible?.(2) ?? quickAccessOpen(); // ESideMenu.QuickAccess
+// Holding opens Quick Access on Performance, or on the last tab used there
+// (not Decky's, which tapping opens).
+let holdTab = QAM_PERF_TAB;
+const rememberTab = () => {
+  const tab = menuStore()?.GetQuickAccessTab?.();
+  if (qamVisible() && typeof tab === "number" && tab !== QAM_DECKY_TAB) holdTab = tab;
+};
+
 const onButton = (action: string) => {
+  rememberTab();
   // Pressing the button again closes what it opened.
-  if ((action === "open_plugin" && panelShown && quickAccessOpen()) || (action === "qam" && quickAccessOpen())) {
+  if ((action === "open_plugin" && panelShown && qamVisible()) || (action === "qam" && qamVisible())) {
     Navigation.CloseSideMenus();
     return;
   }
@@ -1884,7 +1999,7 @@ const onButton = (action: string) => {
       // the Decky tab opens on its plugin list instead
     }
   } else if (action === "qam") {
-    Navigation.OpenQuickAccessMenu();
+    Navigation.OpenQuickAccessMenu(holdTab as never);
   } else if (action === "keyboard") {
     (window.SteamClient as any).URL.ExecuteSteamURL("steam://open/keyboard");
   }
@@ -1892,11 +2007,16 @@ const onButton = (action: string) => {
 
 export default definePlugin(() => {
   addEventListener<[string]>("hhctl_button", onButton);
+  // Closing with B isn't seen by the plugin, so note the tab while it's open.
+  const tabWatch = setInterval(rememberTab, 1000);
   return {
     name: "Handheld Control",
     titleView: <TitleView />,
     content: <Content />,
     icon: <FaMicrochip />,
-    onDismount: () => removeEventListener("hhctl_button", onButton),
+    onDismount: () => {
+      removeEventListener("hhctl_button", onButton);
+      clearInterval(tabWatch);
+    },
   };
 });

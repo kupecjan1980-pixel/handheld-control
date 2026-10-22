@@ -24,6 +24,8 @@ MIME = {
     ".webp": "image/webp",
 }
 MAX_BYTES = 8 * 1024 * 1024  # it travels to the panel as base64
+# Bigger pictures go to the panel once, get shrunk there, and come back.
+MAX_SOURCE = 40 * 1024 * 1024
 
 
 MAX_LISTED = 300
@@ -73,12 +75,41 @@ def thumb(path: str, home: str) -> str | None:
     """A data URL for a thumbnail of `path`, or None if it's too big to send."""
     src = _cached_thumb(path, home)
     if not src:
-        if os.path.splitext(path)[1].lower() not in MIME or os.path.getsize(path) > MAX_BYTES:
+        if os.path.splitext(path)[1].lower() not in MIME or os.path.getsize(path) > MAX_SOURCE:
             return None
         src = path
     mime = MIME.get(os.path.splitext(src)[1].lower(), "image/png")
     with open(src, "rb") as f:
         return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+
+
+def read_data_url(path: str) -> str:
+    """A picture of up to MAX_SOURCE as a data URL, for the panel to shrink."""
+    mime = MIME.get(os.path.splitext(path)[1].lower())
+    if not mime:
+        raise OSError("unsupported image type (use PNG, JPG or WebP)")
+    size = os.path.getsize(path)
+    if size > MAX_SOURCE:
+        raise OSError(f"image is {size // (1024 * 1024)} MB; the limit is {MAX_SOURCE // (1024 * 1024)} MB")
+    with open(path, "rb") as f:
+        return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+
+
+def save_data_url(folder: str, data_url: str) -> str:
+    """Store a picture the panel sent back (already shrunk) as the background."""
+    head, _, b64 = data_url.partition(",")
+    ext = next((e for e, m in MIME.items() if head == f"data:{m};base64"), None)
+    if not ext:
+        raise ValueError("not a PNG, JPG or WebP data URL")
+    data = base64.b64decode(b64, validate=True)
+    if len(data) > MAX_BYTES:
+        raise OSError(f"picture is still {len(data) // (1024 * 1024)} MB after shrinking")
+    os.makedirs(folder, exist_ok=True)
+    clear(folder)
+    name = f"background-{time.time_ns()}{ext}"
+    with open(os.path.join(folder, name), "wb") as f:
+        f.write(data)
+    return name
 
 
 def _stored(folder: str) -> list[str]:

@@ -104,6 +104,12 @@ class Plugin:
     async def list_pictures(self, folder: str | None = None):
         return await self._run(self.ctl.list_pictures, folder)
 
+    async def picture_data(self, path: str):
+        return await self._run(self.ctl.picture_data, path)
+
+    async def set_background_data(self, data_url: str):
+        return await self._run(self.ctl.set_background_data, data_url)
+
     async def picture_thumb(self, path: str):
         return await self._run(self.ctl.picture_thumb, path)
 

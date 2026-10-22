@@ -2,8 +2,10 @@
 
 - AYANEO NEXT 2: vendor HID (1c4f:0002, usage page 0xFF00), 65-byte report,
   command 21 09 with a checksum in bytes 1-2 (protocol from HHD).
-- OneXPlayer: the hid-oxp kernel LED (`oxp:rgb:*`) when present, otherwise
-  the OXP HID v1 vendor protocol (1a86:fe00, usage page 0xFF00).
+- OneXPlayer: the OXP HID v1 vendor protocol (1a86:fe00, usage page 0xFF00),
+  else the hid-oxp kernel LED (`oxp:rgb:*`). On the ONEXPLAYER 3 the kernel
+  LED left the lights on rainbow; the vendor protocol reaches every zone
+  (light zone test, 2026-10-23).
 """
 
 import colorsys
@@ -161,11 +163,12 @@ def _oxp_v1_cmd(cid: int, payload: list[int], idx: int = 0x01) -> bytes:
 
 
 class OxpHidV1(_Hidraw):
-    name = "oxp hid v1"
+    name = "oxp hid"
     modes = ["off", "solid", "effect"]
     effects = list(OXP_V1_EFFECTS)
-    # ONEXPLAYER 3: left stick, right stick, centre; front strip is 5/6.
-    sides = (0x01, 0x02, 0x07)
+    # ONEXPLAYER 3 (light zone test): 1 left stick ring, 2 right stick ring,
+    # 3 top logo, 5 power and Steam button rings.
+    sides = (0x01, 0x02, 0x03, 0x05)
 
     @classmethod
     def find(cls):
@@ -211,5 +214,5 @@ def find_backend(dev: Device):
     if dev.rgb == "ayaneo_hid":
         return AyaneoHid.find()
     if dev.rgb == "oxp":
-        return OxpLed.find() or OxpHidV1.find()
+        return OxpHidV1.find() or OxpLed.find()
     return OxpLed.find()

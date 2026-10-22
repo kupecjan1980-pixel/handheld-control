@@ -9,6 +9,7 @@ next to it:
 - matrix: Share Tech Mono
 - doom: Metal Mania
 - quake: Grenze Gotisch
+- fraktur: UnifrakturMaguntia (German blackletter)
 
 The frontend can't load plugin files directly, so it gets @font-face rules
 with the fonts inlined as data URLs.

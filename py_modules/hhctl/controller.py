@@ -33,7 +33,7 @@ DEFAULTS = {
     # bg_pos: which part of the picture shows (CSS background-position %) and zoom (%).
     # Extra buttons open Steam things (AYN -> this plugin, Win+D -> keyboard).
     "controller": {"buttons": True},
-    "ui": {"theme": "default", "font": "default", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
+    "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
     "battery": {"limit": 100, "bypass": "off"},
@@ -312,6 +312,23 @@ class Controller:
         except OSError as e:
             return {"folder": folder, "parent": os.path.dirname(folder), "home": home,
                     "dirs": [], "files": [], "more": 0, "error": str(e)}
+
+    def picture_data(self, path: str) -> str | None:
+        try:
+            return background.read_data_url(path)
+        except OSError as e:
+            self.errors["ui"] = str(e)
+            return None
+
+    def set_background_data(self, data_url: str) -> dict:
+        try:
+            self.settings["ui"]["bg"] = background.save_data_url(self._ui_dir(), data_url)
+            self.settings["ui"]["bg_pos"] = {"x": 50, "y": 50, "zoom": 100}
+            self.save()
+            self.errors.pop("ui", None)
+        except (OSError, ValueError) as e:
+            self.errors["ui"] = str(e)
+        return self.state()
 
     def picture_thumb(self, path: str) -> str | None:
         try:

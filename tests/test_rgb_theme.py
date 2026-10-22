@@ -37,5 +37,9 @@ assert [p[4] for p in sent[::2]] == list(range(1, 9)) and sent[1][3:7] == bytes(
 assert st["rgb"]["zone_test"].startswith("zone 1: red") and st["rgb"]["zone_test_available"]
 rgb.OxpHidV1.find = classmethod(lambda cls: None)
 assert "Zone test" in ctl.rgb_zone_test()["errors"]["rgb"]
+sent.clear()
+o = rgb.OxpHidV1.__new__(rgb.OxpHidV1); o.send = lambda pkts: sent.extend(pkts)
+o.apply("solid", 0, 100, 100, None)
+assert sorted({p[4] for p in sent}) == [1, 2, 3, 5], "all four OXP3 zones: stick rings, logo, power / Steam rings"
 print("oxp zone test ok")
 shutil.rmtree(tmp); print("all rgb theme tests passed")
