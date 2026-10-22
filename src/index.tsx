@@ -1318,19 +1318,18 @@ function Content() {
             <PanelSectionRow>
               <Field
                 label={
-                  <span className="hhctl-headlabel">
-                    BATT{battery.capacity != null ? ` ${battery.capacity}%` : ""}
+                  <span className="hhctl-headlabel hhctl-inline">
+                    {[
+                      "BATT",
+                      battery.capacity != null ? `${battery.capacity}%` : null,
+                      battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                   </span>
                 }
               >
-                <span className="hhctl-inline">
-                  {[
-                    battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
-                    battery.power_w != null ? `${battery.power_w} W` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
+                <span className="hhctl-inline">{battery.power_w != null ? `${battery.power_w} W` : ""}</span>
               </Field>
             </PanelSectionRow>
             {battery.unavailable && !battery.limit_mode ? (
