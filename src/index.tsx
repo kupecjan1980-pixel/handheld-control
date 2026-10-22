@@ -348,6 +348,7 @@ const READOUT_CSS = `
   .hhctl-readout .hhctl-capped.hhctl-free { color: #8b929a; }
   .hhctl-headlabel { font-weight: bold; }
   .hhctl-inline { white-space: nowrap; }
+  .hhctl-batt { display: inline-block; padding-right: 3ch; }
 `;
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
@@ -1318,18 +1319,19 @@ function Content() {
             <PanelSectionRow>
               <Field
                 label={
-                  <span className="hhctl-headlabel hhctl-inline">
-                    {[
-                      "BATT",
-                      battery.capacity != null ? `${battery.capacity}%` : null,
-                      battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  </span>
+                  <span className="hhctl-headlabel">BATT</span>
                 }
               >
-                <span className="hhctl-inline">{battery.power_w != null ? `${battery.power_w} W` : ""}</span>
+                {/* Kept 3 characters in from the right edge, where it got cut off. */}
+                <span className="hhctl-inline hhctl-batt">
+                  {[
+                    battery.capacity != null ? `${battery.capacity}%` : null,
+                    battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
+                    battery.power_w != null ? `${battery.power_w} W` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
               </Field>
             </PanelSectionRow>
             {battery.unavailable && !battery.limit_mode ? (
