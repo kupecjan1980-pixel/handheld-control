@@ -23,4 +23,19 @@ ctl.update("ui", {"font": "doom", "theme": "green"}); assert calls[-1] == ("soli
 ctl.update("rgb", {"match_theme": False}); assert calls[-1] == ("solid", 300, 50, 80)
 ctl.update("rgb", {"enabled": False}); k = len(calls); ctl.update("ui", {"theme": "blue"}); assert len(calls) == k
 assert "rgb" not in ctl.errors
+
+# OXP light zone test: enable + color for zones 1..8, legend in the state
+from hhctl import rgb
+sent = []
+class FakeOxp:
+    def send(self, pkts): sent.extend(pkts)
+rgb.OxpHidV1.find = classmethod(lambda cls: FakeOxp())
+ctl.dev = __import__("hhctl.device", fromlist=["x"])._oxp3("ONE-NETBOOK", "ONEXPLAYER 3")
+st = ctl.rgb_zone_test()
+assert len(sent) == 16 and all(len(p) == 64 and p[0] == 0xB8 and p[1] == 0x3F and p[-1] == 0xB8 for p in sent)
+assert [p[4] for p in sent[::2]] == list(range(1, 9)) and sent[1][3:7] == bytes([0xFE, 1, 2, 255])
+assert st["rgb"]["zone_test"].startswith("zone 1: red") and st["rgb"]["zone_test_available"]
+rgb.OxpHidV1.find = classmethod(lambda cls: None)
+assert "Zone test" in ctl.rgb_zone_test()["errors"]["rgb"]
+print("oxp zone test ok")
 shutil.rmtree(tmp); print("all rgb theme tests passed")

@@ -1,5 +1,6 @@
 import { addEventListener, callable, definePlugin, removeEventListener, toaster, useQuickAccessVisible } from "@decky/api";
 import {
+  getGamepadNavigationTrees,
   ButtonItem,
   DropdownItem,
   Field,
@@ -98,7 +99,13 @@ type State = {
     inhibited?: boolean;
     ac?: boolean;
   };
-  rgb: { backend: string | null; modes: string[]; effects: string[] };
+  rgb: {
+    backend: string | null;
+    modes: string[];
+    effects: string[];
+    zone_test: string | null;
+    zone_test_available: boolean;
+  };
   ec: { supported: boolean; lockdown: string | null };
   version: string | null;
   home: string | null;
@@ -237,6 +244,7 @@ const HDR_MODES: Record<string, string> = {
 const brightnessTest = callable<[], State>("brightness_test");
 const inputCapture = callable<[], State>("input_capture");
 const checkUpdates = callable<[], State>("check_updates");
+const rgbZoneTest = callable<[], State>("rgb_zone_test");
 const installUpdate = callable<[string], State>("install_update");
 
 const versionKey = (v: string) => v.replace(/^v/, "").split(".").map((p) => parseInt(p, 10) || 0);
@@ -520,7 +528,12 @@ const PICKER_CSS = `
     position: relative; overflow: hidden; border-radius: 6px; background: rgba(255, 255, 255, 0.08);
     outline: 2px solid transparent;
   }
-  .hhctl-tile.gpfocus, .hhctl-tile:focus, .hhctl-tile:hover { outline-color: #ffffff; }
+  .hhctl-tile::after {
+    content: ""; position: absolute; inset: 0; border-radius: 6px; border: 3px solid transparent; pointer-events: none;
+  }
+  .hhctl-tile.hhctl-focus { transform: scale(1.04); z-index: 1; }
+  .hhctl-tile.hhctl-focus::after { border-color: #ffffff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6); }
+  .hhctl-tile.hhctl-focus span { background: rgba(255, 255, 255, 0.9); color: #000; }
   .hhctl-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .hhctl-tile span {
     position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 4px; font-size: 10px; line-height: 13px;
@@ -542,6 +555,17 @@ function PicturePicker({
 }) {
   const [list, setList] = useState<Listing | null>(null);
   const [, bump] = useState(0);
+  // Which tile has gamepad focus; Steam's own focus ring doesn't show on these.
+  const [focused, setFocused] = useState<string | null>(null);
+  const focusProps = (key: string, activate: () => void) => ({
+    className: `hhctl-tile${focused === key ? " hhctl-focus" : ""}`,
+    focusClassName: "hhctl-focus",
+    onGamepadFocus: () => setFocused(key),
+    onGamepadBlur: () => setFocused((f) => (f === key ? null : f)),
+    onFocus: () => setFocused(key),
+    onActivate: activate,
+    onClick: activate,
+  });
   const open = async (folder: string | null) => setList(await listPictures(folder));
   useEffect(() => {
     open(null);
@@ -589,12 +613,7 @@ function PicturePicker({
       {list && (
         <Focusable className="hhctl-grid" flow-children="grid">
           {list.parent && (
-            <Focusable
-              className="hhctl-tile"
-              style={tile}
-              onActivate={() => open(list.parent)}
-              onClick={() => open(list.parent)}
-            >
+            <Focusable style={tile} {...focusProps("..", () => open(list.parent))}>
               <div className="hhctl-folder">⬆</div>
               <span>Up</span>
             </Focusable>
@@ -602,13 +621,7 @@ function PicturePicker({
           {list.dirs.map((d) => {
             const path = `${list.folder}/${d}`;
             return (
-              <Focusable
-                key={path}
-                className="hhctl-tile"
-                style={tile}
-                onActivate={() => open(path)}
-                onClick={() => open(path)}
-              >
+              <Focusable key={path} style={tile} {...focusProps(path, () => open(path))}>
                 <div className="hhctl-folder">📁</div>
                 <span>{d}</span>
               </Focusable>
@@ -617,13 +630,7 @@ function PicturePicker({
           {list.files.map((f) => {
             const t = thumbCache.get(f.path);
             return (
-              <Focusable
-                key={f.path}
-                className="hhctl-tile"
-                style={tile}
-                onActivate={() => onPick(f.path)}
-                onClick={() => onPick(f.path)}
-              >
+              <Focusable key={f.path} style={tile} {...focusProps(f.path, () => onPick(f.path))}>
                 {t ? <img src={t} /> : <div className="hhctl-folder">{t === null ? "?" : "…"}</div>}
                 <span>{f.name}</span>
               </Focusable>
@@ -648,6 +655,12 @@ function Content() {
   const [fitHeight, setFitHeight] = useState<number | null>(null);
   const [view, setView] = useState<"main" | "pick" | "adjust">("main");
   const [pickTag, setPickTag] = useState<string | null>(null);
+  useEffect(() => {
+    panelShown = true;
+    return () => {
+      panelShown = false;
+    };
+  }, []);
 
   const refresh = async () => {
     const s = await getState();
@@ -1362,7 +1375,22 @@ function Content() {
                     )}
                   </>
                 )}
-                <ErrorRow msg={state.errors.rgb} />
+                {rgb.zone_test_available && (
+              <PanelSectionRow>
+                <ButtonItem
+                  layout="below"
+                  description={
+                    rgb.zone_test
+                      ? `Sent: ${rgb.zone_test}. Note which part shows which color (stick rings, top logo, power button ring), then change any RGB setting to go back.`
+                      : "Lights every possible zone in its own color at once, to find out which part is which"
+                  }
+                  onClick={async () => setState(await rgbZoneTest())}
+                >
+                  Light zone test
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            <ErrorRow msg={state.errors.rgb} />
               </>
             )}
           </PanelSection>
@@ -1828,7 +1856,25 @@ function TitleView() {
 
 // Extra buttons (backend listener): runs while the plugin is loaded, panel open or not.
 const QAM_DECKY_TAB = 999; // EQuickAccessTab.Decky
+let panelShown = false; // Content is mounted: our page is the one in the Decky tab
+
+// Same check as useQuickAccessVisible, outside React.
+const quickAccessOpen = () => {
+  try {
+    const w = getGamepadNavigationTrees()?.find((t: any) => t?.id === "QuickAccess-NA")?.m_Root?.m_element
+      ?.ownerDocument?.defaultView;
+    return w ? !w.document.hidden : false;
+  } catch {
+    return false;
+  }
+};
+
 const onButton = (action: string) => {
+  // Pressing the button again closes what it opened.
+  if ((action === "open_plugin" && panelShown && quickAccessOpen()) || (action === "qam" && quickAccessOpen())) {
+    Navigation.CloseSideMenus();
+    return;
+  }
   if (action === "open_plugin") {
     Navigation.OpenQuickAccessMenu(QAM_DECKY_TAB as never);
     // Decky has no public call to pick a plugin in its tab; try its internal state.

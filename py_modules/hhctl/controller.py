@@ -93,6 +93,7 @@ class Controller:
         self.btest_mode = "desktop"
         self.icap = {"running": False, "left": 0, "summary": None, "report": None}
         self.upd = {"busy": False, "releases": [], "error": None, "message": None}
+        self.zone_test: str | None = None  # legend of the last OXP light zone test
         self.plugin_dir: str | None = None  # set by main.py; where updates are installed
         self.dev = detect()
         self.settings = self._load()
@@ -767,6 +768,14 @@ class Controller:
         threading.Thread(target=run, daemon=True).start()
         return self.state()
 
+    def rgb_zone_test(self) -> dict:
+        self.errors.pop("rgb", None)
+        try:
+            self.zone_test = rgb.oxp_zone_test()
+        except OSError as e:
+            self.errors["rgb"] = f"Zone test: {e}"
+        return self.state()
+
     def answer_brightness_test(self, answer: str) -> dict:
         """answer: which passes visibly changed the screen: first/second/both/neither."""
         if self.btest_sections and self.btest["answer"] is None:
@@ -1093,5 +1102,7 @@ class Controller:
                 "backend": getattr(self.rgb, "name", None),
                 "modes": getattr(self.rgb, "modes", []),
                 "effects": getattr(self.rgb, "effects", []),
+                "zone_test": self.zone_test,
+                "zone_test_available": self.dev.rgb == "oxp",
             },
         }

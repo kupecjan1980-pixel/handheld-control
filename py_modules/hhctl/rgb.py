@@ -186,6 +186,27 @@ class OxpHidV1(_Hidraw):
         self.send(pkts)
 
 
+# Light zone test: every candidate zone id gets its own color at once, so the
+# user can say which part (stick rings, top logo, power button ring) is which.
+ZONE_TEST = [
+    (0x01, "red", (255, 0, 0)), (0x02, "green", (0, 255, 0)), (0x03, "blue", (0, 0, 255)),
+    (0x04, "yellow", (255, 255, 0)), (0x05, "magenta", (255, 0, 255)), (0x06, "cyan", (0, 255, 255)),
+    (0x07, "white", (255, 255, 255)), (0x08, "orange", (255, 100, 0)),
+]
+
+
+def oxp_zone_test() -> str:
+    dev = OxpHidV1.find()
+    if not dev:
+        raise OSError("OneXPlayer vendor HID interface not found")
+    pkts = []
+    for z, _, (r, g, b) in ZONE_TEST:
+        pkts.append(_oxp_v1_cmd(0xB8, [0xFD, z, 0x02, 1, 0x05, 0x04]))
+        pkts.append(_oxp_v1_cmd(0xB8, [0xFE, z, 0x02] + 18 * [r, g, b] + [r, g]))
+    dev.send(pkts)
+    return ", ".join(f"zone {z}: {name}" for z, name, _ in ZONE_TEST)
+
+
 def find_backend(dev: Device):
     if dev.rgb == "ayaneo_hid":
         return AyaneoHid.find()
