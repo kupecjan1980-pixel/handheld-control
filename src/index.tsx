@@ -112,6 +112,12 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
+  update: {
+    busy: boolean;
+    error: string | null;
+    message: string | null;
+    releases: { tag: string; version: string; prerelease: boolean; date: string; url: string; notes: string }[];
+  };
   input_capture: {
     running: boolean;
     left: number;
@@ -230,6 +236,23 @@ const HDR_MODES: Record<string, string> = {
 };
 const brightnessTest = callable<[], State>("brightness_test");
 const inputCapture = callable<[], State>("input_capture");
+const checkUpdates = callable<[], State>("check_updates");
+const installUpdate = callable<[string], State>("install_update");
+
+const versionKey = (v: string) => v.replace(/^v/, "").split(".").map((p) => parseInt(p, 10) || 0);
+const versionCmp = (a: string, b: string) => {
+  const x = versionKey(a);
+  const y = versionKey(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0);
+  return 0;
+};
+const FIRST_WITH_UPDATER = "0.10.7";
+// Release notes are Markdown; the first line of text is enough here.
+const firstLine = (md: string) =>
+  md
+    .split("\n")
+    .map((l) => l.replace(/[*_`#>]/g, "").replace(/^\s*-\s*/, "").trim())
+    .find(Boolean) ?? "";
 const brightnessTestAnswer = callable<[string], State>("brightness_test_answer");
 const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
@@ -624,6 +647,7 @@ function Content() {
   const rootRef = useRef<HTMLDivElement>(null);
   const [fitHeight, setFitHeight] = useState<number | null>(null);
   const [view, setView] = useState<"main" | "pick" | "adjust">("main");
+  const [pickTag, setPickTag] = useState<string | null>(null);
 
   const refresh = async () => {
     const s = await getState();
@@ -1637,6 +1661,59 @@ function Content() {
           </PanelSection>
 
           <PanelSection>
+            {(() => {
+              const upd = state.update;
+              const installed = state.version ?? "0";
+              const sel = upd.releases.find((r) => r.tag === pickTag) ?? upd.releases[0];
+              const cmp = sel ? versionCmp(sel.version, installed) : 0;
+              return (
+                <>
+                  <PanelSectionRow>
+                    <ButtonItem
+                      layout="below"
+                      disabled={upd.busy}
+                      description={[`Installed: v${installed}`, upd.message, upd.error].filter(Boolean).join(" · ")}
+                      onClick={async () => setState(await checkUpdates())}
+                    >
+                      {upd.releases.length ? "Check again" : "Check for updates"}
+                    </ButtonItem>
+                  </PanelSectionRow>
+                  {sel && (
+                    <>
+                      <PanelSectionRow>
+                        <DropdownItem
+                          label="Version"
+                          description={[sel.date, firstLine(sel.notes)].filter(Boolean).join(" · ")}
+                          rgOptions={upd.releases.map((r, i) => ({
+                            data: r.tag,
+                            label: `v${r.version}${r.version === installed ? " (installed)" : i === 0 ? " (newest)" : ""}`,
+                          }))}
+                          selectedOption={sel.tag}
+                          onChange={(o) => setPickTag(o.data)}
+                        />
+                      </PanelSectionRow>
+                      <PanelSectionRow>
+                        <ButtonItem
+                          layout="below"
+                          disabled={upd.busy}
+                          description={[
+                            "Decky restarts to load it; your settings stay.",
+                            versionCmp(sel.version, FIRST_WITH_UPDATER) < 0
+                              ? `v${sel.version} has no updater: to come back, install from the release URL.`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          onClick={async () => setState(await installUpdate(sel.tag))}
+                        >
+                          {cmp > 0 ? `Update to v${sel.version}` : cmp < 0 ? `Go back to v${sel.version}` : `Reinstall v${sel.version}`}
+                        </ButtonItem>
+                      </PanelSectionRow>
+                    </>
+                  )}
+                </>
+              );
+            })()}
             <PanelSectionRow>
               <DropdownItem
                 label="Theme color"

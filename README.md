@@ -34,6 +34,13 @@ the touchpads. It only reads, nothing is grabbed or remapped, and saves
 Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
+**Updates** (last section): **Check for updates** lists this plugin's GitHub
+releases (pre-releases included); pick any version and install it, newer or
+older. The zip must come from this repository's releases; it's checked,
+swapped in, and Decky's plugin loader restarts to load it. Settings stay.
+Versions before 0.10.7 have no updater, so going back to one means
+installing from the release URL to return.
+
 **Controller → Extra buttons** (on by default): tapping AYN opens
 Handheld Control in the Quick Access Menu, holding it (0.5 s) opens the
 regular Quick Access Menu, and the button next to it (Win+D) opens the Steam
@@ -66,7 +73,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.6/handheld-control-0.10.6.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.7/handheld-control-0.10.7.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -269,6 +276,7 @@ py_modules/hhctl/
   gpu.py                GPU + package power, GPU memory, clock
   backlight.py          brightness
   background.py         custom panel background picture, picture browser
+  updater.py            install any GitHub release from the panel
   buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)

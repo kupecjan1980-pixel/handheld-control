@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, buttons, fonts, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
+from . import background, backlight, buttons, fonts, updater, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -92,6 +92,8 @@ class Controller:
         self.btest_sections: list[tuple[str, list[str]]] = []
         self.btest_mode = "desktop"
         self.icap = {"running": False, "left": 0, "summary": None, "report": None}
+        self.upd = {"busy": False, "releases": [], "error": None, "message": None}
+        self.plugin_dir: str | None = None  # set by main.py; where updates are installed
         self.dev = detect()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
@@ -726,6 +728,45 @@ class Controller:
         threading.Thread(target=run, daemon=True).start()
         return self.state()
 
+    # --- updates (install any GitHub release) --------------------------------
+
+    def check_updates(self) -> dict:
+        if self.upd["busy"]:
+            return self.state()
+        self.upd.update(busy=True, error=None, message="Checking GitHub…")
+
+        def run():
+            try:
+                self.upd["releases"] = updater.releases()
+                self.upd["message"] = None if self.upd["releases"] else "No releases found"
+            except Exception as e:
+                log.warning("update check failed: %s", e)
+                self.upd.update(error=f"Couldn't reach GitHub: {e}", message=None)
+            finally:
+                self.upd["busy"] = False
+
+        threading.Thread(target=run, daemon=True).start()
+        return self.state()
+
+    def install_update(self, tag: str) -> dict:
+        rel = next((r for r in self.upd["releases"] if r["tag"] == tag), None)
+        if self.upd["busy"] or not rel or not self.plugin_dir:
+            return self.state()
+        self.upd.update(busy=True, error=None, message=f"Downloading {tag}…")
+
+        def run():
+            try:
+                updater.install(rel["url"], self.plugin_dir)
+                self.upd["message"] = f"Installed {tag}. Decky restarts in a moment and loads it."
+                # Give the panel a moment to show that before the loader goes away.
+                threading.Timer(2.0, updater.restart_loader).start()
+            except Exception as e:
+                log.exception("update to %s failed", tag)
+                self.upd.update(error=f"Install failed, nothing was changed: {e}", message=None, busy=False)
+
+        threading.Thread(target=run, daemon=True).start()
+        return self.state()
+
     def answer_brightness_test(self, answer: str) -> dict:
         """answer: which passes visibly changed the screen: first/second/both/neither."""
         if self.btest_sections and self.btest["answer"] is None:
@@ -1037,6 +1078,7 @@ class Controller:
             "gamescope": self._gamescope_state(),
             "sdr_brightness": self._sdr_brightness_state(),
             "input_capture": dict(self.icap),
+            "update": {**self.upd, "releases": [{**r, "notes": r["notes"][:600]} for r in self.upd["releases"]]},
             "buttons": {
                 "available": self.buttons.available()[0],
                 "unavailable": self.buttons.available()[1],

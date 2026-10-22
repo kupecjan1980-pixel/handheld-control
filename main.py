@@ -41,6 +41,7 @@ class Plugin:
         settings = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
         self.ctl = await asyncio.to_thread(Controller, settings, decky.DECKY_USER_HOME, _version())
         self.ctl.install_exit_hooks()
+        self.ctl.plugin_dir = decky.DECKY_PLUGIN_DIR
         loop = asyncio.get_running_loop()
         # Button actions come from a listener thread; the panel opens QAM / keyboard.
         self.ctl.emit = lambda action: asyncio.run_coroutine_threadsafe(decky.emit("hhctl_button", action), loop)
@@ -114,6 +115,12 @@ class Plugin:
 
     async def set_brightness(self, percent: int):
         return await self._run(self.ctl.set_brightness, percent)
+
+    async def check_updates(self):
+        return await self._run(self.ctl.check_updates)
+
+    async def install_update(self, tag: str):
+        return await self._run(self.ctl.install_update, tag)
 
     async def input_capture(self):
         return await self._run(self.ctl.run_input_capture)
