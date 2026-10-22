@@ -38,7 +38,7 @@ Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
 released below 80 °C.
 
-The title bar shows the plugin version. A header pinned at the top of the panel shows the device name and a CPU/GPU table (clock, power, temperature, RAM and VRAM used / total, and what caps each). The **About** section at the bottom shows device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue) that tints the plugin's panel and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch). The games' own lettering can't be redistributed.
+The title bar shows the plugin version. A header pinned at the top of the panel shows the device name and a CPU/GPU table (clock, power, temperature, RAM and VRAM used / total, and what caps each). The **About** section at the bottom shows device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue, Green, Gold) that tints the plugin's panel, section titles, toggles and sliders and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch). The games' own lettering can't be redistributed.
 
 Nothing is changed until you enable a section. Settings persist in
 `~/homebrew/settings/Handheld Control/settings.json` and are re-applied at

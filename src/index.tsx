@@ -8,6 +8,8 @@ import {
   PanelSectionRow,
   SliderField,
   ToggleField,
+  gamepadDialogClasses,
+  gamepadSliderClasses,
   staticClasses,
 } from "@decky/ui";
 import { Fragment, useEffect, useRef, useState } from "react";
@@ -272,17 +274,32 @@ const DISPLAY_TOGGLES: Record<string, { label: string; description: string }> = 
 };
 
 // Purely cosmetic: tints the plugin's own panel and its section titles.
-const THEMES: Record<string, { label: string; bg?: string; title?: string }> = {
+// accent colors the plugin's toggles (when on) and sliders (filled part).
+const THEMES: Record<string, { label: string; bg?: string; title?: string; accent?: string }> = {
   default: { label: "Default (black)" },
   red: {
     label: "Red",
     bg: "linear-gradient(180deg, rgba(170, 25, 35, 0.40) 0%, rgba(70, 10, 15, 0.25) 100%)",
     title: "#ff7a7a",
+    accent: "#e5383b",
   },
   blue: {
     label: "Blue",
     bg: "linear-gradient(180deg, rgba(25, 80, 190, 0.40) 0%, rgba(10, 30, 80, 0.25) 100%)",
     title: "#7ab4ff",
+    accent: "#3d8bff",
+  },
+  green: {
+    label: "Green",
+    bg: "linear-gradient(180deg, rgba(25, 140, 60, 0.40) 0%, rgba(10, 60, 25, 0.25) 100%)",
+    title: "#7ee08a",
+    accent: "#36b44f",
+  },
+  gold: {
+    label: "Gold",
+    bg: "linear-gradient(180deg, rgba(185, 140, 20, 0.40) 0%, rgba(80, 60, 10, 0.25) 100%)",
+    title: "#ffd166",
+    accent: "#e0a920",
   },
 };
 
@@ -306,9 +323,22 @@ const themeCss = (name: string, hasImage: boolean) => {
   const t = THEMES[name];
   if (!t?.bg) return "";
   // With a background picture, keep the picture and only color the titles.
+  const dlg = gamepadDialogClasses;
+  const sl = gamepadSliderClasses;
+  // Steam fills a slider's track up to --normalized-slider-value, set inline on
+  // the slider; the rule only applies where that variable exists, so a Steam
+  // layout change falls back to the default blue instead of an empty track.
+  const fill = "calc(var(--normalized-slider-value) * 100%)";
   return `
     ${hasImage ? "" : `.hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }`}
     .hhctl-root .${staticClasses.PanelSectionTitle} { color: ${t.title}; }
+    ${t.accent ? `
+    .hhctl-root .${dlg.Toggle}.${dlg.On} .${dlg.ToggleRail} { background: ${t.accent} !important; }
+    .hhctl-root [style*="--normalized-slider-value"] .${sl.SliderTrack},
+    .hhctl-root .${sl.SliderTrack}[style*="--normalized-slider-value"] {
+      background: linear-gradient(to right, ${t.accent} 0%, ${t.accent} ${fill},
+        rgba(255, 255, 255, 0.18) ${fill}, rgba(255, 255, 255, 0.18) 100%) !important;
+    }` : ""}
   `;
 };
 
