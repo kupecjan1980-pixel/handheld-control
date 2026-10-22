@@ -105,7 +105,6 @@ type State = {
     effects: string[];
     zone_test: string | null;
     zone_test_available: boolean;
-    ring_test: { step: number; total: number; what: string } | null;
   };
   ec: { supported: boolean; lockdown: string | null };
   version: string | null;
@@ -248,7 +247,6 @@ const brightnessTest = callable<[], State>("brightness_test");
 const inputCapture = callable<[], State>("input_capture");
 const checkUpdates = callable<[], State>("check_updates");
 const rgbZoneTest = callable<[], State>("rgb_zone_test");
-const rgbRingTest = callable<[], State>("rgb_ring_test");
 const installUpdate = callable<[string], State>("install_update");
 
 const versionKey = (v: string) => v.replace(/^v/, "").split(".").map((p) => parseInt(p, 10) || 0);
@@ -804,18 +802,25 @@ function Content() {
     const sc = scroller;
     const fit = () => {
       const top = root.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
-      const pad = parseFloat(getComputedStyle(sc).paddingBottom) || 0;
-      const h = Math.max(240, Math.floor(sc.clientHeight - top - pad));
+      // Down to the bottom edge of the visible area (over Decky's padding).
+      let h = Math.max(240, Math.floor(sc.clientHeight - top));
       // Switch layouts before measuring: unfitted, the settings overflow the panel.
       root.classList.replace("hhctl-sticky", "hhctl-fit");
+      root.style.marginBottom = "0px";
       root.style.height = `${h}px`;
-      // Anything after the panel (Decky's own padding or spacers) still makes
-      // the outer area scroll: take that off too, so only the settings scroll.
+      // Decky's padding and spacers after the panel would make the outer area
+      // scroll (taking the header with it); a negative margin lets the panel
+      // cover them instead of leaving an empty strip at the bottom.
       const extra = sc.scrollHeight - sc.clientHeight;
-      const fitted = extra > 0 ? Math.max(240, h - extra) : h;
-      root.style.height = `${fitted}px`;
+      if (extra > 0) root.style.marginBottom = `-${extra}px`;
+      // Whatever still overflows (margins that don't give way) comes off the height.
+      const left = sc.scrollHeight - sc.clientHeight;
+      if (left > 0) {
+        h = Math.max(240, h - left);
+        root.style.height = `${h}px`;
+      }
       sc.scrollTop = 0;
-      setFitHeight(fitted);
+      setFitHeight(h);
     };
     fit();
     if (bodyRef.current) bodyRef.current.scrollTop = savedScroll; // reopened: back where it was
@@ -1311,10 +1316,15 @@ function Content() {
 
           <PanelSection>
             <PanelSectionRow>
-              <Field label={<span className="hhctl-headlabel">BATT</span>}>
+              <Field
+                label={
+                  <span className="hhctl-headlabel">
+                    BATT{battery.capacity != null ? ` ${battery.capacity}%` : ""}
+                  </span>
+                }
+              >
                 <span className="hhctl-inline">
                   {[
-                    battery.capacity != null ? `${battery.capacity}%` : null,
                     battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
                     battery.power_w != null ? `${battery.power_w} W` : null,
                   ]
@@ -1481,25 +1491,6 @@ function Content() {
                   onClick={async () => setState(await rgbZoneTest())}
                 >
                   Light zone test
-                </ButtonItem>
-              </PanelSectionRow>
-            )}
-            {rgb.zone_test_available && (
-              <PanelSectionRow>
-                <ButtonItem
-                  layout="below"
-                  description={
-                    rgb.ring_test
-                      ? `Step ${rgb.ring_test.step} of ${rgb.ring_test.total}: ${rgb.ring_test.what}. Note the power ring's color, then press for the next step.`
-                      : "Tries 8 ways of setting the power button ring, one per press; note its color at each step"
-                  }
-                  onClick={async () => setState(await rgbRingTest())}
-                >
-                  {!rgb.ring_test
-                    ? "Power ring test"
-                    : rgb.ring_test.step < rgb.ring_test.total
-                      ? `Next step (${rgb.ring_test.step + 1} of ${rgb.ring_test.total})`
-                      : "Finish (lights go back)"}
                 </ButtonItem>
               </PanelSectionRow>
             )}
@@ -1970,7 +1961,7 @@ function TitleView() {
           minWidth: 0,
         }}
       >
-        Handheld Control
+        HHC
       </span>
       {version && <span style={{ fontSize: "0.55em", opacity: 0.6, flexShrink: 0 }}>v{version}</span>}
     </div>

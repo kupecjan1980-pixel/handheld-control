@@ -44,16 +44,5 @@ assert [p[4] for p in sent] == [z for z in range(1, 9) for _ in (0, 1)], "zones 
 assert [p[3] for p in sent[:2]] == [0xFD, 0xFE] and sent[1][6:9] == bytes([255, 0, 0])
 sent.clear(); o.apply("off", 0, 100, 100, None)
 assert len(sent) == 8 and all(p[3] == 0xFD and p[6] == 0 for p in sent), "off: switch-off for every zone, no colors"
-# power ring test: 8 steps, then the lights go back
-sent.clear(); rgb.OxpHidV1.find = classmethod(lambda cls: FakeOxp())
-applied = []; ctl.apply_rgb = lambda: applied.append(1)
-for i in range(len(rgb.RING_STEPS)):
-    st = ctl.rgb_ring_test()
-    assert st["rgb"]["ring_test"]["step"] == i + 1 and st["rgb"]["ring_test"]["total"] == 8, st["rgb"]
-assert all(len(p) == 64 and p[0] == 0xB8 and p[-1] == 0xB8 for p in sent)
-assert any(p[4] == 6 for p in sent) and any(p[2] == 0x02 for p in sent), "zone 6 and second index tried"
-st = ctl.rgb_ring_test(); assert st["rgb"]["ring_test"] is None and applied == [1]
-rgb.OxpHidV1.find = classmethod(lambda cls: None)
-st = ctl.rgb_ring_test(); assert st["rgb"]["ring_test"] is None and "Power ring" in st["errors"]["rgb"]
 print("oxp zone test ok")
 shutil.rmtree(tmp); print("all rgb theme tests passed")
