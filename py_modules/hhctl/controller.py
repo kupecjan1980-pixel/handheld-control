@@ -32,7 +32,7 @@ DEFAULTS = {
     "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
     "ui": {"theme": "default", "font": "default", "bg": None, "bg_dim": 55},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
-    "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None},
+    "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
     "battery": {"limit": 100, "bypass": "off"},
     # Raw EC writes are only used when the user opts in.
     "ec": {"enabled": False},
@@ -261,8 +261,22 @@ class Controller:
 
     # --- apply ------------------------------------------------------------
 
+    # (hue, saturation) the lights take with "Match theme color"; the default
+    # theme has no color, so the RGB section's own hue stays.
+    THEME_RGB = {"red": (0, 100), "blue": (215, 100), "green": (130, 100), "gold": (42, 100)}
+
     def apply_ui(self) -> None:
-        pass  # purely cosmetic; the frontend reads it from settings
+        # The panel itself reads ui from settings; only the lights follow it.
+        if self.settings["rgb"].get("match_theme"):
+            self.apply_rgb()
+
+    def rgb_color(self) -> tuple[int, int]:
+        s = self.settings["rgb"]
+        if s.get("match_theme"):
+            theme = self.THEME_RGB.get(self.settings["ui"].get("theme"))
+            if theme:
+                return theme
+        return s["hue"], s["sat"]
 
     def _ui_dir(self) -> str:
         return os.path.dirname(self.settings_path)
@@ -402,7 +416,8 @@ class Controller:
         s = self.settings["rgb"]
         if not self.rgb or not s["enabled"]:
             return
-        self._guard("rgb", lambda: self.rgb.apply(s["mode"], s["hue"], s["sat"], s["bright"], s["effect"]))
+        hue, sat = self.rgb_color()
+        self._guard("rgb", lambda: self.rgb.apply(s["mode"], hue, sat, s["bright"], s["effect"]))
 
     # --- display ----------------------------------------------------------
 

@@ -27,7 +27,15 @@ type Settings = {
   };
   gpu: { mode: GpuMode; mhz: number | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
-  rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
+  rgb: {
+    enabled: boolean;
+    mode: string;
+    hue: number;
+    sat: number;
+    bright: number;
+    effect: string | null;
+    match_theme: boolean;
+  };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
   ui: { theme: string; font: string; bg: string | null; bg_dim: number };
@@ -317,6 +325,9 @@ const THEMES: Record<string, { label: string; bg?: string; title?: string; filte
     filter: "hue-rotate(-156deg) saturate(0.8) brightness(1.24)",
   },
 };
+
+// Light color for RGB "Match theme color"; mirrors THEME_RGB in controller.py.
+const THEME_RGB: Record<string, [number, number]> = { red: [0, 100], blue: [215, 100], green: [130, 100], gold: [42, 100] };
 
 // Free (OFL) fonts in the style of each game; the originals can't be bundled.
 const FONTS: Record<string, { label: string; family?: string; fallback?: string; about?: string }> = {
@@ -919,6 +930,20 @@ function Content() {
                     </PanelSectionRow>
                   )}
                   {(r.mode === "solid" || r.mode === "pulse") && (
+                    <PanelSectionRow>
+                      <ToggleField
+                        label="Match theme color"
+                        description={
+                          THEME_RGB[theme]
+                            ? "The lights follow the theme color"
+                            : "Pick a colored theme in the last section; Default keeps your own color"
+                        }
+                        checked={!!r.match_theme}
+                        onChange={(v) => change("rgb", { match_theme: v }, 0)}
+                      />
+                    </PanelSectionRow>
+                  )}
+                  {(r.mode === "solid" || r.mode === "pulse") && !(r.match_theme && THEME_RGB[theme]) && (
                     <>
                       <PanelSectionRow>
                         <div
