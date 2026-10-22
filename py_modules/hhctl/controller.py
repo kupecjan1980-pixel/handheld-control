@@ -1041,6 +1041,7 @@ class Controller:
                 "available": self.buttons.available()[0],
                 "unavailable": self.buttons.available()[1],
                 "listening": self.buttons.node,
+                "help": self.buttons.help,
             },
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),

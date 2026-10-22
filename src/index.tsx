@@ -111,7 +111,7 @@ type State = {
     tdp_w: number | null;
     limits: { cpu: string[]; gpu: string[] };
   };
-  buttons: { available: boolean; unavailable: string | null; listening: string | null };
+  buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
   input_capture: {
     running: boolean;
     left: number;
@@ -1602,7 +1602,7 @@ function Content() {
               <PanelSectionRow>
                 <ToggleField
                   label="Extra buttons"
-                  description={`AYN: tap opens Handheld Control, hold opens Quick Access · the button next to it opens the Steam keyboard · ${
+                  description={`${state.buttons.help ?? ""} · ${
                     state.buttons.listening ? "active" : draft.controller.buttons ? "looking for the buttons…" : "off"
                   }`}
                   checked={draft.controller.buttons}

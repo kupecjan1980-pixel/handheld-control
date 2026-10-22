@@ -1,4 +1,4 @@
-"""Extra buttons that open Steam things (NEXT 2 so far).
+"""Extra buttons that open Steam things.
 
 The NEXT 2's extra buttons are keys on the 'AYANEO COMPOSITE DEVICE'
 keyboard (input report 2026-10-22): AYN sends F23, the button next to it
@@ -8,8 +8,12 @@ so games keep it). This listener only reads that keyboard (no EVIOCGRAB), so
 nothing is taken away from Steam or games, and there's nothing to restore.
 Actions go to the panel, which opens the Quick Access Menu or the keyboard.
 
-The back buttons (F17-F20) need a virtual controller to become paddles;
-that comes later.
+The ONEXPLAYER 3's keyboard (1a86:fe00, input report 2026-10-22) sends
+Ctrl+Win+O (the keyboard button) and Ctrl+Win+F17 (the home button, held as
+long as the button is), handled the same way.
+
+The back buttons (NEXT 2: F17-F20; OXP3: vendor HID only) need a virtual
+controller to become paddles; that comes later.
 """
 
 import logging
@@ -28,14 +32,19 @@ SYS_INPUT = "/sys/class/input"
 DEV = "/dev/input"
 EVENT = struct.Struct("llHHi")
 EV_KEY = 0x01
-KEY_D, KEY_LEFTMETA, KEY_RIGHTMETA = 32, 125, 126
-KEY_F23 = 193
+KEY_O, KEY_D, KEY_LEFTMETA, KEY_RIGHTMETA = 24, 32, 125, 126
+KEY_F17, KEY_F23 = 187, 193
 
 HOLD = 0.5  # seconds held before a key's hold action fires (while still held)
 
-# board -> (vendor, product, {key: action or (tap, hold)}, {key with Meta held: action})
+# device key -> (vendor, product, {key: action or (tap, hold)}, {key with Meta held: same})
 MAPS = {
-    "AB09": ("1c4f", "0002", {KEY_F23: ("open_plugin", "qam")}, {KEY_D: "keyboard"}),
+    "ayaneo_next2": ("1c4f", "0002", {KEY_F23: ("open_plugin", "qam")}, {KEY_D: "keyboard"}),
+    "oxp3": ("1a86", "fe00", {}, {KEY_F17: ("open_plugin", "qam"), KEY_O: "keyboard"}),
+}
+HELP = {
+    "ayaneo_next2": "AYN: tap opens Handheld Control, hold opens Quick Access · the button next to it opens the Steam keyboard",
+    "oxp3": "Home button: tap opens Handheld Control, hold opens Quick Access · keyboard button opens the Steam keyboard",
 }
 
 
@@ -65,7 +74,8 @@ class Buttons:
     RETRY = 3.0  # seconds between looks for the keyboard (it reappears after resume)
 
     def __init__(self, dev: Device, emit):
-        self.map = MAPS.get(dev.board)
+        self.map = MAPS.get(dev.key)
+        self.help = HELP.get(dev.key)
         self.emit = emit
         self.enabled = False
         self.node: str | None = None
@@ -89,7 +99,7 @@ class Buttons:
 
     def _run(self) -> None:
         vendor, product, keys, meta_keys = self.map
-        probe = next(iter(keys))
+        probe = next(iter(keys or meta_keys))
         while not self._stop.is_set():
             node = find_keyboard(vendor, product, probe)
             if not node:
@@ -105,6 +115,8 @@ class Buttons:
             log.info("buttons: listening on %s", node)
             try:
                 self._read(fd, keys, meta_keys)
+            except Exception:
+                log.exception("buttons: listener failed, starting over")
             finally:
                 os.close(fd)
                 self.node = None
@@ -119,14 +131,15 @@ class Buttons:
 
     def _read(self, fd: int, keys: dict, meta_keys: dict) -> None:
         meta = set()
-        held: dict[int, float | None] = {}  # tap/hold key -> pressed at (None once hold fired)
+        # tap/hold key -> (pressed at, or None once the hold fired; its (tap, hold))
+        held: dict[int, tuple[float | None, tuple[str, str]]] = {}
         while not self._stop.is_set():
             now = time.monotonic()
-            for code, t in list(held.items()):
+            for code, (t, act) in list(held.items()):
                 if t is not None and now - t >= HOLD:
-                    held[code] = None
-                    self._fire(keys[code][1])
-            waits = [t + HOLD - now for t in held.values() if t is not None]
+                    held[code] = (None, act)
+                    self._fire(act[1])
+            waits = [t + HOLD - now for t, _ in held.values() if t is not None]
             ready, _, _ = select.select([fd], [], [], max(0.01, min(waits)) if waits else 0.5)
             if not ready:
                 continue
@@ -145,13 +158,15 @@ class Buttons:
                 if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                     (meta.add if value else meta.discard)(code)
                     continue
+                if value == 0 and code in held:
+                    t, act = held.pop(code)
+                    if t is not None:  # released before the hold fired
+                        self._fire(act[0])
+                    continue
                 action = meta_keys.get(code) if meta else keys.get(code)
                 if isinstance(action, tuple):
                     if value == 1:
-                        held[code] = time.monotonic()
-                    elif value == 0 and code in held:
-                        if held.pop(code) is not None:  # released before the hold fired
-                            self._fire(action[0])
+                        held[code] = (time.monotonic(), action)
                     continue
                 if action and value == 1:  # presses only, not release or repeat
                     self._fire(action)

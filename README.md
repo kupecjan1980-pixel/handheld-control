@@ -34,10 +34,12 @@ the touchpads. It only reads, nothing is grabbed or remapped, and saves
 Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
-**Controller → Extra buttons** (NEXT 2, on by default): tapping AYN opens
+**Controller → Extra buttons** (on by default): tapping AYN opens
 Handheld Control in the Quick Access Menu, holding it (0.5 s) opens the
 regular Quick Access Menu, and the button next to it (Win+D) opens the Steam
-keyboard. ☰ stays the gamepad's Start, so games keep it. The plugin only
+keyboard. On the ONEXPLAYER 3 the home button (Ctrl+Win+F17) works like AYN
+and the keyboard button (Ctrl+Win+O) opens the Steam keyboard. ☰ stays the
+gamepad's Start, so games keep it. The plugin only
 reads those keys, so nothing is taken from Steam or games. The back buttons
 and the touchpads need a virtual controller; that comes later.
 

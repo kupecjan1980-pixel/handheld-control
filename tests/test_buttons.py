@@ -23,7 +23,7 @@ got = []
 next2 = device._next2("AYA", "AB09")
 b = buttons.Buttons(next2, got.append)
 assert b.available() == (True, None)
-assert not buttons.Buttons(device._oxp3("ONE-NETBOOK", "ONEXPLAYER 3"), got.append).available()[0]
+assert not buttons.Buttons(device.Device(**{**vars(next2), "key": "other"}), got.append).available()[0]
 b.start()
 wfd = os.open(node, os.O_WRONLY)  # blocks until the listener has it open
 ev = lambda code, value: struct.pack("llHHi", 0, 0, 1, code, value) + struct.pack("llHHi", 0, 0, 0, 0, 0)
@@ -47,4 +47,26 @@ assert got[-1] == "open_plugin" and len(got) == 4, "short press is still a tap"
 assert b.node == node
 b.stop(); os.close(wfd); b._thread.join(3); assert not b._thread.is_alive()
 print("find keyboard, AYN tap / hold, Win+D, presses only, stop ok")
+
+# --- ONEXPLAYER 3: Ctrl+Win+O keyboard, Ctrl+Win+F17 home (tap / hold) ---
+oxp_caps = "1000000000007 ff800000000007ff febeffdfffefffff fefffffffffffffe"  # event5 in the OXP3 report
+iface1 = "733eff 0 0 483ffff17aff32d bfd4444600000000 ffff0001 130ff38b17c000 677bfad941dfed 9ed68000004400 10000002"
+assert buttons.has_key(oxp_caps, buttons.KEY_F17) and not buttons.has_key(iface1, buttons.KEY_F17)
+for n, keys in {"event11": iface1, "event5": oxp_caps}.items():
+    d = f"{tmp}/sys/{n}/device"
+    w(f"{d}/id/vendor", "1a86"); w(f"{d}/id/product", "fe00"); w(f"{d}/capabilities/key", keys)
+node = f"{tmp}/dev/event5"; os.mkfifo(node)
+got.clear()
+b = buttons.Buttons(device._oxp3("ONE-NETBOOK", "ONEXPLAYER 3"), got.append)
+assert b.available() == (True, None)
+b.start(); wfd = os.open(node, os.O_WRONLY)
+combo = lambda key, held=0.0: (ev(29, 1) + ev(125, 1) + ev(key, 1), ev(key, 0) + ev(29, 0) + ev(125, 0), held)
+for down, up, held in (combo(24), combo(187, 0.1), combo(187, buttons.HOLD + 0.25)):
+    os.write(wfd, down); time.sleep(held); os.write(wfd, up); time.sleep(0.15)
+time.sleep(0.2)
+assert got == ["keyboard", "open_plugin", "qam"], got
+os.write(wfd, ev(187, 1) + ev(187, 0)); time.sleep(0.2)
+assert len(got) == 3, "F17 without Win does nothing"
+b.stop(); os.close(wfd); b._thread.join(3)
+print("oxp3: Ctrl+Win+O keyboard, Ctrl+Win+F17 tap / hold ok")
 shutil.rmtree(tmp); print("all buttons tests passed")
