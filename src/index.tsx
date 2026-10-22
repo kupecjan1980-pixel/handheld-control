@@ -348,7 +348,10 @@ const READOUT_CSS = `
   .hhctl-readout .hhctl-capped.hhctl-free { color: #8b929a; }
   .hhctl-headlabel { font-weight: bold; }
   .hhctl-inline { white-space: nowrap; }
-  .hhctl-batt { display: inline-block; padding-right: 3ch; }
+  .hhctl-statusrow {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap;
+    padding: 10px 3ch 10px 0; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
 `;
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
@@ -1317,13 +1320,11 @@ function Content() {
 
           <PanelSection>
             <PanelSectionRow>
-              <Field
-                label={
-                  <span className="hhctl-headlabel">BATT</span>
-                }
-              >
-                {/* Kept 3 characters in from the right edge, where it got cut off. */}
-                <span className="hhctl-inline hhctl-batt">
+              {/* A plain full-width row: in a Field the values only get the right-hand
+                  part and the watts were cut off. Kept 3 characters in from the edge. */}
+              <div className="hhctl-statusrow">
+                <span className="hhctl-headlabel">BATT</span>
+                <span>
                   {[
                     battery.capacity != null ? `${battery.capacity}%` : null,
                     battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
@@ -1332,7 +1333,7 @@ function Content() {
                     .filter(Boolean)
                     .join(" · ")}
                 </span>
-              </Field>
+              </div>
             </PanelSectionRow>
             {battery.unavailable && !battery.limit_mode ? (
               <Unavailable why={battery.unavailable} />
