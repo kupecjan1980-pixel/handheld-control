@@ -6,7 +6,7 @@ stability control for:
 | | AYANEO NEXT 2 (Bazzite 44) | ONEXPLAYER 3 (CachyOS) |
 |---|---|---|
 | DMI | vendor `AYA`, board `AB09` | vendor `ONE-NETBOOK`, board `ONEXPLAYER 3` |
-| TDP | firmware-attributes (`amd-dptc`) → `ryzenadj` fallback, 10–80 W, boost up to 85 W | Intel RAPL powercap (MSR and MMIO package zones), 3–40 W, PL2 up to 42 W |
+| TDP | firmware-attributes (`amd-dptc`) → `ryzenadj` fallback, 10–80 W, boost up to 85 W | Intel RAPL powercap (MSR and MMIO package zones), 3–40 W, PL2 up to 42 W, PL4 kept at 84 W or higher; platform profile held at `performance` (via power-profiles-daemon when running) while TDP control is on |
 | EPP | `amd-pstate-epp` | `intel_pstate` (HWP) |
 | CPU boost | cpufreq `boost` | `intel_pstate/no_turbo` |
 | CPU clock limit | cpufreq `scaling_max_freq` (amd-pstate) | cpufreq `scaling_max_freq` (intel_pstate), clamped per P-/E-core type |
@@ -57,7 +57,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.3/handheld-control-0.10.3.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.4/handheld-control-0.10.4.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy

@@ -92,6 +92,8 @@ class Controller:
         self.dev = detect()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
+        # Intel only: firmware-attributes already selects "custom", ryzenadj needs nothing.
+        self.profile = tdp.PlatformProfile() if isinstance(self.tdp, tdp.Rapl) else None
         self.rgb = rgb.find_backend(self.dev)
         self.gpu = gpu.Gpu()
         self.epp = epp.Epp()  # snapshots the original EPP before anything is applied
@@ -306,12 +308,27 @@ class Controller:
 
     def apply_tdp(self) -> None:
         s = self.settings["tdp"]
-        if not self.tdp or not s["enabled"]:
+        if not self.tdp:
+            return
+        if not s["enabled"]:
+            if self.profile:
+                self._guard("tdp", self.profile.restore)
             return
         watts = s["watts"] or self.dev.tdp_default
         watts = max(self.dev.tdp_min, min(self.dev.tdp_max, int(watts)))
         self._guard("tdp", lambda: self.tdp.apply(self.dev, watts, s["boost"]))
         self.last_tdp_apply = time.monotonic()
+        self.hold_profile()
+
+    def hold_profile(self) -> None:
+        """Keep "performance" while TDP control is on (low-power caps ~15 W)."""
+        if not self.profile or not self.settings["tdp"]["enabled"]:
+            return
+        changed = []
+        self._guard("tdp", lambda: changed.append(self.profile.hold()))
+        if any(changed):
+            # power-profiles-daemon sets EPP along with the profile.
+            self.apply_epp()
 
     def apply_epp(self) -> None:
         if not self.epp.available()[0]:
@@ -805,6 +822,7 @@ class Controller:
                 log.info("EPP changed behind our back, re-applying %s", e["value"])
                 self.apply_epp()
             self.apply_cpu()
+            self.hold_profile()
             g = self.settings["gpu"]
             if self.gpuclk.drifted(g["mode"], g.get("mhz")):
                 log.info("GPU clocks changed behind our back, re-applying %s", g["mode"])
@@ -821,6 +839,8 @@ class Controller:
             # Clock limits go back to the driver; they're re-applied on load.
             self._guard("cpu", self.freqcap.restore)
             self._guard("gpu", self.gpuclk.restore)
+            if self.profile:
+                self._guard("tdp", self.profile.restore)
         if self.fan and self.settings["fan"]["mode"] != "auto":
             try:
                 self.fan.set_auto()
@@ -862,6 +882,9 @@ class Controller:
             gpu_why = self.gpuclk.throttle() if self.gpuclk.files else list(inferred)
             if self.settings["gpu"]["mode"] in ("min", "manual"):
                 gpu_why.append("mode")
+        if self.profile and self.profile.current() == "low-power":
+            cpu_why.append("profile")
+            gpu_why.append("profile")
         dedupe = lambda xs: list(dict.fromkeys(xs))
         return {"cpu": dedupe(cpu_why), "gpu": dedupe(gpu_why)}
 
@@ -921,6 +944,7 @@ class Controller:
                 "backend": getattr(self.tdp, "name", None),
                 "min": d.tdp_min, "max": d.tdp_max, "default": d.tdp_default,
                 "current": cur,
+                "profile": self.profile.current() if self.profile else None,
             },
             "fan": {
                 "backend": getattr(self.fan, "name", None),

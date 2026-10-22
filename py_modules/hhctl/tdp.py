@@ -4,12 +4,18 @@
    asus-armoury, ...). This is what Bazzite's kernel exposes for the NEXT 2.
 2. Intel RAPL powercap (package MSR zone and the MMIO zone, both enforced).
 3. ryzenadj, if the binary is installed.
+
+On Intel the ACPI platform profile matters too: in "low-power" the firmware
+holds the package near 15 W whatever RAPL says (seen on the ONEXPLAYER 3,
+where CachyOS's power-profiles-daemon had picked it). PlatformProfile holds
+"performance" while TDP control is on, so the TDP slider is the only limit.
 """
 
 import glob
 import logging
 import os
 import shutil
+import subprocess
 
 from . import proc, sysfs
 from .device import Device
@@ -93,9 +99,12 @@ class FirmwareAttrs:
 
 class Rapl:
     name = "intel-rapl"
+    PL4_FACTOR = 2  # PL4 is a peak-current guard, not a TDP knob: keep it well above PL2
 
     def __init__(self, zones: list[str]):
         self.zones = zones
+        # Firmware's PL4, read before we write anything; never go below it.
+        self.pl4_orig = {z: sysfs.read_int(p) or 0 for z in zones if (p := self._constraints(z).get("peak_power"))}
 
     @classmethod
     def find(cls):
@@ -116,19 +125,24 @@ class Rapl:
             out[kind] = c.removesuffix("name") + "power_limit_uw"
         return out
 
+    def pl4_uw(self, dev: Device, zone: str) -> int:
+        # A PL4 just above PL2 (what this plugin used to write) capped the
+        # OXP3's GPU at ~700 MHz with the package at 15 W ("peak current").
+        return max(self.pl4_orig.get(zone, 0), self.PL4_FACTOR * dev.tdp_boost_max * UW)
+
     def apply(self, dev: Device, watts: int, boost: bool) -> None:
-        pl2, pl4 = boost_limits(dev, watts, boost)
+        pl2, _ = boost_limits(dev, watts, boost)
         errors = []
         for zone in self.zones:
             cons = self._constraints(zone)
-            for kind, value in (("long_term", watts), ("short_term", pl2), ("peak_power", pl4)):
+            for kind, uw in (("long_term", watts * UW), ("short_term", pl2 * UW), ("peak_power", self.pl4_uw(dev, zone))):
                 path = cons.get(kind)
                 if not path or not sysfs.writable(path):
                     continue
                 if kind == "peak_power" and (sysfs.read_int(path) or 0) <= 0:
                     continue
                 try:
-                    sysfs.write(path, value * UW)
+                    sysfs.write(path, uw)
                 except OSError as e:
                     errors.append(f"{path}: {e}")
         if errors:
@@ -142,6 +156,61 @@ class Rapl:
                 if uw:
                     return uw // UW
         return None
+
+
+class PlatformProfile:
+    """ACPI platform profile, set through power-profiles-daemon when it runs.
+
+    Writing sysfs under a running daemon works until the daemon re-applies its
+    own choice, so powerprofilesctl (also served by tuned-ppd) comes first.
+    """
+
+    PATH = "/sys/firmware/acpi/platform_profile"
+    WANT = "performance"
+
+    def __init__(self, path: str | None = None):
+        self.path = path or self.PATH
+        self.orig = self.current()
+        self.changed = False
+
+    def current(self) -> str | None:
+        return sysfs.read(self.path)
+
+    def available(self) -> bool:
+        return self.WANT in sysfs.choices(f"{self.path}_choices")
+
+    def _daemon(self) -> str | None:
+        binary = shutil.which("powerprofilesctl", path=proc.env()["PATH"])
+        if not binary:
+            return None
+        try:
+            ok = proc.run([binary, "get"], text=True, timeout=5).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        return binary if ok else None
+
+    def set(self, name: str) -> None:
+        binary = self._daemon()
+        if binary:
+            res = proc.run([binary, "set", name], text=True, timeout=10)
+            if res.returncode == 0 and self.current() == name:
+                return
+            log.warning("powerprofilesctl set %s: %s", name, (res.stderr or res.stdout).strip())
+        sysfs.write(self.path, name)
+
+    def hold(self) -> bool:
+        """Select WANT if it isn't; True if something was changed."""
+        if not self.available() or self.current() == self.WANT:
+            return False
+        log.info("Platform profile is %s, selecting %s", self.current(), self.WANT)
+        self.set(self.WANT)
+        self.changed = True
+        return True
+
+    def restore(self) -> None:
+        if self.changed and self.orig and self.current() != self.orig:
+            self.set(self.orig)
+        self.changed = False
 
 
 class RyzenAdj:

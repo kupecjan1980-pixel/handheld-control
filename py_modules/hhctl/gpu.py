@@ -303,6 +303,10 @@ class GpuClock:
             return []
         t = self.files["throttle"]
         if self.driver == "xe":
+            # Newer kernels have one "reasons" file ("pl4", "none", ...).
+            listed = sysfs.read(f"{t}/reasons")
+            if listed is not None:
+                return [] if listed in ("", "none") else sorted(set(listed.replace(",", " ").split()))
             if sysfs.read(f"{t}/status") != "1":
                 return []
             return sorted(

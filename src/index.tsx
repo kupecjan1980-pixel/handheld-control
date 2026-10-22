@@ -41,7 +41,7 @@ type State = {
   conflicts: string[];
   settings: Settings;
   errors: Record<string, string>;
-  tdp: { backend: string | null; min: number; max: number; default: number; current: number | null };
+  tdp: { backend: string | null; min: number; max: number; default: number; current: number | null; profile: string | null };
   fan: {
     backend: string | null;
     unavailable: string | null;
@@ -235,6 +235,7 @@ const THROTTLE_LABELS: Record<string, string> = {
   clock_limit: "your clock limit",
   boost_off: "boost off",
   mode: "clock mode",
+  profile: "low-power profile",
 };
 
 const reasons = (xs: string[]) => xs.map((r) => THROTTLE_LABELS[r] ?? r).join(", ");
@@ -538,7 +539,7 @@ function Content() {
             <PanelSectionRow>
               <ToggleField
                 label="Custom TDP"
-                description={`via ${tdp.backend}${tdp.current ? ` · now ${tdp.current} W` : ""}`}
+                description={`via ${tdp.backend}${tdp.current ? ` · now ${tdp.current} W` : ""}${tdp.profile ? ` · ${tdp.profile} profile` : ""}`}
                 checked={t.enabled}
                 onChange={(v) => change("tdp", { enabled: v, watts: t.watts ?? tdp.default }, 0)}
               />
