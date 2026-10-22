@@ -100,6 +100,7 @@ class Controller:
         self.prefcore = cpu.Prefcore()
         self.ccx = cpu.Ccx(os.path.join(os.path.dirname(settings_path), "ccx-groups.json"))
         self.freqcap = cpu.FreqCap()
+        self.limit_reasons = cpu.LimitReasons()
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
@@ -833,6 +834,48 @@ class Controller:
 
     # --- state for the UI -------------------------------------------------
 
+    def _limits(self, g: dict, tdp_now: int | None) -> dict[str, list[str]]:
+        """What holds the CPU and GPU back right now.
+
+        Intel reports exact reasons (MSR 0x64F for the CPU, xe throttle
+        files for the GPU). Elsewhere it's inferred: package power at the
+        TDP limit, temperature, or a limit set in this plugin.
+        """
+        temp = fan.cpu_temp()
+        pkg = g.get("pkg_w")
+        inferred = []
+        if pkg is not None and tdp_now and pkg >= 0.92 * tdp_now:
+            inferred.append("tdp")
+        if temp is not None and temp >= 95:
+            inferred.append("thermal")
+        msr = self.limit_reasons.read()
+        cpu_why = list(msr) if msr is not None else list(inferred)
+        s = self.settings["cpu"]
+        if s.get("cap") and s.get("cap_mhz") and self.freqcap.available()[0]:
+            peak = self.freqcap.peak_mhz()
+            if peak and peak >= 0.97 * min(int(s["cap_mhz"]), self.freqcap.range_mhz()[1]):
+                cpu_why.append("clock_limit")
+        if self.boost.available()[0] and self.boost.on() is False:
+            cpu_why.append("boost_off")
+        gpu_why = []
+        if self.gpuclk.available()[0]:
+            gpu_why = self.gpuclk.throttle() if self.gpuclk.files else list(inferred)
+            if self.settings["gpu"]["mode"] in ("min", "manual"):
+                gpu_why.append("mode")
+        dedupe = lambda xs: list(dict.fromkeys(xs))
+        return {"cpu": dedupe(cpu_why), "gpu": dedupe(gpu_why)}
+
+    def _perf_state(self, g: dict, tdp_now: int | None) -> dict:
+        used, total = gpu.memory_mb()
+        ok = self.freqcap.available()[0]
+        return {
+            "cpu_mhz": self.freqcap.avg_mhz() if ok else None,
+            "cpu_peak_mhz": self.freqcap.peak_mhz() if ok else None,
+            "ram_used_mb": used, "ram_total_mb": total,
+            "tdp_w": tdp_now,
+            "limits": self._limits(g, tdp_now),
+        }
+
     def _cap_state(self) -> dict:
         ok, why = self.freqcap.available()
         lo, hi = self.freqcap.range_mhz() if ok else (0, 0)
@@ -861,6 +904,7 @@ class Controller:
                 cur = self.tdp.current()
             except Exception:
                 cur = None
+        gpu_state = self.gpu.state()
         rpm = None
         if self.fan:
             try:
@@ -911,7 +955,8 @@ class Controller:
             }
             | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()}
             | {"cap": self._cap_state()},
-            "gpu": self.gpu.state() | {"clock": self._gpu_clock_state()},
+            "gpu": gpu_state | {"clock": self._gpu_clock_state()},
+            "perf": self._perf_state(gpu_state, cur),
             "display": self._display_state(),
             "version": self.version,
             "home": self.user_home,

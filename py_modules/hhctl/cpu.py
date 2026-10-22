@@ -227,6 +227,11 @@ class FreqCap:
         vals = {sysfs.read_int(f"{p}/scaling_max_freq") for p in self._policies()}
         return sorted((v // 1000 for v in vals if v), reverse=True)
 
+    def peak_mhz(self) -> int | None:
+        vals = [sysfs.read_int(f"{p}/scaling_cur_freq") for p in self._policies()]
+        vals = [v for v in vals if v]
+        return max(vals) // 1000 if vals else None
+
     def avg_mhz(self) -> int | None:
         vals = [sysfs.read_int(f"{p}/scaling_cur_freq") for p in self._policies()]
         vals = [v for v in vals if v]
@@ -252,3 +257,37 @@ class FreqCap:
             return
         self._write_all(lambda p: sysfs.read_int(f"{p}/cpuinfo_max_freq"))
         self.changed = False
+
+
+MSR_DEV = "/dev/cpu/0/msr"
+PERF_LIMIT_REASONS = 0x64F  # MSR_CORE_PERF_LIMIT_REASONS, Intel client CPUs
+LIMIT_BITS = {0: "prochot", 1: "thermal", 5: "ratl", 6: "vr_thermalert", 7: "vr_tdc", 8: "other", 10: "pl1", 11: "pl2"}
+
+
+class LimitReasons:
+    """Why an Intel CPU runs below its requested clock, from MSR 0x64F.
+
+    Returns None where it can't be read (AMD, no msr module); the caller
+    falls back to inferring the reason from power and temperature.
+    """
+
+    def __init__(self):
+        cpuinfo = sysfs.read("/proc/cpuinfo") or ""
+        self.intel = "GenuineIntel" in cpuinfo
+        self.tried_modprobe = False
+
+    def read(self) -> list[str] | None:
+        if not self.intel:
+            return None
+        if not os.path.exists(MSR_DEV) and not self.tried_modprobe:
+            self.tried_modprobe = True
+            proc.run(["modprobe", "msr"], timeout=10)
+        try:
+            fd = os.open(MSR_DEV, os.O_RDONLY)
+            try:
+                val = int.from_bytes(os.pread(fd, 8, PERF_LIMIT_REASONS), "little")
+            finally:
+                os.close(fd)
+        except OSError:
+            return None
+        return [name for bit, name in LIMIT_BITS.items() if val >> bit & 1]

@@ -64,6 +64,14 @@ type State = {
   ec: { supported: boolean; lockdown: string | null };
   version: string | null;
   home: string | null;
+  perf: {
+    cpu_mhz: number | null;
+    cpu_peak_mhz: number | null;
+    ram_used_mb: number | null;
+    ram_total_mb: number | null;
+    tdp_w: number | null;
+    limits: { cpu: string[]; gpu: string[] };
+  };
   input_capture: { running: boolean; left: number; summary: string | null; report: string | null };
   gamescope: {
     running: boolean;
@@ -107,6 +115,8 @@ type State = {
     driver: string | null;
     gpu_w: number | null;
     pkg_w: number | null;
+    cpu_w: number | null;
+    cpu_w_est: boolean;
     freq_mhz: number | null;
     vram_mb: number | null;
     gtt_mb: number | null;
@@ -204,16 +214,26 @@ const GPU_MODES: Record<GpuMode, { label: string; description: string }> = {
   manual: { label: "Manual", description: "Locked at the clock you set" },
 };
 
+// Reasons from Intel's limit flags, xe throttle files, or inferred (tdp).
 const THROTTLE_LABELS: Record<string, string> = {
-  pl1: "sustained power limit",
-  pl2: "boost power limit",
-  pl4: "peak current limit",
+  tdp: "TDP",
+  pl1: "TDP (PL1)",
+  pl2: "boost power (PL2)",
+  pl4: "peak current",
   thermal: "temperature",
   prochot: "PROCHOT",
-  ratl: "running average temperature",
+  ratl: "average temperature",
   vr_thermalert: "VR temperature",
   vr_tdc: "VR current",
+  other: "other",
+  clock_limit: "your clock limit",
+  boost_off: "boost off",
+  mode: "clock mode",
 };
+
+const reasons = (xs: string[]) => xs.map((r) => THROTTLE_LABELS[r] ?? r).join(", ");
+
+const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 
 const ghz = (mhz: number) => `${(mhz / 1000).toFixed(1)} GHz`;
 
@@ -381,6 +401,26 @@ function Content() {
 
   const { tdp, fan, battery, rgb, gpu, display } = state;
   const e = draft.epp;
+  const { perf } = state;
+  const join = (xs: (string | null)[]) => xs.filter(Boolean).join(" · ");
+  const readout = [
+    join([
+      perf.cpu_mhz != null ? `CPU ${ghz(perf.cpu_mhz)}` : null,
+      gpu.cpu_w != null ? `${gpu.cpu_w_est ? "≈" : ""}${gpu.cpu_w} W` : null,
+    ]),
+    join([gpu.freq_mhz != null ? `GPU ${gpu.freq_mhz} MHz` : null, gpu.gpu_w != null ? `${gpu.gpu_w} W` : null]),
+    join([
+      gpu.pkg_w != null ? `TDP ${gpu.pkg_w}${perf.tdp_w ? ` / ${perf.tdp_w}` : ""} W` : null,
+      perf.ram_used_mb != null && perf.ram_total_mb ? `RAM ${gb(perf.ram_used_mb)} / ${gb(perf.ram_total_mb)}` : null,
+    ]),
+    join([
+      gpu.vram_mb != null ? `VRAM ${gb(gpu.vram_mb)}` : null,
+      gpu.gtt_mb != null ? `GTT ${gb(gpu.gtt_mb)}` : null,
+      gpu.mem_mb != null ? `GPU mem ${gb(gpu.mem_mb)}` : null,
+    ]),
+    perf.limits.cpu.length ? `CPU capped by ${reasons(perf.limits.cpu)}` : null,
+    perf.limits.gpu.length ? `GPU capped by ${reasons(perf.limits.gpu)}` : null,
+  ].filter(Boolean) as string[];
   const t = draft.tdp;
   const g = draft.gpu;
   const f = draft.fan;
@@ -394,6 +434,19 @@ function Content() {
       <style>{themeCss(theme, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
       <PanelSection title="TDP">
+        {readout.length > 0 && (
+          <PanelSectionRow>
+            <Field
+              description={
+                <>
+                  {readout.map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </>
+              }
+            />
+          </PanelSectionRow>
+        )}
         {!tdp.backend ? (
           <Unavailable why="No TDP interface found (firmware-attributes, RAPL or ryzenadj)." />
         ) : (
@@ -563,7 +616,7 @@ function Content() {
             <PanelSectionRow>
               <Field
                 label="Held back by"
-                description={`${gpu.clock.throttle.map((r) => THROTTLE_LABELS[r] ?? r).join(", ")}. Raise the TDP or limit the CPU clock to give the GPU more power.`}
+                description={`${reasons(gpu.clock.throttle)}. Raise the TDP or limit the CPU clock to give the GPU more power.`}
               />
             </PanelSectionRow>
           )}

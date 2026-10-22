@@ -18,6 +18,19 @@ import time
 from . import sysfs
 
 
+def memory_mb() -> tuple[int | None, int | None]:
+    """(used, total) system RAM in MB, from /proc/meminfo."""
+    info = {}
+    for line in (sysfs.read("/proc/meminfo") or "").splitlines():
+        k, _, v = line.partition(":")
+        if v.strip().split()[:1]:
+            info[k] = int(v.split()[0])  # kB
+    total, avail = info.get("MemTotal"), info.get("MemAvailable")
+    if total is None or avail is None:
+        return None, None
+    return (total - avail) >> 10, total >> 10
+
+
 def find_card() -> tuple[str, str] | None:
     """Return (device dir, driver) of the first GPU bound to a known driver."""
     for card in sorted(glob.glob("/sys/class/drm/card[0-9]*")):
@@ -112,6 +125,7 @@ class Gpu:
         self.dev, self.driver = card if card else (None, None)
         self.hwmon = _hwmon(self.dev) if self.dev else None
         self.pkg = _meter(_rapl_zone("package-0"))
+        self.core = _meter(_rapl_zone("core"))
         self.gpu_meter = None
         if self.driver in ("xe", "i915"):
             energy = f"{self.hwmon}/energy1_input" if self.hwmon else None
@@ -122,7 +136,7 @@ class Gpu:
 
     def sample(self) -> None:
         """Called every tick so energy deltas stay fresh."""
-        for m in (self.pkg, self.gpu_meter):
+        for m in (self.pkg, self.core, self.gpu_meter):
             if m:
                 m.sample()
 
@@ -155,6 +169,8 @@ class Gpu:
             "driver": self.driver,
             "gpu_w": self._gpu_watts(),
             "pkg_w": self.pkg.watts if self.pkg else None,
+            "cpu_w": self.core.watts if self.core else None,
+            "cpu_w_est": False,
             "freq_mhz": self._freq_mhz(),
             "vram_mb": None,
             "gtt_mb": None,
@@ -168,7 +184,11 @@ class Gpu:
         elif self.driver:
             mem = drm_client_memory(self.driver)
             out["mem_mb"] = mem >> 20 if mem is not None else None
-        for k in ("gpu_w", "pkg_w"):
+        if out["cpu_w"] is None and out["pkg_w"] is not None and out["gpu_w"] is not None:
+            # No RAPL core domain (AMD): package minus GPU is close enough.
+            out["cpu_w"] = max(0.0, out["pkg_w"] - out["gpu_w"])
+            out["cpu_w_est"] = True
+        for k in ("gpu_w", "pkg_w", "cpu_w"):
             if out[k] is not None:
                 out[k] = round(out[k], 1)
         return out
