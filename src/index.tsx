@@ -263,17 +263,20 @@ const THEMES: Record<string, { label: string; bg?: string; title?: string }> = {
   },
 };
 
-// "diablo" is Cinzel, a free stand-in for Diablo's (commercial) Exocet lettering.
-const FONTS: Record<string, { label: string; family?: string }> = {
+// Free (OFL) fonts in the style of each game; the originals can't be bundled.
+const FONTS: Record<string, { label: string; family?: string; fallback?: string; about?: string }> = {
   default: { label: "Default" },
-  diablo: { label: "Diablo", family: "HHCinzel" },
+  diablo: { label: "Diablo", family: "HHCinzel", fallback: "serif", about: "Cinzel, in the style of Diablo's lettering" },
+  matrix: { label: "Matrix", family: "HHShareTechMono", fallback: "monospace", about: "Share Tech Mono, a terminal-style font" },
+  doom: { label: "Doom", family: "HHMetalMania", fallback: "serif", about: "Metal Mania, a heavy-metal logo style" },
+  quake: { label: "Quake", family: "HHGrenzeGotisch", fallback: "serif", about: "Grenze Gotisch, a gothic style" },
 };
 
 const fontCss = (name: string, faces: string | null) => {
-  const family = FONTS[name]?.family;
-  if (!family || !faces) return "";
+  const font = FONTS[name];
+  if (!font?.family || !faces) return "";
   return `${faces}
-    .hhctl-root, .hhctl-root * { font-family: '${family}', serif !important; }`;
+    .hhctl-root, .hhctl-root * { font-family: '${font.family}', ${font.fallback ?? "serif"} !important; }`;
 };
 
 const themeCss = (name: string, hasImage: boolean) => {
@@ -1111,7 +1114,7 @@ function Content() {
         <PanelSectionRow>
           <DropdownItem
             label="Font"
-            description={draft.ui?.font === "diablo" ? "Cinzel, a free font in the style of Diablo's lettering" : undefined}
+            description={FONTS[draft.ui?.font ?? "default"]?.about}
             rgOptions={Object.entries(FONTS).map(([data, f]) => ({ data, label: f.label }))}
             selectedOption={draft.ui?.font ?? "default"}
             onChange={(o) => change("ui", { font: o.data }, 0)}
