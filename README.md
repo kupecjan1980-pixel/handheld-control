@@ -34,11 +34,17 @@ the touchpads. It only reads, nothing is grabbed or remapped, and saves
 Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
+**Controller → Extra buttons** (NEXT 2, on by default): AYN opens Handheld
+Control in the Quick Access Menu and the button next to it (Win+D) opens the
+Steam keyboard. The plugin only reads those keys, so nothing is taken from
+Steam or games. The back buttons, ☰ (the gamepad's Start button) and the
+touchpads need a virtual controller; that comes later.
+
 Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
 released below 80 °C.
 
-The title bar shows the plugin version. A header pinned at the top of the panel shows the device name and a CPU/GPU table (clock, power, temperature, RAM and VRAM used / total, and what caps each). The **About** section at the bottom shows device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue, Green, Gold) that tints the plugin's panel, section titles, toggles and sliders and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch). The games' own lettering can't be redistributed.
+The title bar shows the plugin version. A header fixed at the top of the panel shows the device name, TDP used / set, and a CPU/GPU table (clock, power, temperature, RAM and VRAM used / total, and what caps each); the settings scroll below it. The last section shows device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue, Green, Gold) that tints the plugin's panel, labels, toggles and sliders (RGB can follow it with **Match theme color**), a **background picture** chosen from thumbnails and adjustable (zoom, position, dimming), and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch). The games' own lettering can't be redistributed.
 
 Nothing is changed until you enable a section. Settings persist in
 `~/homebrew/settings/Handheld Control/settings.json` and are re-applied at
@@ -259,7 +265,8 @@ py_modules/hhctl/
   ec.py                 guarded EC access: ec_sys / MMIO / port I/O
   gpu.py                GPU + package power, GPU memory, clock
   backlight.py          brightness
-  background.py         custom panel background picture
+  background.py         custom panel background picture, picture browser
+  buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)
   kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree

@@ -1,9 +1,10 @@
-import { callable, definePlugin, openFilePicker, toaster, useQuickAccessVisible } from "@decky/api";
-import type { FileSelectionType } from "@decky/api/dist/types";
+import { addEventListener, callable, definePlugin, removeEventListener, toaster, useQuickAccessVisible } from "@decky/api";
 import {
   ButtonItem,
   DropdownItem,
   Field,
+  Focusable,
+  Navigation,
   PanelSection,
   PanelSectionRow,
   SliderField,
@@ -38,18 +39,45 @@ type Settings = {
   };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
-  ui: { theme: string; font: string; bg: string | null; bg_dim: number };
+  controller: { buttons: boolean };
+  ui: {
+    theme: string;
+    font: string;
+    bg: string | null;
+    bg_dim: number;
+    bg_pos: BgPos;
+  };
   sdr_brightness: { enabled: boolean; nits: number };
 };
 
 type GpuMode = "auto" | "min" | "max" | "manual";
+
+// Which part of the background picture shows: CSS background-position (%) and zoom (%).
+type BgPos = { x: number; y: number; zoom: number };
+
+type Listing = {
+  folder: string;
+  parent: string | null;
+  home: string;
+  dirs: string[];
+  files: { name: string; path: string; size: number }[];
+  more: number;
+  error?: string;
+};
 
 type State = {
   device: { name: string; board: string; vendor: string; notes: string[] };
   conflicts: string[];
   settings: Settings;
   errors: Record<string, string>;
-  tdp: { backend: string | null; min: number; max: number; default: number; current: number | null; profile: string | null };
+  tdp: {
+    backend: string | null;
+    min: number;
+    max: number;
+    default: number;
+    current: number | null;
+    profile: string | null;
+  };
   fan: {
     backend: string | null;
     unavailable: string | null;
@@ -83,7 +111,13 @@ type State = {
     tdp_w: number | null;
     limits: { cpu: string[]; gpu: string[] };
   };
-  input_capture: { running: boolean; left: number; summary: string | null; report: string | null };
+  buttons: { available: boolean; unavailable: string | null; listening: string | null };
+  input_capture: {
+    running: boolean;
+    left: number;
+    summary: string | null;
+    report: string | null;
+  };
   gamescope: {
     running: boolean;
     modes: string[];
@@ -184,6 +218,8 @@ const confirmSdrBrightness = callable<[boolean], State>("confirm_sdr_brightness"
 const setBackground = callable<[string], State>("set_background");
 const clearBackground = callable<[], State>("clear_background");
 const getBackground = callable<[], string | null>("get_background");
+const listPictures = callable<[string | null], Listing>("list_pictures");
+const pictureThumb = callable<[string], string | null>("picture_thumb");
 const getFont = callable<[string], string | null>("get_font");
 const confirmGamescopeHdr = callable<[boolean], State>("confirm_gamescope_hdr");
 
@@ -206,6 +242,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   rgb: callable<[object], State>("set_rgb"),
   battery: callable<[object], State>("set_battery"),
   ec: callable<[object], State>("set_ec"),
+  controller: callable<[object], State>("set_controller"),
 };
 
 const BYPASS_LABELS: Record<string, string> = {
@@ -327,15 +364,40 @@ const THEMES: Record<string, { label: string; bg?: string; title?: string; filte
 };
 
 // Light color for RGB "Match theme color"; mirrors THEME_RGB in controller.py.
-const THEME_RGB: Record<string, [number, number]> = { red: [0, 100], blue: [215, 100], green: [130, 100], gold: [42, 100] };
+const THEME_RGB: Record<string, [number, number]> = {
+  red: [0, 100],
+  blue: [215, 100],
+  green: [130, 100],
+  gold: [42, 100],
+};
 
 // Free (OFL) fonts in the style of each game; the originals can't be bundled.
 const FONTS: Record<string, { label: string; family?: string; fallback?: string; about?: string }> = {
   default: { label: "Default" },
-  diablo: { label: "Diablo", family: "HHCinzel", fallback: "serif", about: "Cinzel, in the style of Diablo's lettering" },
-  matrix: { label: "Matrix", family: "HHShareTechMono", fallback: "monospace", about: "Share Tech Mono, a terminal-style font" },
-  doom: { label: "Doom", family: "HHMetalMania", fallback: "serif", about: "Metal Mania, a heavy-metal logo style" },
-  quake: { label: "Quake", family: "HHGrenzeGotisch", fallback: "serif", about: "Grenze Gotisch, a gothic style" },
+  diablo: {
+    label: "Diablo",
+    family: "HHCinzel",
+    fallback: "serif",
+    about: "Cinzel, in the style of Diablo's lettering",
+  },
+  matrix: {
+    label: "Matrix",
+    family: "HHShareTechMono",
+    fallback: "monospace",
+    about: "Share Tech Mono, a terminal-style font",
+  },
+  doom: {
+    label: "Doom",
+    family: "HHMetalMania",
+    fallback: "serif",
+    about: "Metal Mania, a heavy-metal logo style",
+  },
+  quake: {
+    label: "Quake",
+    family: "HHGrenzeGotisch",
+    fallback: "serif",
+    about: "Grenze Gotisch, a gothic style",
+  },
 };
 
 const fontCss = (name: string, faces: string | null) => {
@@ -367,12 +429,24 @@ const themeCss = (name: string, hasImage: boolean) => {
   `;
 };
 
-const imageStyle = (url: string, dimPct: number) => {
+// zoom 100 is "cover"; above that the picture's shorter side (relative to the
+// panel) grows, so it needs the picture's size and the panel's.
+const imageStyle = (
+  url: string,
+  dimPct: number,
+  pos: BgPos,
+  img: { w: number; h: number } | null,
+  box: { w: number; h: number } | null,
+) => {
   const a = Math.max(0, Math.min(90, dimPct)) / 100;
+  const zoom = Math.max(100, pos.zoom);
+  const size =
+    zoom === 100 || !img || !box ? "cover" : img.w / img.h > box.w / box.h ? `auto ${zoom}%` : `${zoom}% auto`;
   return {
     backgroundImage: `linear-gradient(rgba(0, 0, 0, ${a}), rgba(0, 0, 0, ${a})), url("${url}")`,
-    backgroundSize: "cover",
-    backgroundPosition: "center",
+    backgroundSize: `auto, ${size}`,
+    backgroundPosition: `center, ${pos.x}% ${pos.y}%`,
+    backgroundRepeat: "no-repeat",
     borderRadius: "8px",
     paddingBottom: "4px",
   };
@@ -397,6 +471,147 @@ function ErrorRow({ msg }: { msg?: string }) {
   );
 }
 
+const DEFAULT_POS: BgPos = { x: 50, y: 50, zoom: 100 };
+
+// Thumbnails survive closing the picker; each is a small JPEG.
+const thumbCache = new Map<string, string | null>();
+
+const shrink = (url: string) =>
+  new Promise<string>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 360 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.width * k));
+      c.height = Math.max(1, Math.round(img.height * k));
+      c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", 0.8));
+    };
+    img.onerror = () => resolve(url);
+    img.src = url;
+  });
+
+const PICKER_CSS = `
+  .hhctl-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 4px 0 8px; }
+  .hhctl-tile {
+    position: relative; overflow: hidden; border-radius: 6px; background: rgba(255, 255, 255, 0.08);
+    outline: 2px solid transparent;
+  }
+  .hhctl-tile.gpfocus, .hhctl-tile:focus, .hhctl-tile:hover { outline-color: #ffffff; }
+  .hhctl-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hhctl-tile span {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 4px; font-size: 10px; line-height: 13px;
+    background: rgba(0, 0, 0, 0.6); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hhctl-tile .hhctl-folder { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 34px; }
+`;
+
+// Picture browser inside the panel. Tiles have the panel's shape and show the
+// middle of each picture, which is what the background shows until adjusted.
+function PicturePicker({
+  aspect,
+  onPick,
+  onClose,
+}: {
+  aspect: number;
+  onPick: (path: string) => void;
+  onClose: () => void;
+}) {
+  const [list, setList] = useState<Listing | null>(null);
+  const [, bump] = useState(0);
+  const open = async (folder: string | null) => setList(await listPictures(folder));
+  useEffect(() => {
+    open(null);
+  }, []);
+  // One thumbnail at a time, so a big folder doesn't flood the backend.
+  useEffect(() => {
+    if (!list) return;
+    let stop = false;
+    (async () => {
+      for (const f of list.files) {
+        if (stop) return;
+        if (!thumbCache.has(f.path)) {
+          const raw = await pictureThumb(f.path);
+          thumbCache.set(f.path, raw ? await shrink(raw) : null);
+          if (!stop) bump((n) => n + 1);
+        }
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [list?.folder]);
+
+  const tile = { aspectRatio: `${aspect}` };
+  return (
+    <PanelSection>
+      <style>{PICKER_CSS}</style>
+      <PanelSectionRow>
+        <Field
+          label={<span className="hhctl-headlabel">Choose a picture</span>}
+          description={[
+            list?.folder.replace(list.home, "~"),
+            list?.error,
+            list?.more ? `Newest ${list.files.length} shown` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={onClose}>
+          Cancel
+        </ButtonItem>
+      </PanelSectionRow>
+      {list && (
+        <Focusable className="hhctl-grid" flow-children="grid">
+          {list.parent && (
+            <Focusable
+              className="hhctl-tile"
+              style={tile}
+              onActivate={() => open(list.parent)}
+              onClick={() => open(list.parent)}
+            >
+              <div className="hhctl-folder">⬆</div>
+              <span>Up</span>
+            </Focusable>
+          )}
+          {list.dirs.map((d) => {
+            const path = `${list.folder}/${d}`;
+            return (
+              <Focusable
+                key={path}
+                className="hhctl-tile"
+                style={tile}
+                onActivate={() => open(path)}
+                onClick={() => open(path)}
+              >
+                <div className="hhctl-folder">📁</div>
+                <span>{d}</span>
+              </Focusable>
+            );
+          })}
+          {list.files.map((f) => {
+            const t = thumbCache.get(f.path);
+            return (
+              <Focusable
+                key={f.path}
+                className="hhctl-tile"
+                style={tile}
+                onActivate={() => onPick(f.path)}
+                onClick={() => onPick(f.path)}
+              >
+                {t ? <img src={t} /> : <div className="hhctl-folder">{t === null ? "?" : "…"}</div>}
+                <span>{f.name}</span>
+              </Focusable>
+            );
+          })}
+        </Focusable>
+      )}
+    </PanelSection>
+  );
+}
+
 function Content() {
   const visible = useQuickAccessVisible();
   const [state, setState] = useState<State | null>(null);
@@ -408,6 +623,7 @@ function Content() {
   const lastBrightEdit = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const [fitHeight, setFitHeight] = useState<number | null>(null);
+  const [view, setView] = useState<"main" | "pick" | "adjust">("main");
 
   const refresh = async () => {
     const s = await getState();
@@ -427,6 +643,14 @@ function Content() {
     }
     getBackground().then(setBgUrl);
   }, [bgName]);
+  const [bgDims, setBgDims] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    setBgDims(null);
+    if (!bgUrl) return;
+    const img = new Image();
+    img.onload = () => setBgDims({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = bgUrl;
+  }, [bgUrl]);
 
   // Like the picture, the font is fetched once per change.
   const fontName = state?.settings.ui?.font ?? "default";
@@ -516,7 +740,14 @@ function Content() {
   const e = draft.epp;
   const { perf } = state;
   const dash = "–";
-  const rows: { name: string; clock: string; power: string; temp: string; mem: string; capped: string[] }[] = [
+  const rows: {
+    name: string;
+    clock: string;
+    power: string;
+    temp: string;
+    mem: string;
+    capped: string[];
+  }[] = [
     {
       name: "CPU",
       clock: perf.cpu_mhz != null ? ghz(perf.cpu_mhz) : dash,
@@ -553,13 +784,18 @@ function Content() {
   const r = draft.rgb;
 
   const theme = draft.ui?.theme ?? "default";
+  const pos = draft.ui?.bg_pos ?? DEFAULT_POS;
+  const boxW = rootRef.current?.clientWidth;
+  const boxH = fitHeight ?? rootRef.current?.clientHeight;
+  const box = boxW && boxH ? { w: boxW, h: boxH } : null;
+  const setPos = (v: Partial<BgPos>) => change("ui", { bg_pos: { ...pos, ...v } }, 150);
 
   return (
     <div
       ref={rootRef}
       className={`hhctl-root ${fitHeight ? "hhctl-fit" : "hhctl-sticky"}`}
       style={{
-        ...(bgUrl ? imageStyle(bgUrl, draft.ui?.bg_dim ?? 55) : {}),
+        ...(bgUrl ? imageStyle(bgUrl, draft.ui?.bg_dim ?? 55, pos, bgDims, box) : {}),
         ...(fitHeight ? { height: fitHeight } : {}),
       }}
     >
@@ -606,749 +842,875 @@ function Content() {
         // D-pad focus: keep the focused setting inside the scroll area.
         onFocus={(ev) => fitHeight && (ev.target as HTMLElement).scrollIntoView?.({ block: "nearest" })}
       >
-        <PanelSection>
-          {!tdp.backend ? (
-            <Unavailable why="No TDP interface found (firmware-attributes, RAPL or ryzenadj)." />
-          ) : (
-            <>
-              <PanelSectionRow>
-                <ToggleField
-                  label="Custom TDP"
-                  description={`via ${tdp.backend}${tdp.current ? ` · now ${tdp.current} W` : ""}${tdp.profile ? ` · ${tdp.profile} profile` : ""}`}
-                  checked={t.enabled}
-                  onChange={(v) => change("tdp", { enabled: v, watts: t.watts ?? tdp.default }, 0)}
-                />
-              </PanelSectionRow>
-              {t.enabled && (
-                <>
-                  <PanelSectionRow>
-                    <SliderField
-                      label="Sustained power"
-                      description="Whole package: CPU and GPU share this limit"
-                      value={t.watts ?? tdp.default}
-                      min={tdp.min}
-                      max={tdp.max}
-                      step={1}
-                      showValue
-                      valueSuffix=" W"
-                      onChange={(v) => change("tdp", { watts: v })}
-                    />
-                  </PanelSectionRow>
-                  <PanelSectionRow>
-                    <ToggleField
-                      label="Power boost"
-                      description="Allow short bursts above the sustained power limit (PL2 / fast PPT)"
-                      checked={t.boost}
-                      onChange={(v) => change("tdp", { boost: v }, 0)}
-                    />
-                  </PanelSectionRow>
-                </>
-              )}
-              <ErrorRow msg={state.errors.tdp} />
-            </>
-          )}
-          {state.epp.available && (
-            <>
-              <PanelSectionRow>
-                <ToggleField
-                  label="Energy preference (EPP)"
-                  description={`${state.epp.driver}${state.epp.current ? ` · now ${EPP_LABELS[state.epp.current] ?? state.epp.current}` : ""}`}
-                  checked={e.enabled}
-                  onChange={(v) => change("epp", { enabled: v }, 0)}
-                />
-              </PanelSectionRow>
-              {e.enabled && (
-                <PanelSectionRow>
-                  <DropdownItem
-                    label="Preference"
-                    description="Anything but Performance switches the CPU governor to powersave"
-                    rgOptions={state.epp.options.map((o) => ({ data: o, label: EPP_LABELS[o] ?? titleCase(o) }))}
-                    selectedOption={e.value}
-                    onChange={(o) => change("epp", { value: o.data }, 0)}
-                  />
-                </PanelSectionRow>
-              )}
-              <ErrorRow msg={state.errors.epp} />
-            </>
-          )}
-          <PanelSectionRow>
-            <ToggleField
-              label="CPU boost (turbo)"
-              description={
-                state.cpu.boost.available
-                  ? "Clocks above base frequency. Off saves a lot of power and heat."
-                  : `Unavailable: ${state.cpu.boost.unavailable}`
-              }
-              checked={draft.cpu.boost ?? state.cpu.boost.on ?? false}
-              disabled={!state.cpu.boost.available}
-              onChange={(v) => change("cpu", { boost: v }, 0)}
-            />
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ToggleField
-              label="Preferred cores"
-              description={
-                state.cpu.prefcore.available
-                  ? "Schedule work on the cores the firmware ranks fastest (CPPC)"
-                  : `Unavailable: ${state.cpu.prefcore.unavailable}`
-              }
-              checked={draft.cpu.prefcore ?? state.cpu.prefcore.on ?? false}
-              disabled={!state.cpu.prefcore.available}
-              onChange={(v) => change("cpu", { prefcore: v }, 0)}
-            />
-          </PanelSectionRow>
-          {state.cpu.ccx.available && (
-            <PanelSectionRow>
-              <ToggleField
-                label="First CCX only"
-                description={`Takes the other CCX offline: ${state.cpu.ccx_keep} of ${state.cpu.ccx_total} threads stay on. Saves some power in light games; heavily threaded games run slower.`}
-                checked={draft.cpu.ccx_off ?? state.cpu.ccx.on ?? false}
-                onChange={(v) => change("cpu", { ccx_off: v }, 0)}
-              />
-            </PanelSectionRow>
-          )}
-          {state.cpu.cap.available && (
-            <>
-              <PanelSectionRow>
-                <ToggleField
-                  label="Limit CPU clock"
-                  description={`A ceiling, not a lock: leaves more of the TDP for the GPU${
-                    state.cpu.cap.avg != null ? ` · now avg ${ghz(state.cpu.cap.avg)}` : ""
-                  }`}
-                  checked={draft.cpu.cap}
-                  onChange={(v) =>
-                    change("cpu", { cap: v, cap_mhz: draft.cpu.cap_mhz ?? state.cpu.cap.max }, 0)
-                  }
-                />
-              </PanelSectionRow>
-              {draft.cpu.cap && (
-                <PanelSectionRow>
-                  <SliderField
-                    label="Max CPU clock"
-                    description={
-                      state.cpu.cap.limits.length > 1
-                        ? `Each core type stays within its own range · now ${state.cpu.cap.limits.map(ghz).join(" / ")}`
-                        : undefined
-                    }
-                    value={draft.cpu.cap_mhz ?? state.cpu.cap.max}
-                    min={state.cpu.cap.min}
-                    max={state.cpu.cap.max}
-                    step={100}
-                    showValue
-                    valueSuffix=" MHz"
-                    onChange={(v) => change("cpu", { cap_mhz: v })}
-                  />
-                </PanelSectionRow>
-              )}
-            </>
-          )}
-          <ErrorRow msg={state.errors.cpu} />
-        </PanelSection>
-
-        {gpu.clock.available && (
+        {view === "pick" && (
+          <PicturePicker
+            aspect={box ? box.w / box.h : 0.55}
+            onClose={() => setView("main")}
+            onPick={async (path) => {
+              setState(await setBackground(path));
+              setView("adjust");
+            }}
+          />
+        )}
+        {view === "adjust" && (
           <PanelSection>
-            {gpu.clock.modes.includes("manual") && (
-              <PanelSectionRow>
-                <SliderField
-                  label="GPU clock"
-                  description={g.mode === "manual" ? undefined : "Moving it locks the clock (Mode: Manual)"}
-                  value={g.mhz ?? gpu.clock.max}
-                  min={gpu.clock.min}
-                  max={gpu.clock.max}
-                  step={50}
-                  showValue
-                  valueSuffix=" MHz"
-                  onChange={(v) => change("gpu", { mode: "manual", mhz: v })}
-                />
-              </PanelSectionRow>
-            )}
             <PanelSectionRow>
-              <DropdownItem
-                label="GPU clock mode"
-                description={`${GPU_MODES[g.mode]?.description ?? ""} · ${gpu.clock.min}–${gpu.clock.max} MHz${
-                  gpu.freq_mhz != null ? ` · now ${gpu.freq_mhz} MHz` : ""
-                }`}
-                rgOptions={gpu.clock.modes.map((m) => ({ data: m, label: GPU_MODES[m].label }))}
-                selectedOption={g.mode}
-                onChange={(o) => change("gpu", { mode: o.data, mhz: g.mhz ?? gpu.clock.max }, 0)}
+              <Field
+                label={<span className="hhctl-headlabel">Adjust picture</span>}
+                description="Pick the part of the picture behind the panel; it moves as you go"
               />
             </PanelSectionRow>
-            {gpu.clock.throttle.length > 0 && (
-              <PanelSectionRow>
-                <Field
-                  label="Held back by"
-                  description={`${reasons(gpu.clock.throttle)}. Raise the TDP or limit the CPU clock to give the GPU more power.`}
-                />
-              </PanelSectionRow>
-            )}
-            <ErrorRow msg={state.errors.gpu} />
+            <PanelSectionRow>
+              <SliderField
+                label="Zoom"
+                value={pos.zoom}
+                min={100}
+                max={400}
+                step={10}
+                showValue
+                valueSuffix="%"
+                onChange={(v) => setPos({ zoom: v })}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <SliderField
+                label="Left – right"
+                value={pos.x}
+                min={0}
+                max={100}
+                step={1}
+                showValue
+                valueSuffix="%"
+                onChange={(v) => setPos({ x: v })}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <SliderField
+                label="Top – bottom"
+                value={pos.y}
+                min={0}
+                max={100}
+                step={1}
+                showValue
+                valueSuffix="%"
+                onChange={(v) => setPos({ y: v })}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <SliderField
+                label="Picture dimming"
+                value={draft.ui.bg_dim ?? 55}
+                min={0}
+                max={90}
+                step={5}
+                showValue
+                valueSuffix="%"
+                onChange={(v) => change("ui", { bg_dim: v })}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem layout="below" onClick={() => setPos(DEFAULT_POS)}>
+                Reset to centered
+              </ButtonItem>
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem layout="below" onClick={() => setView("main")}>
+                Done
+              </ButtonItem>
+            </PanelSectionRow>
           </PanelSection>
         )}
-
-        <PanelSection>
-          {!fan.backend ? (
-            <Unavailable why={`Fan: ${fan.unavailable ?? "no fan control"}`} />
-          ) : (
-            <>
-              <PanelSectionRow>
-                <Field label={<span className="hhctl-headlabel">Fan status</span>}>
-                  <span className="hhctl-inline">
-                    {[
-                      fan.temp != null ? `${Math.round(fan.temp)} °C` : null,
-                      fan.rpm != null ? `${fan.rpm} RPM` : null,
-                      fan.percent != null ? `${fan.percent}%` : null,
-                      fan.safety ? "safety 100%" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                </Field>
-              </PanelSectionRow>
-              <PanelSectionRow>
-                <DropdownItem
-                  label="Fan mode"
-                  description={`via ${fan.backend}${fan.watchdog ? " · watchdog armed" : ""}`}
-                  rgOptions={[
-                    { data: "auto", label: "Auto (firmware)" },
-                    { data: "curve", label: "Curve" },
-                    { data: "fixed", label: "Fixed" },
-                  ]}
-                  selectedOption={f.mode}
-                  onChange={(o) => change("fan", { mode: o.data }, 0)}
-                />
-              </PanelSectionRow>
-              {f.mode === "curve" && (
+        <div style={view === "main" ? undefined : { display: "none" }}>
+          <PanelSection>
+            {!tdp.backend ? (
+              <Unavailable why="No TDP interface found (firmware-attributes, RAPL or ryzenadj)." />
+            ) : (
+              <>
                 <PanelSectionRow>
-                  <DropdownItem
-                    label="Curve"
-                    rgOptions={fan.curves.map((c) => ({ data: c, label: titleCase(c) }))}
-                    selectedOption={f.curve}
-                    onChange={(o) => change("fan", { curve: o.data }, 0)}
+                  <ToggleField
+                    label="Custom TDP"
+                    description={`via ${tdp.backend}${tdp.current ? ` · now ${tdp.current} W` : ""}${tdp.profile ? ` · ${tdp.profile} profile` : ""}`}
+                    checked={t.enabled}
+                    onChange={(v) => change("tdp", { enabled: v, watts: t.watts ?? tdp.default }, 0)}
                   />
                 </PanelSectionRow>
-              )}
-              {f.mode === "fixed" && (
-                <PanelSectionRow>
-                  <SliderField
-                    label="Speed"
-                    description="Forced to 100% above 90 °C"
-                    value={f.percent}
-                    min={0}
-                    max={100}
-                    step={5}
-                    showValue
-                    valueSuffix="%"
-                    onChange={(v) => change("fan", { percent: v })}
-                  />
-                </PanelSectionRow>
-              )}
-              <ErrorRow msg={state.errors.fan} />
-            </>
-          )}
-        </PanelSection>
-
-        <PanelSection>
-          <PanelSectionRow>
-            <Field label={<span className="hhctl-headlabel">Battery status</span>}>
-              <span className="hhctl-inline">
-                {[
-                  battery.capacity != null ? `${battery.capacity}%` : null,
-                  battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
-                  battery.power_w != null ? `${battery.power_w} W` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </Field>
-          </PanelSectionRow>
-          {battery.unavailable && !battery.limit_mode ? (
-            <Unavailable why={battery.unavailable} />
-          ) : (
-            <>
-              {battery.limit_mode && (
-                <PanelSectionRow>
-                  <SliderField
-                    label="Charge limit"
-                    description={battery.limit_mode === "emulated" ? "Enforced by the plugin while it runs" : undefined}
-                    value={b.limit}
-                    min={50}
-                    max={100}
-                    step={5}
-                    showValue
-                    valueSuffix="%"
-                    onChange={(v) => change("battery", { limit: v })}
-                  />
-                </PanelSectionRow>
-              )}
-              {battery.bypass_options.length > 1 && (
-                <PanelSectionRow>
-                  <DropdownItem
-                    label="Charge bypass"
-                    description="Run from the charger without charging the battery"
-                    rgOptions={battery.bypass_options.map((o) => ({ data: o, label: BYPASS_LABELS[o] ?? o }))}
-                    selectedOption={b.bypass}
-                    onChange={(o) => change("battery", { bypass: o.data }, 0)}
-                  />
-                </PanelSectionRow>
-              )}
-            </>
-          )}
-          <ErrorRow msg={state.errors.battery} />
-        </PanelSection>
-
-        <PanelSection>
-          {!rgb.backend ? (
-            <Unavailable why="No RGB controller found." />
-          ) : (
-            <>
-              <PanelSectionRow>
-                <ToggleField
-                  label="RGB lighting"
-                  description={`via ${rgb.backend}`}
-                  checked={r.enabled}
-                  onChange={(v) => change("rgb", { enabled: v }, 0)}
-                />
-              </PanelSectionRow>
-              {r.enabled && (
-                <>
-                  <PanelSectionRow>
-                    <DropdownItem
-                      label="Mode"
-                      rgOptions={rgb.modes.map((m) => ({ data: m, label: titleCase(m) }))}
-                      selectedOption={r.mode}
-                      onChange={(o) => change("rgb", { mode: o.data }, 0)}
-                    />
-                  </PanelSectionRow>
-                  {r.mode === "effect" && rgb.effects.length > 0 && (
+                {t.enabled && (
+                  <>
                     <PanelSectionRow>
-                      <DropdownItem
-                        label="Effect"
-                        rgOptions={rgb.effects.map((e) => ({ data: e, label: titleCase(e) }))}
-                        selectedOption={r.effect ?? rgb.effects[0]}
-                        onChange={(o) => change("rgb", { effect: o.data }, 0)}
+                      <SliderField
+                        label="Sustained power"
+                        description="Whole package: CPU and GPU share this limit"
+                        value={t.watts ?? tdp.default}
+                        min={tdp.min}
+                        max={tdp.max}
+                        step={1}
+                        showValue
+                        valueSuffix=" W"
+                        onChange={(v) => change("tdp", { watts: v })}
                       />
                     </PanelSectionRow>
-                  )}
-                  {(r.mode === "solid" || r.mode === "pulse") && (
                     <PanelSectionRow>
                       <ToggleField
-                        label="Match theme color"
-                        description={
-                          THEME_RGB[theme]
-                            ? "The lights follow the theme color"
-                            : "Pick a colored theme in the last section; Default keeps your own color"
-                        }
-                        checked={!!r.match_theme}
-                        onChange={(v) => change("rgb", { match_theme: v }, 0)}
+                        label="Power boost"
+                        description="Allow short bursts above the sustained power limit (PL2 / fast PPT)"
+                        checked={t.boost}
+                        onChange={(v) => change("tdp", { boost: v }, 0)}
                       />
                     </PanelSectionRow>
-                  )}
-                  {(r.mode === "solid" || r.mode === "pulse") && !(r.match_theme && THEME_RGB[theme]) && (
-                    <>
+                  </>
+                )}
+                <ErrorRow msg={state.errors.tdp} />
+              </>
+            )}
+            {state.epp.available && (
+              <>
+                <PanelSectionRow>
+                  <ToggleField
+                    label="Energy preference (EPP)"
+                    description={`${state.epp.driver}${state.epp.current ? ` · now ${EPP_LABELS[state.epp.current] ?? state.epp.current}` : ""}`}
+                    checked={e.enabled}
+                    onChange={(v) => change("epp", { enabled: v }, 0)}
+                  />
+                </PanelSectionRow>
+                {e.enabled && (
+                  <PanelSectionRow>
+                    <DropdownItem
+                      label="Preference"
+                      description="Anything but Performance switches the CPU governor to powersave"
+                      rgOptions={state.epp.options.map((o) => ({
+                        data: o,
+                        label: EPP_LABELS[o] ?? titleCase(o),
+                      }))}
+                      selectedOption={e.value}
+                      onChange={(o) => change("epp", { value: o.data }, 0)}
+                    />
+                  </PanelSectionRow>
+                )}
+                <ErrorRow msg={state.errors.epp} />
+              </>
+            )}
+            <PanelSectionRow>
+              <ToggleField
+                label="CPU boost (turbo)"
+                description={
+                  state.cpu.boost.available
+                    ? "Clocks above base frequency. Off saves a lot of power and heat."
+                    : `Unavailable: ${state.cpu.boost.unavailable}`
+                }
+                checked={draft.cpu.boost ?? state.cpu.boost.on ?? false}
+                disabled={!state.cpu.boost.available}
+                onChange={(v) => change("cpu", { boost: v }, 0)}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ToggleField
+                label="Preferred cores"
+                description={
+                  state.cpu.prefcore.available
+                    ? "Schedule work on the cores the firmware ranks fastest (CPPC)"
+                    : `Unavailable: ${state.cpu.prefcore.unavailable}`
+                }
+                checked={draft.cpu.prefcore ?? state.cpu.prefcore.on ?? false}
+                disabled={!state.cpu.prefcore.available}
+                onChange={(v) => change("cpu", { prefcore: v }, 0)}
+              />
+            </PanelSectionRow>
+            {state.cpu.ccx.available && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="First CCX only"
+                  description={`Takes the other CCX offline: ${state.cpu.ccx_keep} of ${state.cpu.ccx_total} threads stay on. Saves some power in light games; heavily threaded games run slower.`}
+                  checked={draft.cpu.ccx_off ?? state.cpu.ccx.on ?? false}
+                  onChange={(v) => change("cpu", { ccx_off: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            {state.cpu.cap.available && (
+              <>
+                <PanelSectionRow>
+                  <ToggleField
+                    label="Limit CPU clock"
+                    description={`A ceiling, not a lock: leaves more of the TDP for the GPU${
+                      state.cpu.cap.avg != null ? ` · now avg ${ghz(state.cpu.cap.avg)}` : ""
+                    }`}
+                    checked={draft.cpu.cap}
+                    onChange={(v) =>
+                      change(
+                        "cpu",
+                        {
+                          cap: v,
+                          cap_mhz: draft.cpu.cap_mhz ?? state.cpu.cap.max,
+                        },
+                        0,
+                      )
+                    }
+                  />
+                </PanelSectionRow>
+                {draft.cpu.cap && (
+                  <PanelSectionRow>
+                    <SliderField
+                      label="Max CPU clock"
+                      description={
+                        state.cpu.cap.limits.length > 1
+                          ? `Each core type stays within its own range · now ${state.cpu.cap.limits.map(ghz).join(" / ")}`
+                          : undefined
+                      }
+                      value={draft.cpu.cap_mhz ?? state.cpu.cap.max}
+                      min={state.cpu.cap.min}
+                      max={state.cpu.cap.max}
+                      step={100}
+                      showValue
+                      valueSuffix=" MHz"
+                      onChange={(v) => change("cpu", { cap_mhz: v })}
+                    />
+                  </PanelSectionRow>
+                )}
+              </>
+            )}
+            <ErrorRow msg={state.errors.cpu} />
+          </PanelSection>
+
+          {gpu.clock.available && (
+            <PanelSection>
+              {gpu.clock.modes.includes("manual") && (
+                <PanelSectionRow>
+                  <SliderField
+                    label="GPU clock"
+                    description={g.mode === "manual" ? undefined : "Moving it locks the clock (Mode: Manual)"}
+                    value={g.mhz ?? gpu.clock.max}
+                    min={gpu.clock.min}
+                    max={gpu.clock.max}
+                    step={50}
+                    showValue
+                    valueSuffix=" MHz"
+                    onChange={(v) => change("gpu", { mode: "manual", mhz: v })}
+                  />
+                </PanelSectionRow>
+              )}
+              <PanelSectionRow>
+                <DropdownItem
+                  label="GPU clock mode"
+                  description={`${GPU_MODES[g.mode]?.description ?? ""} · ${gpu.clock.min}–${gpu.clock.max} MHz${
+                    gpu.freq_mhz != null ? ` · now ${gpu.freq_mhz} MHz` : ""
+                  }`}
+                  rgOptions={gpu.clock.modes.map((m) => ({
+                    data: m,
+                    label: GPU_MODES[m].label,
+                  }))}
+                  selectedOption={g.mode}
+                  onChange={(o) => change("gpu", { mode: o.data, mhz: g.mhz ?? gpu.clock.max }, 0)}
+                />
+              </PanelSectionRow>
+              {gpu.clock.throttle.length > 0 && (
+                <PanelSectionRow>
+                  <Field
+                    label="Held back by"
+                    description={`${reasons(gpu.clock.throttle)}. Raise the TDP or limit the CPU clock to give the GPU more power.`}
+                  />
+                </PanelSectionRow>
+              )}
+              <ErrorRow msg={state.errors.gpu} />
+            </PanelSection>
+          )}
+
+          <PanelSection>
+            {!fan.backend ? (
+              <Unavailable why={`Fan: ${fan.unavailable ?? "no fan control"}`} />
+            ) : (
+              <>
+                <PanelSectionRow>
+                  <Field label={<span className="hhctl-headlabel">Fan status</span>}>
+                    <span className="hhctl-inline">
+                      {[
+                        fan.temp != null ? `${Math.round(fan.temp)} °C` : null,
+                        fan.rpm != null ? `${fan.rpm} RPM` : null,
+                        fan.percent != null ? `${fan.percent}%` : null,
+                        fan.safety ? "safety 100%" : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </Field>
+                </PanelSectionRow>
+                <PanelSectionRow>
+                  <DropdownItem
+                    label="Fan mode"
+                    description={`via ${fan.backend}${fan.watchdog ? " · watchdog armed" : ""}`}
+                    rgOptions={[
+                      { data: "auto", label: "Auto (firmware)" },
+                      { data: "curve", label: "Curve" },
+                      { data: "fixed", label: "Fixed" },
+                    ]}
+                    selectedOption={f.mode}
+                    onChange={(o) => change("fan", { mode: o.data }, 0)}
+                  />
+                </PanelSectionRow>
+                {f.mode === "curve" && (
+                  <PanelSectionRow>
+                    <DropdownItem
+                      label="Curve"
+                      rgOptions={fan.curves.map((c) => ({
+                        data: c,
+                        label: titleCase(c),
+                      }))}
+                      selectedOption={f.curve}
+                      onChange={(o) => change("fan", { curve: o.data }, 0)}
+                    />
+                  </PanelSectionRow>
+                )}
+                {f.mode === "fixed" && (
+                  <PanelSectionRow>
+                    <SliderField
+                      label="Speed"
+                      description="Forced to 100% above 90 °C"
+                      value={f.percent}
+                      min={0}
+                      max={100}
+                      step={5}
+                      showValue
+                      valueSuffix="%"
+                      onChange={(v) => change("fan", { percent: v })}
+                    />
+                  </PanelSectionRow>
+                )}
+                <ErrorRow msg={state.errors.fan} />
+              </>
+            )}
+          </PanelSection>
+
+          <PanelSection>
+            <PanelSectionRow>
+              <Field label={<span className="hhctl-headlabel">Battery status</span>}>
+                <span className="hhctl-inline">
+                  {[
+                    battery.capacity != null ? `${battery.capacity}%` : null,
+                    battery.ac && battery.inhibited && (battery.power_w ?? 0) < 1 ? "Held" : battery.status,
+                    battery.power_w != null ? `${battery.power_w} W` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </Field>
+            </PanelSectionRow>
+            {battery.unavailable && !battery.limit_mode ? (
+              <Unavailable why={battery.unavailable} />
+            ) : (
+              <>
+                {battery.limit_mode && (
+                  <PanelSectionRow>
+                    <SliderField
+                      label="Charge limit"
+                      description={
+                        battery.limit_mode === "emulated" ? "Enforced by the plugin while it runs" : undefined
+                      }
+                      value={b.limit}
+                      min={50}
+                      max={100}
+                      step={5}
+                      showValue
+                      valueSuffix="%"
+                      onChange={(v) => change("battery", { limit: v })}
+                    />
+                  </PanelSectionRow>
+                )}
+                {battery.bypass_options.length > 1 && (
+                  <PanelSectionRow>
+                    <DropdownItem
+                      label="Charge bypass"
+                      description="Run from the charger without charging the battery"
+                      rgOptions={battery.bypass_options.map((o) => ({
+                        data: o,
+                        label: BYPASS_LABELS[o] ?? o,
+                      }))}
+                      selectedOption={b.bypass}
+                      onChange={(o) => change("battery", { bypass: o.data }, 0)}
+                    />
+                  </PanelSectionRow>
+                )}
+              </>
+            )}
+            <ErrorRow msg={state.errors.battery} />
+          </PanelSection>
+
+          <PanelSection>
+            {!rgb.backend ? (
+              <Unavailable why="No RGB controller found." />
+            ) : (
+              <>
+                <PanelSectionRow>
+                  <ToggleField
+                    label="RGB lighting"
+                    description={`via ${rgb.backend}`}
+                    checked={r.enabled}
+                    onChange={(v) => change("rgb", { enabled: v }, 0)}
+                  />
+                </PanelSectionRow>
+                {r.enabled && (
+                  <>
+                    <PanelSectionRow>
+                      <DropdownItem
+                        label="Mode"
+                        rgOptions={rgb.modes.map((m) => ({
+                          data: m,
+                          label: titleCase(m),
+                        }))}
+                        selectedOption={r.mode}
+                        onChange={(o) => change("rgb", { mode: o.data }, 0)}
+                      />
+                    </PanelSectionRow>
+                    {r.mode === "effect" && rgb.effects.length > 0 && (
                       <PanelSectionRow>
-                        <div
-                          style={{
-                            height: 12,
-                            borderRadius: 6,
-                            background: `hsl(${r.hue}, ${r.sat}%, ${50 + (100 - r.sat) / 2}%)`,
-                          }}
+                        <DropdownItem
+                          label="Effect"
+                          rgOptions={rgb.effects.map((e) => ({
+                            data: e,
+                            label: titleCase(e),
+                          }))}
+                          selectedOption={r.effect ?? rgb.effects[0]}
+                          onChange={(o) => change("rgb", { effect: o.data }, 0)}
                         />
                       </PanelSectionRow>
+                    )}
+                    {(r.mode === "solid" || r.mode === "pulse") && (
                       <PanelSectionRow>
-                        <SliderField
-                          label="Hue"
-                          value={r.hue}
-                          min={0}
-                          max={359}
-                          step={5}
-                          showValue
-                          valueSuffix="°"
-                          onChange={(v) => change("rgb", { hue: v })}
+                        <ToggleField
+                          label="Match theme color"
+                          description={
+                            THEME_RGB[theme]
+                              ? "The lights follow the theme color"
+                              : "Pick a colored theme in the last section; Default keeps your own color"
+                          }
+                          checked={!!r.match_theme}
+                          onChange={(v) => change("rgb", { match_theme: v }, 0)}
                         />
                       </PanelSectionRow>
+                    )}
+                    {(r.mode === "solid" || r.mode === "pulse") && !(r.match_theme && THEME_RGB[theme]) && (
+                      <>
+                        <PanelSectionRow>
+                          <div
+                            style={{
+                              height: 12,
+                              borderRadius: 6,
+                              background: `hsl(${r.hue}, ${r.sat}%, ${50 + (100 - r.sat) / 2}%)`,
+                            }}
+                          />
+                        </PanelSectionRow>
+                        <PanelSectionRow>
+                          <SliderField
+                            label="Hue"
+                            value={r.hue}
+                            min={0}
+                            max={359}
+                            step={5}
+                            showValue
+                            valueSuffix="°"
+                            onChange={(v) => change("rgb", { hue: v })}
+                          />
+                        </PanelSectionRow>
+                        <PanelSectionRow>
+                          <SliderField
+                            label="Saturation"
+                            value={r.sat}
+                            min={0}
+                            max={100}
+                            step={5}
+                            showValue
+                            valueSuffix="%"
+                            onChange={(v) => change("rgb", { sat: v })}
+                          />
+                        </PanelSectionRow>
+                      </>
+                    )}
+                    {r.mode !== "off" && (
                       <PanelSectionRow>
                         <SliderField
-                          label="Saturation"
-                          value={r.sat}
+                          label="Brightness"
+                          value={r.bright}
                           min={0}
                           max={100}
                           step={5}
                           showValue
                           valueSuffix="%"
-                          onChange={(v) => change("rgb", { sat: v })}
+                          onChange={(v) => change("rgb", { bright: v })}
                         />
                       </PanelSectionRow>
+                    )}
+                  </>
+                )}
+                <ErrorRow msg={state.errors.rgb} />
+              </>
+            )}
+          </PanelSection>
+
+          {(display.backlight || display.bootloader || state.gamescope.running) && (
+            <PanelSection>
+              {display.backlight && bright != null && (
+                <PanelSectionRow>
+                  <SliderField
+                    label="Screen brightness"
+                    description="Writes the backlight directly, so it also works in Game Mode"
+                    value={bright}
+                    min={5}
+                    max={100}
+                    step={1}
+                    showValue
+                    valueSuffix="%"
+                    onChange={changeBrightness}
+                  />
+                </PanelSectionRow>
+              )}
+              {display.backlight && (
+                <>
+                  <PanelSectionRow>
+                    <ButtonItem
+                      layout="below"
+                      disabled={display.test.running}
+                      description="Steps brightness to 25%, 75% and back, and saves a report. Watch the screen while it runs."
+                      onClick={async () => setState(await brightnessTest())}
+                    >
+                      {display.test.running ? "Testing… watch the screen" : "Run brightness test"}
+                    </ButtonItem>
+                  </PanelSectionRow>
+                  {display.test.verdict && (
+                    <PanelSectionRow>
+                      <Field
+                        label="Result"
+                        description={[
+                          display.test.verdict,
+                          display.test.report ? `Report: ${display.test.report}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      />
+                    </PanelSectionRow>
+                  )}
+                  {display.test.verdict && display.test.answer === null && (
+                    <>
+                      <PanelSectionRow>
+                        <Field label="When did the screen get darker, then brighter?" />
+                      </PanelSectionRow>
+                      {(display.test.phases > 1
+                        ? [
+                            ["first", "Only in the first pass"],
+                            ["second", "Only in the second pass"],
+                            ["both", "In both passes"],
+                            ["neither", "Never"],
+                          ]
+                        : [
+                            ["first", "It changed"],
+                            ["neither", "It stayed the same"],
+                          ]
+                      ).map(([value, label]) => (
+                        <PanelSectionRow key={value}>
+                          <ButtonItem layout="below" onClick={async () => setState(await brightnessTestAnswer(value))}>
+                            {label}
+                          </ButtonItem>
+                        </PanelSectionRow>
+                      ))}
                     </>
                   )}
-                  {r.mode !== "off" && (
+                  {display.test.answer !== null && (
                     <PanelSectionRow>
-                      <SliderField
-                        label="Brightness"
-                        value={r.bright}
-                        min={0}
-                        max={100}
-                        step={5}
-                        showValue
-                        valueSuffix="%"
-                        onChange={(v) => change("rgb", { bright: v })}
-                      />
+                      <Field description={`Answer saved to the report (${display.test.answer}).`} />
                     </PanelSectionRow>
                   )}
                 </>
               )}
-              <ErrorRow msg={state.errors.rgb} />
-            </>
+              {Object.entries(display.toggles).map(([group, t]) => (
+                <PanelSectionRow key={group}>
+                  <ToggleField
+                    label={DISPLAY_TOGGLES[group]?.label ?? group}
+                    description={[
+                      t.blocked ?? DISPLAY_TOGGLES[group]?.description,
+                      t.params.join(" "),
+                      t.in_entries === false
+                        ? "Saved, but not in the boot entries yet"
+                        : t.reboot
+                          ? "Reboot required"
+                          : t.active
+                            ? "Active"
+                            : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    checked={t.configured}
+                    disabled={display.busy || (!!t.blocked && !t.configured)}
+                    onChange={async (v) => setState(await setDisplay(group, v))}
+                  />
+                </PanelSectionRow>
+              ))}
+              {Object.entries(display.toggles)
+                .filter(([, t]) => t.in_entries === false && !(t.blocked && t.configured))
+                .map(([group, t]) => (
+                  <PanelSectionRow key={`${group}-apply`}>
+                    <ButtonItem
+                      layout="below"
+                      disabled={display.busy}
+                      description={`Rebuilds the ${display.bootloader} boot entries so the change takes effect at the next boot`}
+                      onClick={async () => setState(await setDisplay(group, t.configured))}
+                    >
+                      Apply to boot entries
+                    </ButtonItem>
+                  </PanelSectionRow>
+                ))}
+              {display.message && (
+                <PanelSectionRow>
+                  <Field description={display.message} />
+                </PanelSectionRow>
+              )}
+              {state.sdr_brightness.available && (
+                <>
+                  <PanelSectionRow>
+                    <ToggleField
+                      label="Game Mode brightness"
+                      description={[
+                        "Dims or brightens the picture through gamescope while HDR stays on, which this panel needs.",
+                        state.sdr_brightness.current != null
+                          ? `Now ${state.sdr_brightness.current} nits`
+                          : "Now at gamescope's default",
+                        !state.sdr_brightness.confirmed ? "The first change must be confirmed within 20 s." : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      checked={draft.sdr_brightness.enabled}
+                      onChange={(v) => change("sdr_brightness", { enabled: v, nits: draft.sdr_brightness.nits }, 0)}
+                    />
+                  </PanelSectionRow>
+                  {draft.sdr_brightness.enabled && (
+                    <PanelSectionRow>
+                      <SliderField
+                        label="Brightness"
+                        value={draft.sdr_brightness.nits}
+                        min={state.sdr_brightness.min}
+                        max={state.sdr_brightness.max}
+                        step={10}
+                        showValue
+                        valueSuffix=" nits"
+                        onChange={(v) => change("sdr_brightness", { enabled: true, nits: v })}
+                      />
+                    </PanelSectionRow>
+                  )}
+                  {state.sdr_brightness.pending && (
+                    <>
+                      <PanelSectionRow>
+                        <Field
+                          label="Keep this brightness?"
+                          description={`Reverting in ${state.sdr_brightness.pending.seconds} s unless you keep it.`}
+                        />
+                      </PanelSectionRow>
+                      <PanelSectionRow>
+                        <ButtonItem layout="below" onClick={async () => setState(await confirmSdrBrightness(true))}>
+                          Keep
+                        </ButtonItem>
+                      </PanelSectionRow>
+                      <PanelSectionRow>
+                        <ButtonItem layout="below" onClick={async () => setState(await confirmSdrBrightness(false))}>
+                          Revert now
+                        </ButtonItem>
+                      </PanelSectionRow>
+                    </>
+                  )}
+                  <ErrorRow msg={state.errors.sdr_brightness} />
+                </>
+              )}
+              {state.gamescope.running && state.gamescope.blocked && (
+                <PanelSectionRow>
+                  <Field
+                    label="Game Mode HDR"
+                    description={`${
+                      state.gamescope.hdr_active === null
+                        ? ""
+                        : `HDR output is ${state.gamescope.hdr_active ? "on" : "off"}. `
+                    }${state.gamescope.blocked}`}
+                  />
+                </PanelSectionRow>
+              )}
+              {state.gamescope.modes.length > 0 && (
+                <>
+                  <PanelSectionRow>
+                    <DropdownItem
+                      label="Game Mode HDR"
+                      description={[
+                        state.gamescope.hdr_active === null
+                          ? null
+                          : `HDR output is ${state.gamescope.hdr_active ? "on" : "off"} right now`,
+                        "In HDR this panel ignores brightness. Off or Only for HDR games lets the slider work.",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      rgOptions={state.gamescope.modes.map((m) => ({
+                        data: m,
+                        label: HDR_MODES[m] ?? m,
+                      }))}
+                      selectedOption={state.gamescope.mode}
+                      onChange={async (o) => setState(await setGamescopeHdr(o.data))}
+                    />
+                  </PanelSectionRow>
+                  {state.gamescope.pending && (
+                    <>
+                      <PanelSectionRow>
+                        <Field
+                          label="Keep this setting?"
+                          description={`Reverting in ${state.gamescope.pending.seconds} s unless you keep it.`}
+                        />
+                      </PanelSectionRow>
+                      <PanelSectionRow>
+                        <ButtonItem layout="below" onClick={async () => setState(await confirmGamescopeHdr(true))}>
+                          Keep
+                        </ButtonItem>
+                      </PanelSectionRow>
+                      <PanelSectionRow>
+                        <ButtonItem layout="below" onClick={async () => setState(await confirmGamescopeHdr(false))}>
+                          Revert now
+                        </ButtonItem>
+                      </PanelSectionRow>
+                    </>
+                  )}
+                  <ErrorRow msg={state.errors.gamescope} />
+                </>
+              )}
+              <ErrorRow msg={state.errors.display} />
+            </PanelSection>
           )}
-        </PanelSection>
 
-        {(display.backlight || display.bootloader || state.gamescope.running) && (
-          <PanelSection>
-            {display.backlight && bright != null && (
+          {state.ec.supported && (
+            <PanelSection title="Advanced">
               <PanelSectionRow>
-                <SliderField
-                  label="Screen brightness"
-                  description="Writes the backlight directly, so it also works in Game Mode"
-                  value={bright}
-                  min={5}
-                  max={100}
-                  step={1}
-                  showValue
-                  valueSuffix="%"
-                  onChange={changeBrightness}
+                <ToggleField
+                  label="Allow raw EC writes"
+                  description={
+                    state.ec.lockdown && state.ec.lockdown !== "none"
+                      ? `Blocked: kernel lockdown is '${state.ec.lockdown}' (Secure Boot).`
+                      : "Fallback for fan and charging when no kernel driver is loaded. Registers are checked before and after every write; anything unexpected turns EC control off."
+                  }
+                  checked={draft.ec.enabled}
+                  onChange={(v) => change("ec", { enabled: v }, 0)}
+                />
+              </PanelSectionRow>
+            </PanelSection>
+          )}
+
+          <PanelSection title="Controller">
+            <PanelSectionRow>
+              <Field
+                label="Remapping is coming"
+                description="Back buttons as paddles, ☰ as Quick Access and the touchpads need a virtual controller; that's next. To help, record what the buttons and touchpads send: start recording, close this menu, then press each button a few times and swipe and click each touchpad. Recording only reads."
+              />
+            </PanelSectionRow>
+            {state.buttons.available && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Extra buttons"
+                  description={`AYN opens Handheld Control, the button next to it opens the Steam keyboard · ${
+                    state.buttons.listening ? "active" : draft.controller.buttons ? "looking for the buttons…" : "off"
+                  }`}
+                  checked={draft.controller.buttons}
+                  onChange={(v) => change("controller", { buttons: v }, 0)}
                 />
               </PanelSectionRow>
             )}
-            {display.backlight && (
-              <>
-                <PanelSectionRow>
-                  <ButtonItem
-                    layout="below"
-                    disabled={display.test.running}
-                    description="Steps brightness to 25%, 75% and back, and saves a report. Watch the screen while it runs."
-                    onClick={async () => setState(await brightnessTest())}
-                  >
-                    {display.test.running ? "Testing… watch the screen" : "Run brightness test"}
-                  </ButtonItem>
-                </PanelSectionRow>
-                {display.test.verdict && (
-                  <PanelSectionRow>
-                    <Field
-                      label="Result"
-                      description={[display.test.verdict, display.test.report ? `Report: ${display.test.report}` : null]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    />
-                  </PanelSectionRow>
-                )}
-                {display.test.verdict && display.test.answer === null && (
-                  <>
-                    <PanelSectionRow>
-                      <Field label="When did the screen get darker, then brighter?" />
-                    </PanelSectionRow>
-                    {(display.test.phases > 1
-                      ? [
-                          ["first", "Only in the first pass"],
-                          ["second", "Only in the second pass"],
-                          ["both", "In both passes"],
-                          ["neither", "Never"],
-                        ]
-                      : [
-                          ["first", "It changed"],
-                          ["neither", "It stayed the same"],
-                        ]
-                    ).map(([value, label]) => (
-                      <PanelSectionRow key={value}>
-                        <ButtonItem layout="below" onClick={async () => setState(await brightnessTestAnswer(value))}>
-                          {label}
-                        </ButtonItem>
-                      </PanelSectionRow>
-                    ))}
-                  </>
-                )}
-                {display.test.answer !== null && (
-                  <PanelSectionRow>
-                    <Field description={`Answer saved to the report (${display.test.answer}).`} />
-                  </PanelSectionRow>
-                )}
-              </>
-            )}
-            {Object.entries(display.toggles).map(([group, t]) => (
-              <PanelSectionRow key={group}>
-                <ToggleField
-                  label={DISPLAY_TOGGLES[group]?.label ?? group}
+            <PanelSectionRow>
+              <ButtonItem
+                layout="below"
+                disabled={state.input_capture.running}
+                onClick={async () => setState(await inputCapture())}
+              >
+                {state.input_capture.running
+                  ? `Recording… ${state.input_capture.left} s left`
+                  : "Record controller input (30 s)"}
+              </ButtonItem>
+            </PanelSectionRow>
+            {state.input_capture.summary && (
+              <PanelSectionRow>
+                <Field
+                  label="Result"
                   description={[
-                    t.blocked ?? DISPLAY_TOGGLES[group]?.description,
-                    t.params.join(" "),
-                    t.in_entries === false
-                      ? "Saved, but not in the boot entries yet"
-                      : t.reboot
-                        ? "Reboot required"
-                        : t.active
-                          ? "Active"
-                          : null,
+                    state.input_capture.summary,
+                    state.input_capture.report ? `Report: ${state.input_capture.report}` : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
-                  checked={t.configured}
-                  disabled={display.busy || (!!t.blocked && !t.configured)}
-                  onChange={async (v) => setState(await setDisplay(group, v))}
                 />
               </PanelSectionRow>
-            ))}
-            {Object.entries(display.toggles)
-              .filter(([, t]) => t.in_entries === false && !(t.blocked && t.configured))
-              .map(([group, t]) => (
-                <PanelSectionRow key={`${group}-apply`}>
-                  <ButtonItem
-                    layout="below"
-                    disabled={display.busy}
-                    description={`Rebuilds the ${display.bootloader} boot entries so the change takes effect at the next boot`}
-                    onClick={async () => setState(await setDisplay(group, t.configured))}
-                  >
-                    Apply to boot entries
+            )}
+          </PanelSection>
+
+          <PanelSection>
+            <PanelSectionRow>
+              <DropdownItem
+                label="Theme color"
+                rgOptions={Object.entries(THEMES).map(([data, t]) => ({
+                  data,
+                  label: t.label,
+                }))}
+                selectedOption={theme}
+                onChange={(o) => change("ui", { theme: o.data }, 0)}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <DropdownItem
+                label="Font"
+                description={FONTS[draft.ui?.font ?? "default"]?.about}
+                rgOptions={Object.entries(FONTS).map(([data, f]) => ({
+                  data,
+                  label: f.label,
+                }))}
+                selectedOption={draft.ui?.font ?? "default"}
+                onChange={(o) => change("ui", { font: o.data }, 0)}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem
+                layout="below"
+                description="PNG, JPG or WebP, up to 8 MB. It's copied into the plugin's settings."
+                onClick={() => setView("pick")}
+              >
+                {draft.ui?.bg ? "Change background picture" : "Choose background picture"}
+              </ButtonItem>
+            </PanelSectionRow>
+            {draft.ui?.bg && (
+              <>
+                <PanelSectionRow>
+                  <ButtonItem layout="below" onClick={() => setView("adjust")}>
+                    Adjust picture (zoom, position)
                   </ButtonItem>
                 </PanelSectionRow>
-              ))}
-            {display.message && (
-              <PanelSectionRow>
-                <Field description={display.message} />
-              </PanelSectionRow>
-            )}
-            {state.sdr_brightness.available && (
-              <>
                 <PanelSectionRow>
-                  <ToggleField
-                    label="Game Mode brightness"
-                    description={[
-                      "Dims or brightens the picture through gamescope while HDR stays on, which this panel needs.",
-                      state.sdr_brightness.current != null ? `Now ${state.sdr_brightness.current} nits` : "Now at gamescope's default",
-                      !state.sdr_brightness.confirmed ? "The first change must be confirmed within 20 s." : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                    checked={draft.sdr_brightness.enabled}
-                    onChange={(v) => change("sdr_brightness", { enabled: v, nits: draft.sdr_brightness.nits }, 0)}
+                  <SliderField
+                    label="Picture dimming"
+                    description="Darkens the picture so text stays readable"
+                    value={draft.ui.bg_dim ?? 55}
+                    min={0}
+                    max={90}
+                    step={5}
+                    showValue
+                    valueSuffix="%"
+                    onChange={(v) => change("ui", { bg_dim: v })}
                   />
                 </PanelSectionRow>
-                {draft.sdr_brightness.enabled && (
-                  <PanelSectionRow>
-                    <SliderField
-                      label="Brightness"
-                      value={draft.sdr_brightness.nits}
-                      min={state.sdr_brightness.min}
-                      max={state.sdr_brightness.max}
-                      step={10}
-                      showValue
-                      valueSuffix=" nits"
-                      onChange={(v) => change("sdr_brightness", { enabled: true, nits: v })}
-                    />
-                  </PanelSectionRow>
-                )}
-                {state.sdr_brightness.pending && (
-                  <>
-                    <PanelSectionRow>
-                      <Field
-                        label="Keep this brightness?"
-                        description={`Reverting in ${state.sdr_brightness.pending.seconds} s unless you keep it.`}
-                      />
-                    </PanelSectionRow>
-                    <PanelSectionRow>
-                      <ButtonItem layout="below" onClick={async () => setState(await confirmSdrBrightness(true))}>
-                        Keep
-                      </ButtonItem>
-                    </PanelSectionRow>
-                    <PanelSectionRow>
-                      <ButtonItem layout="below" onClick={async () => setState(await confirmSdrBrightness(false))}>
-                        Revert now
-                      </ButtonItem>
-                    </PanelSectionRow>
-                  </>
-                )}
-                <ErrorRow msg={state.errors.sdr_brightness} />
+                <PanelSectionRow>
+                  <ButtonItem layout="below" onClick={async () => setState(await clearBackground())}>
+                    Remove background picture
+                  </ButtonItem>
+                </PanelSectionRow>
               </>
             )}
-            {state.gamescope.running && state.gamescope.blocked && (
+            <ErrorRow msg={state.errors.ui} />
+            {state.device.notes.map((n) => (
+              <PanelSectionRow key={n}>
+                <Field description={n} />
+              </PanelSectionRow>
+            ))}
+            {state.conflicts.length > 0 && (
               <PanelSectionRow>
                 <Field
-                  label="Game Mode HDR"
-                  description={`${
-                    state.gamescope.hdr_active === null ? "" : `HDR output is ${state.gamescope.hdr_active ? "on" : "off"}. `
-                  }${state.gamescope.blocked}`}
+                  description={`${state.conflicts.join(", ")} is running. If it also controls TDP, RGB or the fan, it may override these settings.`}
                 />
               </PanelSectionRow>
             )}
-            {state.gamescope.modes.length > 0 && (
-              <>
-                <PanelSectionRow>
-                  <DropdownItem
-                    label="Game Mode HDR"
-                    description={[
-                      state.gamescope.hdr_active === null
-                        ? null
-                        : `HDR output is ${state.gamescope.hdr_active ? "on" : "off"} right now`,
-                      "In HDR this panel ignores brightness. Off or Only for HDR games lets the slider work.",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                    rgOptions={state.gamescope.modes.map((m) => ({ data: m, label: HDR_MODES[m] ?? m }))}
-                    selectedOption={state.gamescope.mode}
-                    onChange={async (o) => setState(await setGamescopeHdr(o.data))}
-                  />
-                </PanelSectionRow>
-                {state.gamescope.pending && (
-                  <>
-                    <PanelSectionRow>
-                      <Field
-                        label="Keep this setting?"
-                        description={`Reverting in ${state.gamescope.pending.seconds} s unless you keep it.`}
-                      />
-                    </PanelSectionRow>
-                    <PanelSectionRow>
-                      <ButtonItem layout="below" onClick={async () => setState(await confirmGamescopeHdr(true))}>
-                        Keep
-                      </ButtonItem>
-                    </PanelSectionRow>
-                    <PanelSectionRow>
-                      <ButtonItem layout="below" onClick={async () => setState(await confirmGamescopeHdr(false))}>
-                        Revert now
-                      </ButtonItem>
-                    </PanelSectionRow>
-                  </>
-                )}
-                <ErrorRow msg={state.errors.gamescope} />
-              </>
-            )}
-            <ErrorRow msg={state.errors.display} />
           </PanelSection>
-        )}
-
-        {state.ec.supported && (
-          <PanelSection title="Advanced">
-            <PanelSectionRow>
-              <ToggleField
-                label="Allow raw EC writes"
-                description={
-                  state.ec.lockdown && state.ec.lockdown !== "none"
-                    ? `Blocked: kernel lockdown is '${state.ec.lockdown}' (Secure Boot).`
-                    : "Fallback for fan and charging when no kernel driver is loaded. Registers are checked before and after every write; anything unexpected turns EC control off."
-                }
-                checked={draft.ec.enabled}
-                onChange={(v) => change("ec", { enabled: v }, 0)}
-              />
-            </PanelSectionRow>
-          </PanelSection>
-        )}
-
-        <PanelSection title="Controller">
-          <PanelSectionRow>
-            <Field
-              label="Remapping is coming"
-              description="First, record what the extra buttons and touchpads send. Start recording, close this menu, then press each extra button a few times, one after another, and swipe and click each touchpad. Recording only reads; nothing is remapped yet."
-            />
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              disabled={state.input_capture.running}
-              onClick={async () => setState(await inputCapture())}
-            >
-              {state.input_capture.running
-                ? `Recording… ${state.input_capture.left} s left`
-                : "Record controller input (30 s)"}
-            </ButtonItem>
-          </PanelSectionRow>
-          {state.input_capture.summary && (
-            <PanelSectionRow>
-              <Field
-                label="Result"
-                description={[
-                  state.input_capture.summary,
-                  state.input_capture.report ? `Report: ${state.input_capture.report}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              />
-            </PanelSectionRow>
-          )}
-        </PanelSection>
-
-        <PanelSection>
-          <PanelSectionRow>
-            <DropdownItem
-              label="Theme color"
-              rgOptions={Object.entries(THEMES).map(([data, t]) => ({ data, label: t.label }))}
-              selectedOption={theme}
-              onChange={(o) => change("ui", { theme: o.data }, 0)}
-            />
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <DropdownItem
-              label="Font"
-              description={FONTS[draft.ui?.font ?? "default"]?.about}
-              rgOptions={Object.entries(FONTS).map(([data, f]) => ({ data, label: f.label }))}
-              selectedOption={draft.ui?.font ?? "default"}
-              onChange={(o) => change("ui", { font: o.data }, 0)}
-            />
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              description="PNG, JPG or WebP, up to 8 MB. It's copied into the plugin's settings."
-              onClick={async () => {
-                try {
-                  const res = await openFilePicker(
-                    0 as FileSelectionType, // FILE
-                    state.home ?? "/home",
-                    true,
-                    true,
-                    undefined,
-                    ["png", "jpg", "jpeg", "webp"],
-                  );
-                  setState(await setBackground(res.realpath || res.path));
-                } catch {
-                  // picker closed without choosing
-                }
-              }}
-            >
-              {draft.ui?.bg ? "Change background picture" : "Choose background picture"}
-            </ButtonItem>
-          </PanelSectionRow>
-          {draft.ui?.bg && (
-            <>
-              <PanelSectionRow>
-                <SliderField
-                  label="Picture dimming"
-                  description="Darkens the picture so text stays readable"
-                  value={draft.ui.bg_dim ?? 55}
-                  min={0}
-                  max={90}
-                  step={5}
-                  showValue
-                  valueSuffix="%"
-                  onChange={(v) => change("ui", { bg_dim: v })}
-                />
-              </PanelSectionRow>
-              <PanelSectionRow>
-                <ButtonItem layout="below" onClick={async () => setState(await clearBackground())}>
-                  Remove background picture
-                </ButtonItem>
-              </PanelSectionRow>
-            </>
-          )}
-          <ErrorRow msg={state.errors.ui} />
-          {state.device.notes.map((n) => (
-            <PanelSectionRow key={n}>
-              <Field description={n} />
-            </PanelSectionRow>
-          ))}
-          {state.conflicts.length > 0 && (
-            <PanelSectionRow>
-              <Field
-                description={`${state.conflicts.join(", ")} is running. If it also controls TDP, RGB or the fan, it may override these settings.`}
-              />
-            </PanelSectionRow>
-          )}
-        </PanelSection>
+        </div>
       </div>
     </div>
   );
@@ -1363,17 +1725,53 @@ function TitleView() {
   return (
     <div
       className={staticClasses.Title}
-      style={{ display: "flex", flexDirection: "row", alignItems: "baseline", gap: "6px", whiteSpace: "nowrap", minWidth: 0 }}
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "baseline",
+        gap: "6px",
+        whiteSpace: "nowrap",
+        minWidth: 0,
+      }}
     >
-      <span style={{ fontSize: "0.8em", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>Handheld Control</span>
+      <span
+        style={{
+          fontSize: "0.8em",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          minWidth: 0,
+        }}
+      >
+        Handheld Control
+      </span>
       {version && <span style={{ fontSize: "0.55em", opacity: 0.6, flexShrink: 0 }}>v{version}</span>}
     </div>
   );
 }
 
-export default definePlugin(() => ({
-  name: "Handheld Control",
-  titleView: <TitleView />,
-  content: <Content />,
-  icon: <FaMicrochip />,
-}));
+// Extra buttons (backend listener): runs while the plugin is loaded, panel open or not.
+const QAM_DECKY_TAB = 999; // EQuickAccessTab.Decky
+const onButton = (action: string) => {
+  if (action === "open_plugin") {
+    Navigation.OpenQuickAccessMenu(QAM_DECKY_TAB as never);
+    // Decky has no public call to pick a plugin in its tab; try its internal state.
+    try {
+      (window as any).DeckyPluginLoader?.deckyState?.setActivePlugin?.("Handheld Control");
+    } catch {
+      // the Decky tab opens on its plugin list instead
+    }
+  } else if (action === "keyboard") {
+    (window.SteamClient as any).URL.ExecuteSteamURL("steam://open/keyboard");
+  }
+};
+
+export default definePlugin(() => {
+  addEventListener<[string]>("hhctl_button", onButton);
+  return {
+    name: "Handheld Control",
+    titleView: <TitleView />,
+    content: <Content />,
+    icon: <FaMicrochip />,
+    onDismount: () => removeEventListener("hhctl_button", onButton),
+  };
+});

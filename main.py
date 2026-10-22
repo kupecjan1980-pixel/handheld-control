@@ -41,6 +41,9 @@ class Plugin:
         settings = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
         self.ctl = await asyncio.to_thread(Controller, settings, decky.DECKY_USER_HOME, _version())
         self.ctl.install_exit_hooks()
+        loop = asyncio.get_running_loop()
+        # Button actions come from a listener thread; the panel opens QAM / keyboard.
+        self.ctl.emit = lambda action: asyncio.run_coroutine_threadsafe(decky.emit("hhctl_button", action), loop)
         await self._run(self.ctl.apply_all)
         self.loop_task = asyncio.get_event_loop().create_task(self._loop())
 
@@ -82,6 +85,9 @@ class Plugin:
     async def set_battery(self, values: dict):
         return await self._run(self.ctl.update, "battery", values)
 
+    async def set_controller(self, values: dict):
+        return await self._run(self.ctl.update, "controller", values)
+
     async def set_ui(self, values: dict):
         return await self._run(self.ctl.update, "ui", values)
 
@@ -93,6 +99,12 @@ class Plugin:
 
     async def get_background(self):
         return await self._run(self.ctl.background_data)
+
+    async def list_pictures(self, folder: str | None = None):
+        return await self._run(self.ctl.list_pictures, folder)
+
+    async def picture_thumb(self, path: str):
+        return await self._run(self.ctl.picture_thumb, path)
 
     async def get_font(self, name: str):
         return await self._run(self.ctl.font_css, name)

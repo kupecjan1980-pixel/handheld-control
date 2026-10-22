@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, fonts, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
+from . import background, backlight, buttons, fonts, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -30,7 +30,10 @@ DEFAULTS = {
     # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
     # change is a trial that must be confirmed; after that it applies directly.
     "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
-    "ui": {"theme": "default", "font": "default", "bg": None, "bg_dim": 55},
+    # bg_pos: which part of the picture shows (CSS background-position %) and zoom (%).
+    # Extra buttons open Steam things (AYN -> this plugin, Win+D -> keyboard).
+    "controller": {"buttons": True},
+    "ui": {"theme": "default", "font": "default", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
     "battery": {"limit": 100, "bypass": "off"},
@@ -104,6 +107,8 @@ class Controller:
         self.freqcap = cpu.FreqCap()
         self.limit_reasons = cpu.LimitReasons()
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
+        self.emit = lambda action: None  # set by main.py: sends a button action to the panel
+        self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
         self.gs_applied_pid: int | None = None
@@ -284,11 +289,32 @@ class Controller:
     def set_background(self, path: str) -> dict:
         try:
             self.settings["ui"]["bg"] = background.save(self._ui_dir(), path)
+            self.settings["ui"]["bg_pos"] = {"x": 50, "y": 50, "zoom": 100}  # new picture: start centered
             self.save()
             self.errors.pop("ui", None)
         except OSError as e:
             self.errors["ui"] = str(e)
         return self.state()
+
+    def _home(self) -> str:
+        return self.user_home or os.path.expanduser("~")
+
+    def list_pictures(self, folder: str | None) -> dict:
+        home = self._home()
+        if not folder:
+            pics = os.path.join(home, "Pictures")
+            folder = pics if os.path.isdir(pics) else home
+        try:
+            return background.list_dir(folder, home)
+        except OSError as e:
+            return {"folder": folder, "parent": os.path.dirname(folder), "home": home,
+                    "dirs": [], "files": [], "more": 0, "error": str(e)}
+
+    def picture_thumb(self, path: str) -> str | None:
+        try:
+            return background.thumb(path, self._home())
+        except OSError:
+            return None
 
     def clear_background(self) -> dict:
         background.clear(self._ui_dir())
@@ -311,7 +337,14 @@ class Controller:
         except OSError:
             return None
 
+    def apply_controller(self) -> None:
+        if self.settings["controller"]["buttons"]:
+            self.buttons.start()
+        else:
+            self.buttons.stop()
+
     def apply_all(self) -> None:
+        self.apply_controller()
         self.apply_tdp()
         self.apply_epp()
         self.apply_cpu()
@@ -851,6 +884,7 @@ class Controller:
         if unload and self.settings["cpu"].get("ccx_off") and self.ccx.on():
             self._guard("cpu", lambda: self.ccx.set(False))
         if unload:
+            self.buttons.stop()
             # Clock limits go back to the driver; they're re-applied on load.
             self._guard("cpu", self.freqcap.restore)
             self._guard("gpu", self.gpuclk.restore)
@@ -1003,6 +1037,11 @@ class Controller:
             "gamescope": self._gamescope_state(),
             "sdr_brightness": self._sdr_brightness_state(),
             "input_capture": dict(self.icap),
+            "buttons": {
+                "available": self.buttons.available()[0],
+                "unavailable": self.buttons.available()[1],
+                "listening": self.buttons.node,
+            },
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),
