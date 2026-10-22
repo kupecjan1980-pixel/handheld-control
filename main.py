@@ -67,6 +67,9 @@ class Plugin:
     async def set_cpu(self, values: dict):
         return await self._run(self.ctl.update, "cpu", values)
 
+    async def set_gpu(self, values: dict):
+        return await self._run(self.ctl.update, "gpu", values)
+
     async def set_fan(self, values: dict):
         return await self._run(self.ctl.update, "fan", values)
 
@@ -88,11 +91,17 @@ class Plugin:
     async def get_background(self):
         return await self._run(self.ctl.background_data)
 
+    async def get_font(self, name: str):
+        return await self._run(self.ctl.font_css, name)
+
     async def set_ec(self, values: dict):
         return await self._run(self.ctl.update, "ec", values)
 
     async def set_brightness(self, percent: int):
         return await self._run(self.ctl.set_brightness, percent)
+
+    async def input_capture(self):
+        return await self._run(self.ctl.run_input_capture)
 
     async def brightness_test(self):
         return await self._run(self.ctl.run_brightness_test)

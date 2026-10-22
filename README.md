@@ -9,6 +9,8 @@ stability control for:
 | TDP | firmware-attributes (`amd-dptc`) → `ryzenadj` fallback, 10–80 W, boost up to 85 W | Intel RAPL powercap (MSR and MMIO package zones), 3–40 W, PL2 up to 42 W |
 | EPP | `amd-pstate-epp` | `intel_pstate` (HWP) |
 | CPU boost | cpufreq `boost` | `intel_pstate/no_turbo` |
+| CPU clock limit | cpufreq `scaling_max_freq` (amd-pstate) | cpufreq `scaling_max_freq` (intel_pstate), clamped per P-/E-core type |
+| GPU clock | Auto / Min / Max via `power_dpm_force_performance_level`; Manual via `pp_od_clk_voltage` when the kernel exposes it | Auto / Min / Max / Manual via xe `freq0/min_freq`, `max_freq` (RPn–RP0) |
 | Preferred cores | scheduler ITMT switch (amd-pstate prefcore) | not applicable on hybrid CPUs |
 | Fan | hwmon `ayaneo_ec` → raw EC fallback (0x4A/0x4B, 0–100) | hwmon `oxp_ec` → raw EC fallback (0x4A/0x4B, 0–184) |
 | Charge limit | **emulated**: the EC can only inhibit charging, so the plugin inhibits at the limit and resumes 3% below it | native `charge_control_end_threshold` → EC 0xA3 |
@@ -17,11 +19,26 @@ stability control for:
 | GPU readout | amdgpu power, clock, VRAM and GTT | GPU power (xe hwmon energy or RAPL uncore), GPU memory from DRM fdinfo, clock |
 | Display | brightness slider | brightness slider, PSR / Panel Replay / DC toggles |
 
+**GPU clock** locks the GPU at its lowest (Min) or highest (Max) clock, or at
+a MHz value you pick (Manual). **Limit CPU clock** sets a ceiling for the CPU.
+Neither adds power: with a fixed TDP, they move the shared budget between CPU
+and GPU. Limiting the CPU clock (or turning CPU boost off) and setting the GPU
+to Max shifts it toward the GPU. On Intel, the GPU section shows what is
+holding the GPU back (power limit, temperature) when it can't reach the
+requested clock. Both go back to the driver defaults when the plugin unloads.
+
+**Controller → Record controller input** (30 s) lists every input and HID
+device and records what they send while you press the extra buttons and touch
+the touchpads. It only reads, nothing is grabbed or remapped, and saves
+`~/handheld-control-input-<desktop|game>.txt`. Controller remapping (Steam
+Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
+be built from these reports.
+
 Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
 released below 80 °C.
 
-The **About** section at the bottom shows the device, the plugin version, device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue) that tints the plugin's panel. You can also choose a **background picture** (PNG, JPG or WebP, up to 8 MB) with adjustable dimming; it's copied into the plugin's settings folder.
+The **About** section at the bottom shows the device, the plugin version, device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue) that tints the plugin's panel and a **Font** option. Font **Diablo** uses [Cinzel](https://github.com/NDISCOVER/Cinzel) (SIL Open Font License, `fonts/OFL.txt`), a free font in the style of Diablo's lettering. You can also choose a **background picture** (PNG, JPG or WebP, up to 8 MB) with adjustable dimming; it's copied into the plugin's settings folder.
 
 Nothing is changed until you enable a section. Settings persist in
 `~/homebrew/settings/Handheld Control/settings.json` and are re-applied at
@@ -40,7 +57,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.9.0/handheld-control-0.9.0.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.0/handheld-control-0.10.0.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy

@@ -132,12 +132,12 @@ def brightness_test(bl) -> tuple[str, list[str]]:
     return verdict, lines
 
 
-def write_report(home: str | None, sections: list[tuple[str, list[str]]], mode: str) -> str | None:
+def write_report(home: str | None, sections: list[tuple[str, list[str]]], mode: str, kind: str = "brightness") -> str | None:
     if not home or not os.path.isdir(home):
         return None
-    path = os.path.join(home, f"handheld-control-brightness-{mode}.txt")
+    path = os.path.join(home, f"handheld-control-{kind}-{mode}.txt")
     with open(path, "w") as f:
-        f.write(f"Handheld Control brightness report, {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Handheld Control {kind} report, {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         for title, lines in sections:
             f.write(f"\n[{title}]\n")
             f.writelines(f"{line}\n" for line in lines)

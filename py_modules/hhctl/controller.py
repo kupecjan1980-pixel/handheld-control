@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
+from . import background, backlight, fonts, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -22,13 +22,15 @@ DEFAULTS = {
     "tdp": {"enabled": False, "watts": None, "boost": True},
     "epp": {"enabled": False, "value": "balance_performance"},
     # None = leave as the system set it; True/False once the user toggles.
-    "cpu": {"boost": None, "prefcore": None, "ccx_off": None},
+    "cpu": {"boost": None, "prefcore": None, "ccx_off": None, "cap": False, "cap_mhz": None},
+    # GPU clock: "auto" leaves the driver alone; min/max/manual lock it.
+    "gpu": {"mode": "auto", "mhz": None},
     # Game Mode HDR: "steam" leaves gamescope alone; others only after confirm.
     "gamescope": {"hdr": "steam"},
     # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
     # change is a trial that must be confirmed; after that it applies directly.
     "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
-    "ui": {"theme": "default", "bg": None, "bg_dim": 55},
+    "ui": {"theme": "default", "font": "default", "bg": None, "bg_dim": 55},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None},
     "battery": {"limit": 100, "bypass": "off"},
@@ -86,6 +88,7 @@ class Controller:
         self.btest = {"running": False, "phase": None, "phases": 0, "verdict": None, "report": None, "answer": None}
         self.btest_sections: list[tuple[str, list[str]]] = []
         self.btest_mode = "desktop"
+        self.icap = {"running": False, "left": 0, "summary": None, "report": None}
         self.dev = detect()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
@@ -96,6 +99,8 @@ class Controller:
         self.boost = cpu.Boost()
         self.prefcore = cpu.Prefcore()
         self.ccx = cpu.Ccx(os.path.join(os.path.dirname(settings_path), "ccx-groups.json"))
+        self.freqcap = cpu.FreqCap()
+        self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
         self.gs_applied_pid: int | None = None
@@ -126,6 +131,11 @@ class Controller:
             self.dev.name, self.dev.vendor, self.dev.board,
             getattr(self.tdp, "name", None), getattr(self.fan, "name", None),
             getattr(self.rgb, "name", None), self.bat.limit_mode(),
+        )
+        log.info(
+            "CPU: driver=%s clock range=%s MHz cap=%s; GPU: driver=%s clock range=%s MHz manual=%s (%s)",
+            self.epp.driver, self.freqcap.range_mhz(), self.freqcap.available(),
+            self.gpu.driver, self.gpuclk.hw_range(), self.gpuclk.manual_ok(), self.gpuclk.available(),
         )
 
     def _scan(self) -> None:
@@ -269,6 +279,13 @@ class Controller:
         self.save()
         return self.state()
 
+    def font_css(self, name: str) -> str | None:
+        try:
+            return fonts.css(name)
+        except OSError:
+            log.exception("font %s missing", name)
+            return None
+
     def background_data(self) -> str | None:
         if not self.settings["ui"]["bg"]:
             return None
@@ -281,6 +298,7 @@ class Controller:
         self.apply_tdp()
         self.apply_epp()
         self.apply_cpu()
+        self.apply_gpu()
         self.apply_fan()
         self.apply_battery()
         self.apply_rgb()
@@ -313,6 +331,18 @@ class Controller:
         for key, ctl in (("boost", self.boost), ("prefcore", self.prefcore)):
             if s[key] is not None and ctl.available()[0]:
                 self._guard("cpu", lambda: ctl.set(bool(s[key])))
+        # After boost and CCX: toggling either can reset the policies' limits.
+        if self.freqcap.available()[0]:
+            if s.get("cap") and s.get("cap_mhz"):
+                self._guard("cpu", lambda: self.freqcap.apply(int(s["cap_mhz"])))
+            else:
+                self._guard("cpu", self.freqcap.restore)
+
+    def apply_gpu(self) -> None:
+        if not self.gpuclk.available()[0]:
+            return
+        s = self.settings["gpu"]
+        self._guard("gpu", lambda: self.gpuclk.apply(s["mode"], s.get("mhz")))
 
     def apply_fan(self) -> None:
         if not self.fan:
@@ -603,6 +633,33 @@ class Controller:
         threading.Thread(target=run, daemon=True).start()
         return self.state()
 
+    def run_input_capture(self, seconds: int = 30) -> dict:
+        if self.icap["running"]:
+            return self.state()
+        self.icap = {"running": True, "left": seconds, "summary": None, "report": None}
+        mode = "game" if diag.game_mode() else "desktop"
+
+        def run():
+            try:
+                devs = inputcap.devices()
+                lines, buttons = inputcap.record(seconds, lambda left: self.icap.update(left=left))
+                summary = (
+                    "Button presses seen on " + ", ".join(f"{d} ({n})" for d, n in sorted(buttons.items()))
+                    if buttons else "No button presses seen"
+                )
+                self.icap["summary"] = summary
+                self.icap["report"] = diag.write_report(
+                    self.user_home, [("summary", [summary]), ("events", lines), ("devices", devs)], mode, "input"
+                )
+            except Exception as e:
+                log.exception("input capture failed")
+                self.icap["summary"] = f"Recording failed: {e}"
+            finally:
+                self.icap.update(running=False, left=0)
+
+        threading.Thread(target=run, daemon=True).start()
+        return self.state()
+
     def answer_brightness_test(self, answer: str) -> dict:
         """answer: which passes visibly changed the screen: first/second/both/neither."""
         if self.btest_sections and self.btest["answer"] is None:
@@ -747,6 +804,10 @@ class Controller:
                 log.info("EPP changed behind our back, re-applying %s", e["value"])
                 self.apply_epp()
             self.apply_cpu()
+            g = self.settings["gpu"]
+            if self.gpuclk.drifted(g["mode"], g.get("mhz")):
+                log.info("GPU clocks changed behind our back, re-applying %s", g["mode"])
+                self.apply_gpu()
         self.tick_fan()
         b = self.settings["battery"]
         self._guard("battery", lambda: self.bat.tick(int(b["limit"]), b["bypass"]))
@@ -755,6 +816,10 @@ class Controller:
         """Hand control back to firmware (unload, exit, EC switch)."""
         if unload and self.settings["cpu"].get("ccx_off") and self.ccx.on():
             self._guard("cpu", lambda: self.ccx.set(False))
+        if unload:
+            # Clock limits go back to the driver; they're re-applied on load.
+            self._guard("cpu", self.freqcap.restore)
+            self._guard("gpu", self.gpuclk.restore)
         if self.fan and self.settings["fan"]["mode"] != "auto":
             try:
                 self.fan.set_auto()
@@ -767,6 +832,26 @@ class Controller:
             self._guard("battery", lambda: self.bat.set_behaviour("auto"))
 
     # --- state for the UI -------------------------------------------------
+
+    def _cap_state(self) -> dict:
+        ok, why = self.freqcap.available()
+        lo, hi = self.freqcap.range_mhz() if ok else (0, 0)
+        return {
+            "available": ok, "unavailable": why, "min": lo, "max": hi,
+            "limits": self.freqcap.limits_mhz() if ok else [], "avg": self.freqcap.avg_mhz() if ok else None,
+        }
+
+    def _gpu_clock_state(self) -> dict:
+        ok, why = self.gpuclk.available()
+        lo, hi = self.gpuclk.hw_range() if ok else (0, 0)
+        manual = ok and self.gpuclk.manual_ok() and hi > lo
+        cur_lo, cur_hi = self.gpuclk.current()
+        return {
+            "available": ok, "unavailable": why,
+            "modes": [m for m in gpu.GpuClock.MODES if m != "manual" or manual],
+            "min": lo, "max": hi, "cur_min": cur_lo, "cur_max": cur_hi,
+            "throttle": self.gpuclk.throttle() if ok else [],
+        }
 
     def state(self) -> dict:
         d = self.dev
@@ -824,13 +909,15 @@ class Controller:
                 for name, ctl in (("boost", self.boost), ("prefcore", self.prefcore), ("ccx", self.ccx))
                 for ok, why in [ctl.available()]
             }
-            | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()},
-            "gpu": self.gpu.state(),
+            | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()}
+            | {"cap": self._cap_state()},
+            "gpu": self.gpu.state() | {"clock": self._gpu_clock_state()},
             "display": self._display_state(),
             "version": self.version,
             "home": self.user_home,
             "gamescope": self._gamescope_state(),
             "sdr_brightness": self._sdr_brightness_state(),
+            "input_capture": dict(self.icap),
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),

@@ -11,7 +11,7 @@ npm run build
 rm -rf out && mkdir -p "out/$NAME/dist"
 cp plugin.json package.json main.py README.md LICENSE "out/$NAME/"
 cp dist/index.js "out/$NAME/dist/"
-cp -r py_modules "out/$NAME/"
+cp -r py_modules fonts "out/$NAME/"
 find "out/$NAME" -name __pycache__ -prune -exec rm -rf {} +
 (cd out && zip -qr "handheld-control-$VERSION.zip" "$NAME")
 echo "out/handheld-control-$VERSION.zip"

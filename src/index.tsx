@@ -16,14 +16,23 @@ import { FaMicrochip } from "react-icons/fa";
 type Settings = {
   tdp: { enabled: boolean; watts: number | null; boost: boolean };
   epp: { enabled: boolean; value: string };
-  cpu: { boost: boolean | null; prefcore: boolean | null; ccx_off: boolean | null };
+  cpu: {
+    boost: boolean | null;
+    prefcore: boolean | null;
+    ccx_off: boolean | null;
+    cap: boolean;
+    cap_mhz: number | null;
+  };
+  gpu: { mode: GpuMode; mhz: number | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
   rgb: { enabled: boolean; mode: string; hue: number; sat: number; bright: number; effect: string | null };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
-  ui: { theme: string; bg: string | null; bg_dim: number };
+  ui: { theme: string; font: string; bg: string | null; bg_dim: number };
   sdr_brightness: { enabled: boolean; nits: number };
 };
+
+type GpuMode = "auto" | "min" | "max" | "manual";
 
 type State = {
   device: { name: string; board: string; vendor: string; notes: string[] };
@@ -55,6 +64,7 @@ type State = {
   ec: { supported: boolean; lockdown: string | null };
   version: string | null;
   home: string | null;
+  input_capture: { running: boolean; left: number; summary: string | null; report: string | null };
   gamescope: {
     running: boolean;
     modes: string[];
@@ -84,6 +94,14 @@ type State = {
   cpu: Record<"boost" | "prefcore" | "ccx", { available: boolean; unavailable: string | null; on: boolean | null }> & {
     ccx_keep: number;
     ccx_total: number;
+    cap: {
+      available: boolean;
+      unavailable: string | null;
+      min: number;
+      max: number;
+      limits: number[];
+      avg: number | null;
+    };
   };
   gpu: {
     driver: string | null;
@@ -93,6 +111,16 @@ type State = {
     vram_mb: number | null;
     gtt_mb: number | null;
     mem_mb: number | null;
+    clock: {
+      available: boolean;
+      unavailable: string | null;
+      modes: GpuMode[];
+      min: number;
+      max: number;
+      cur_min: number | null;
+      cur_max: number | null;
+      throttle: string[];
+    };
   };
   display: {
     brightness: number | null;
@@ -132,6 +160,7 @@ const confirmSdrBrightness = callable<[boolean], State>("confirm_sdr_brightness"
 const setBackground = callable<[string], State>("set_background");
 const clearBackground = callable<[], State>("clear_background");
 const getBackground = callable<[], string | null>("get_background");
+const getFont = callable<[string], string | null>("get_font");
 const confirmGamescopeHdr = callable<[boolean], State>("confirm_gamescope_hdr");
 
 const HDR_MODES: Record<string, string> = {
@@ -140,11 +169,13 @@ const HDR_MODES: Record<string, string> = {
   off: "Off",
 };
 const brightnessTest = callable<[], State>("brightness_test");
+const inputCapture = callable<[], State>("input_capture");
 const brightnessTestAnswer = callable<[string], State>("brightness_test_answer");
 const setters: Record<Section, (v: object) => Promise<State>> = {
   tdp: callable<[object], State>("set_tdp"),
   epp: callable<[object], State>("set_epp"),
   cpu: callable<[object], State>("set_cpu"),
+  gpu: callable<[object], State>("set_gpu"),
   ui: callable<[object], State>("set_ui"),
   sdr_brightness: callable<[object], State>("set_sdr_brightness"),
   fan: callable<[object], State>("set_fan"),
@@ -165,6 +196,26 @@ const EPP_LABELS: Record<string, string> = {
   balance_power: "Balance power",
   power: "Power saver",
 };
+
+const GPU_MODES: Record<GpuMode, { label: string; description: string }> = {
+  auto: { label: "Auto", description: "The driver picks the clock" },
+  min: { label: "Min", description: "Locked at the lowest clock" },
+  max: { label: "Max", description: "Locked at the highest clock" },
+  manual: { label: "Manual", description: "Locked at the clock you set" },
+};
+
+const THROTTLE_LABELS: Record<string, string> = {
+  pl1: "sustained power limit",
+  pl2: "boost power limit",
+  pl4: "peak current limit",
+  thermal: "temperature",
+  prochot: "PROCHOT",
+  ratl: "running average temperature",
+  vr_thermalert: "VR temperature",
+  vr_tdc: "VR current",
+};
+
+const ghz = (mhz: number) => `${(mhz / 1000).toFixed(1)} GHz`;
 
 const DISPLAY_TOGGLES: Record<string, { label: string; description: string }> = {
   psr: {
@@ -192,6 +243,19 @@ const THEMES: Record<string, { label: string; bg?: string; title?: string }> = {
   },
 };
 
+// "diablo" is Cinzel, a free stand-in for Diablo's (commercial) Exocet lettering.
+const FONTS: Record<string, { label: string; family?: string }> = {
+  default: { label: "Default" },
+  diablo: { label: "Diablo", family: "HHCinzel" },
+};
+
+const fontCss = (name: string, faces: string | null) => {
+  const family = FONTS[name]?.family;
+  if (!family || !faces) return "";
+  return `${faces}
+    .hhctl-root, .hhctl-root * { font-family: '${family}', serif !important; }`;
+};
+
 const themeCss = (name: string, hasImage: boolean) => {
   const t = THEMES[name];
   if (!t?.bg) return "";
@@ -212,8 +276,6 @@ const imageStyle = (url: string, dimPct: number) => {
     paddingBottom: "4px",
   };
 };
-
-const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 
 const titleCase = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -263,6 +325,17 @@ function Content() {
     getBackground().then(setBgUrl);
   }, [bgName]);
 
+  // Like the picture, the font is fetched once per change.
+  const fontName = state?.settings.ui?.font ?? "default";
+  const [fontFaces, setFontFaces] = useState<string | null>(null);
+  useEffect(() => {
+    if (!FONTS[fontName]?.family) {
+      setFontFaces(null);
+      return;
+    }
+    getFont(fontName).then(setFontFaces);
+  }, [fontName]);
+
   // Make the trial's Keep prompt hard to miss, even outside this panel.
   const sbPending = !!state?.sdr_brightness.pending;
   useEffect(() => {
@@ -308,15 +381,8 @@ function Content() {
 
   const { tdp, fan, battery, rgb, gpu, display } = state;
   const e = draft.epp;
-  const perf = [
-    gpu.pkg_w != null ? `Package ${gpu.pkg_w} W` : null,
-    gpu.gpu_w != null ? `GPU ${gpu.gpu_w} W` : null,
-    gpu.vram_mb != null ? `VRAM ${gb(gpu.vram_mb)}` : null,
-    gpu.gtt_mb != null ? `GTT ${gb(gpu.gtt_mb)}` : null,
-    gpu.mem_mb != null ? `GPU mem ${gb(gpu.mem_mb)}` : null,
-    gpu.freq_mhz != null ? `${gpu.freq_mhz} MHz` : null,
-  ].filter(Boolean);
   const t = draft.tdp;
+  const g = draft.gpu;
   const f = draft.fan;
   const b = draft.battery;
   const r = draft.rgb;
@@ -326,12 +392,8 @@ function Content() {
   return (
     <div className="hhctl-root" style={bgUrl ? imageStyle(bgUrl, draft.ui?.bg_dim ?? 55) : undefined}>
       <style>{themeCss(theme, !!bgUrl)}</style>
+      <style>{fontCss(fontName, fontFaces)}</style>
       <PanelSection title="TDP">
-        {perf.length > 0 && (
-          <PanelSectionRow>
-            <Field label="Now" description={perf.join(" · ")} />
-          </PanelSectionRow>
-        )}
         {!tdp.backend ? (
           <Unavailable why="No TDP interface found (firmware-attributes, RAPL or ryzenadj)." />
         ) : (
@@ -432,8 +494,82 @@ function Content() {
             />
           </PanelSectionRow>
         )}
+        {state.cpu.cap.available && (
+          <>
+            <PanelSectionRow>
+              <ToggleField
+                label="Limit CPU clock"
+                description={`A ceiling, not a lock: leaves more of the TDP for the GPU${
+                  state.cpu.cap.avg != null ? ` · now avg ${ghz(state.cpu.cap.avg)}` : ""
+                }`}
+                checked={draft.cpu.cap}
+                onChange={(v) =>
+                  change("cpu", { cap: v, cap_mhz: draft.cpu.cap_mhz ?? state.cpu.cap.max }, 0)
+                }
+              />
+            </PanelSectionRow>
+            {draft.cpu.cap && (
+              <PanelSectionRow>
+                <SliderField
+                  label="Max CPU clock"
+                  description={
+                    state.cpu.cap.limits.length > 1
+                      ? `Each core type stays within its own range · now ${state.cpu.cap.limits.map(ghz).join(" / ")}`
+                      : undefined
+                  }
+                  value={draft.cpu.cap_mhz ?? state.cpu.cap.max}
+                  min={state.cpu.cap.min}
+                  max={state.cpu.cap.max}
+                  step={100}
+                  showValue
+                  valueSuffix=" MHz"
+                  onChange={(v) => change("cpu", { cap_mhz: v })}
+                />
+              </PanelSectionRow>
+            )}
+          </>
+        )}
         <ErrorRow msg={state.errors.cpu} />
       </PanelSection>
+
+      {gpu.clock.available && (
+        <PanelSection title="GPU clock">
+          <PanelSectionRow>
+            <DropdownItem
+              label="Mode"
+              description={`${GPU_MODES[g.mode]?.description ?? ""} · ${gpu.clock.min}–${gpu.clock.max} MHz${
+                gpu.freq_mhz != null ? ` · now ${gpu.freq_mhz} MHz` : ""
+              }`}
+              rgOptions={gpu.clock.modes.map((m) => ({ data: m, label: GPU_MODES[m].label }))}
+              selectedOption={g.mode}
+              onChange={(o) => change("gpu", { mode: o.data, mhz: g.mhz ?? gpu.clock.max }, 0)}
+            />
+          </PanelSectionRow>
+          {g.mode === "manual" && (
+            <PanelSectionRow>
+              <SliderField
+                label="GPU clock"
+                value={g.mhz ?? gpu.clock.max}
+                min={gpu.clock.min}
+                max={gpu.clock.max}
+                step={50}
+                showValue
+                valueSuffix=" MHz"
+                onChange={(v) => change("gpu", { mhz: v })}
+              />
+            </PanelSectionRow>
+          )}
+          {gpu.clock.throttle.length > 0 && (
+            <PanelSectionRow>
+              <Field
+                label="Held back by"
+                description={`${gpu.clock.throttle.map((r) => THROTTLE_LABELS[r] ?? r).join(", ")}. Raise the TDP or limit the CPU clock to give the GPU more power.`}
+              />
+            </PanelSectionRow>
+          )}
+          <ErrorRow msg={state.errors.gpu} />
+        </PanelSection>
+      )}
 
       <PanelSection title="Fan">
         {!fan.backend ? (
@@ -877,6 +1013,39 @@ function Content() {
         </PanelSection>
       )}
 
+      <PanelSection title="Controller">
+        <PanelSectionRow>
+          <Field
+            label="Remapping is coming"
+            description="First, record what the extra buttons and touchpads send. Start recording, close this menu, then press each extra button a few times, one after another, and swipe and click each touchpad. Recording only reads; nothing is remapped yet."
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            disabled={state.input_capture.running}
+            onClick={async () => setState(await inputCapture())}
+          >
+            {state.input_capture.running
+              ? `Recording… ${state.input_capture.left} s left`
+              : "Record controller input (30 s)"}
+          </ButtonItem>
+        </PanelSectionRow>
+        {state.input_capture.summary && (
+          <PanelSectionRow>
+            <Field
+              label="Result"
+              description={[
+                state.input_capture.summary,
+                state.input_capture.report ? `Report: ${state.input_capture.report}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            />
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+
       <PanelSection title="About">
         <PanelSectionRow>
           <DropdownItem
@@ -884,6 +1053,15 @@ function Content() {
             rgOptions={Object.entries(THEMES).map(([data, t]) => ({ data, label: t.label }))}
             selectedOption={theme}
             onChange={(o) => change("ui", { theme: o.data }, 0)}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <DropdownItem
+            label="Font"
+            description={draft.ui?.font === "diablo" ? "Cinzel, a free font in the style of Diablo's lettering" : undefined}
+            rgOptions={Object.entries(FONTS).map(([data, f]) => ({ data, label: f.label }))}
+            selectedOption={draft.ui?.font ?? "default"}
+            onChange={(o) => change("ui", { font: o.data }, 0)}
           />
         </PanelSectionRow>
         <PanelSectionRow>

@@ -179,3 +179,76 @@ class Ccx:
 
     def total(self) -> int:
         return sum(len(g) for g in self.groups)
+
+
+class FreqCap:
+    """Cap the CPU clock through each cpufreq policy's scaling_max_freq.
+
+    The cap is one MHz value; each policy gets it clamped to its own hardware
+    range, so on hybrid Intel CPUs the P-cores and E-cores each stay within
+    their limits. It's a ceiling: the CPU still drops lower when idle.
+    "Off" puts every policy back to its hardware maximum.
+    """
+
+    def __init__(self):
+        self.changed = False
+
+    @staticmethod
+    def _policies() -> list[str]:
+        # Policies of offline CPUs stay listed but take no writes.
+        return [
+            p for p in sorted(glob.glob(f"{CPUFREQ}/policy[0-9]*"))
+            if (sysfs.read(f"{p}/affected_cpus") or "").strip()
+        ]
+
+    def available(self) -> tuple[bool, str | None]:
+        pols = self._policies()
+        if not pols:
+            return False, "no cpufreq policies"
+        if not all(os.path.exists(f"{p}/scaling_max_freq") for p in pols):
+            return False, "the cpufreq driver has no frequency limits"
+        return True, None
+
+    def range_mhz(self) -> tuple[int, int]:
+        """(lowest cap valid on every core, highest clock of any core)."""
+        lows, highs = [], []
+        for p in self._policies():
+            lo = sysfs.read_int(f"{p}/cpuinfo_min_freq")
+            hi = sysfs.read_int(f"{p}/cpuinfo_max_freq")
+            if lo and hi:
+                lows.append(lo)
+                highs.append(hi)
+        if not highs:
+            return 0, 0
+        return max(lows) // 1000, max(highs) // 1000
+
+    def limits_mhz(self) -> list[int]:
+        """Current scaling_max_freq of each distinct core type, high first."""
+        vals = {sysfs.read_int(f"{p}/scaling_max_freq") for p in self._policies()}
+        return sorted((v // 1000 for v in vals if v), reverse=True)
+
+    def avg_mhz(self) -> int | None:
+        vals = [sysfs.read_int(f"{p}/scaling_cur_freq") for p in self._policies()]
+        vals = [v for v in vals if v]
+        return sum(vals) // len(vals) // 1000 if vals else None
+
+    def _write_all(self, khz_for) -> None:
+        for p in self._policies():
+            want = khz_for(p)
+            if want and sysfs.read_int(f"{p}/scaling_max_freq") != want:
+                sysfs.write(f"{p}/scaling_max_freq", want)
+
+    def apply(self, mhz: int) -> None:
+        def khz(p):
+            lo = sysfs.read_int(f"{p}/cpuinfo_min_freq") or 0
+            hi = sysfs.read_int(f"{p}/cpuinfo_max_freq") or 0
+            return max(lo, min(hi, int(mhz) * 1000)) if hi else None
+
+        self._write_all(khz)
+        self.changed = True
+
+    def restore(self) -> None:
+        if not self.changed:
+            return
+        self._write_all(lambda p: sysfs.read_int(f"{p}/cpuinfo_max_freq"))
+        self.changed = False

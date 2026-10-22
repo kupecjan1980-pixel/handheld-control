@@ -12,6 +12,7 @@ plugin reads the same data itself:
 
 import glob
 import os
+import re
 import time
 
 from . import sysfs
@@ -171,3 +172,181 @@ class Gpu:
             if out[k] is not None:
                 out[k] = round(out[k], 1)
         return out
+
+
+def _intel_freq_dir(dev: str, driver: str) -> dict[str, str] | None:
+    """Map min/max/rpn/rp0 to the clock files of the render GT."""
+    if driver == "xe":
+        d = f"{dev}/tile0/gt0/freq0"
+        if os.path.exists(f"{d}/min_freq"):
+            return {k: f"{d}/{k}_freq" for k in ("min", "max", "rpn", "rp0", "rpe")} | {"throttle": f"{d}/throttle"}
+    elif driver == "i915":
+        for card in sorted(glob.glob(f"{dev}/drm/card[0-9]*")):
+            if os.path.exists(f"{card}/gt_min_freq_mhz"):
+                return {
+                    "min": f"{card}/gt_min_freq_mhz", "max": f"{card}/gt_max_freq_mhz",
+                    "rpn": f"{card}/gt_RPn_freq_mhz", "rp0": f"{card}/gt_RP0_freq_mhz",
+                    "rpe": f"{card}/gt_RP1_freq_mhz", "throttle": f"{card}/gt/gt0/throttle_reason",
+                }
+    return None
+
+
+def parse_dpm_levels(text: str) -> list[int]:
+    """'0: 600Mhz\\n1: 2900Mhz *' -> [600, 2900]"""
+    return [int(m) for m in re.findall(r"^\s*\d+:\s*(\d+)\s*mhz", text or "", re.I | re.M)]
+
+
+class GpuClock:
+    """Lock the GPU clock: auto / min / max / manual (MHz).
+
+    - Intel (xe, i915): the render GT's min/max frequency files, bounded by
+      RPn (lowest) and RP0 (highest). A lock writes min = max.
+    - AMD: power_dpm_force_performance_level low / high, and for manual the
+      soft clock range in pp_od_clk_voltage ("s 0 X", "s 1 X", "c").
+
+    Auto restores what the driver had when the plugin started, so nothing is
+    written until the user picks another mode.
+    """
+
+    MODES = ("auto", "min", "max", "manual")
+
+    def __init__(self, dev: str | None, driver: str | None):
+        self.dev, self.driver = dev, driver
+        self.files = _intel_freq_dir(dev, driver) if dev and driver in ("xe", "i915") else None
+        self.level = f"{dev}/power_dpm_force_performance_level" if driver == "amdgpu" else None
+        self.od = f"{dev}/pp_od_clk_voltage" if driver == "amdgpu" else None
+        self.changed = False
+        self.orig: tuple[int, int] | str | None = None
+        if self.files:
+            lo, hi = sysfs.read_int(self.files["min"]), sysfs.read_int(self.files["max"])
+            rpn, rp0 = self.hw_range()
+            # min == max means a lock left over from a crash: use the hardware range.
+            self.orig = (lo, hi) if lo is not None and hi is not None and lo < hi else (rpn, rp0)
+        elif self.level and os.path.exists(self.level):
+            cur = sysfs.read(self.level)
+            self.orig = cur if cur and cur != "manual" else "auto"
+
+    def available(self) -> tuple[bool, str | None]:
+        if not self.driver:
+            return False, "no supported GPU found"
+        if self.files:
+            return True, None
+        if self.level and os.path.exists(self.level):
+            return True, None
+        return False, f"{self.driver} exposes no clock controls"
+
+    def manual_ok(self) -> bool:
+        if self.files:
+            return True
+        return bool(self.od and os.path.exists(self.od) and self.hw_range()[1])
+
+    def hw_range(self) -> tuple[int, int]:
+        if self.files:
+            return sysfs.read_int(self.files["rpn"], 0), sysfs.read_int(self.files["rp0"], 0)
+        if self.dev:
+            od = sysfs.read(self.od) if self.od else None
+            for line in (od or "").splitlines():
+                # OD_RANGE "SCLK:     600Mhz       2900Mhz"
+                if line.strip().upper().startswith("SCLK:"):
+                    nums = [int(n) for n in re.findall(r"(\d+)\s*mhz", line, re.I)]
+                    if len(nums) >= 2:
+                        return min(nums), max(nums)
+            levels = parse_dpm_levels(sysfs.read(f"{self.dev}/pp_dpm_sclk") or "")
+            if levels:
+                return min(levels), max(levels)
+        return 0, 0
+
+    def current(self) -> tuple[int | None, int | None]:
+        """The min/max clock the GPU is currently allowed (Intel), or None."""
+        if self.files:
+            return sysfs.read_int(self.files["min"]), sysfs.read_int(self.files["max"])
+        return None, None
+
+    def throttle(self) -> list[str]:
+        """Intel: why the GPU is held below the requested clock right now."""
+        if not self.files:
+            return []
+        t = self.files["throttle"]
+        if self.driver == "xe":
+            if sysfs.read(f"{t}/status") != "1":
+                return []
+            return sorted(
+                os.path.basename(p)[len("reason_"):]
+                for p in glob.glob(f"{t}/reason_*")
+                if sysfs.read(p) == "1"
+            ) or ["unknown"]
+        val = sysfs.read_int(t)
+        return ["active"] if val else []
+
+    def _target(self, mode: str, mhz: int | None) -> tuple[int, int]:
+        lo, hi = self.hw_range()
+        if mode == "min":
+            return lo, lo
+        if mode == "max":
+            return hi, hi
+        v = max(lo, min(hi, int(mhz or hi)))
+        return v, v
+
+    def _intel_set(self, lo: int, hi: int) -> None:
+        f = self.files
+        cur_lo, cur_hi = self.current()
+        if cur_lo == lo and cur_hi == hi:
+            return
+        # Keep min <= max at every step, or the driver rejects the write.
+        if cur_hi is not None and lo > cur_hi:
+            sysfs.write(f["max"], hi)
+            sysfs.write(f["min"], lo)
+        else:
+            sysfs.write(f["min"], lo)
+            sysfs.write(f["max"], hi)
+
+    def _amd_reset_od(self) -> None:
+        if sysfs.read(self.level) == "manual" and self.od and os.path.exists(self.od):
+            try:
+                sysfs.write(self.od, "r")
+                sysfs.write(self.od, "c")
+            except OSError:
+                pass
+
+    def apply(self, mode: str, mhz: int | None) -> None:
+        if mode == "auto":
+            self.restore()
+            return
+        if mode == "manual" and not self.manual_ok():
+            raise OSError("manual GPU clocks are not supported by this driver")
+        if self.files:
+            self._intel_set(*self._target(mode, mhz))
+        else:
+            want = {"min": "low", "max": "high", "manual": "manual"}[mode]
+            if want != "manual":
+                if sysfs.read(self.level) != want:
+                    self._amd_reset_od()
+                    sysfs.write(self.level, want)
+            else:
+                v, _ = self._target(mode, mhz)
+                if sysfs.read(self.level) != "manual":
+                    sysfs.write(self.level, "manual")
+                sysfs.write(self.od, f"s 0 {v}")
+                sysfs.write(self.od, f"s 1 {v}")
+                sysfs.write(self.od, "c")
+        self.changed = True
+
+    def drifted(self, mode: str, mhz: int | None) -> bool:
+        """True if something else changed the clocks we set."""
+        if mode == "auto" or not self.changed:
+            return False
+        if self.files:
+            return self.current() != self._target(mode, mhz)
+        want = {"min": "low", "max": "high", "manual": "manual"}[mode]
+        return sysfs.read(self.level) != want
+
+    def restore(self) -> None:
+        if not self.changed:
+            return
+        if self.files and isinstance(self.orig, tuple):
+            self._intel_set(*self.orig)
+        elif self.level and isinstance(self.orig, str):
+            self._amd_reset_od()
+            if sysfs.read(self.level) != self.orig:
+                sysfs.write(self.level, self.orig)
+        self.changed = False
