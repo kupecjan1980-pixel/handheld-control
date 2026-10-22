@@ -247,11 +247,11 @@ const reasons = (xs: string[]) => xs.map((r) => THROTTLE_LABELS[r] ?? r).join(",
 const READOUT_CSS = `
   .hhctl-root { box-sizing: border-box; }
   .hhctl-fit { display: flex; flex-direction: column; }
-  .hhctl-header { flex: none; padding: 2px 16px 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
-  .hhctl-sticky .hhctl-header {
+  .hhctl-header {
+    flex: none; padding: 2px 16px 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     position: sticky; top: 0; z-index: 10;
-    background: rgba(14, 20, 27, 0.94); backdrop-filter: blur(6px);
   }
+  .hhctl-sticky .hhctl-header { background: rgba(14, 20, 27, 0.94); backdrop-filter: blur(6px); }
   .hhctl-body { flex: 1; min-height: 0; overflow-y: auto; }
   .hhctl-body::-webkit-scrollbar { display: none; }
   .hhctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; }
@@ -287,33 +287,34 @@ const DISPLAY_TOGGLES: Record<string, { label: string; description: string }> = 
   },
 };
 
-// Purely cosmetic: tints the plugin's own panel and its section titles.
-// accent colors the plugin's toggles (when on) and sliders (filled part).
-const THEMES: Record<string, { label: string; bg?: string; title?: string; accent?: string }> = {
+// Purely cosmetic: tints the plugin's own panel, its titles and labels.
+// filter turns Steam's blue (#1a9fff) on toggles and sliders into the theme
+// color; fitted per theme (hue-rotate alone gives orange for red). A filter
+// works whatever the controls look like inside, unlike recoloring their parts.
+const THEMES: Record<string, { label: string; bg?: string; title?: string; filter?: string }> = {
   default: { label: "Default (black)" },
   red: {
     label: "Red",
     bg: "linear-gradient(180deg, rgba(170, 25, 35, 0.40) 0%, rgba(70, 10, 15, 0.25) 100%)",
     title: "#ff7a7a",
-    accent: "#e5383b",
+    filter: "hue-rotate(150deg) saturate(1.6) brightness(0.94)",
   },
   blue: {
     label: "Blue",
     bg: "linear-gradient(180deg, rgba(25, 80, 190, 0.40) 0%, rgba(10, 30, 80, 0.25) 100%)",
     title: "#7ab4ff",
-    accent: "#3d8bff",
   },
   green: {
     label: "Green",
     bg: "linear-gradient(180deg, rgba(25, 140, 60, 0.40) 0%, rgba(10, 60, 25, 0.25) 100%)",
     title: "#7ee08a",
-    accent: "#36b44f",
+    filter: "hue-rotate(-84deg) saturate(0.7) brightness(1.06)",
   },
   gold: {
     label: "Gold",
     bg: "linear-gradient(180deg, rgba(185, 140, 20, 0.40) 0%, rgba(80, 60, 10, 0.25) 100%)",
     title: "#ffd166",
-    accent: "#e0a920",
+    filter: "hue-rotate(-156deg) saturate(0.8) brightness(1.24)",
   },
 };
 
@@ -339,20 +340,19 @@ const themeCss = (name: string, hasImage: boolean) => {
   // With a background picture, keep the picture and only color the titles.
   const dlg = gamepadDialogClasses;
   const sl = gamepadSliderClasses;
-  // Steam fills a slider's track up to --normalized-slider-value, set inline on
-  // the slider; the rule only applies where that variable exists, so a Steam
-  // layout change falls back to the default blue instead of an empty track.
-  const fill = "calc(var(--normalized-slider-value) * 100%)";
+  // Steam's module class names look like gamepaddialog_Toggle_9Ql-o; the
+  // [class*=] forms still match if a class map lookup comes back empty.
+  const labels = `.hhctl-root .${dlg.FieldLabel}, .hhctl-root [class*="gamepaddialog_FieldLabel_"]`;
+  const controls = [
+    `.hhctl-root .${dlg.Toggle}`,
+    `.hhctl-root [class*="gamepaddialog_Toggle_"]`,
+    `.hhctl-root .${sl.SliderControl}`,
+    `.hhctl-root [class*="gamepadslider_SliderControl_"]`,
+  ].join(", ");
   return `
     ${hasImage ? "" : `.hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }`}
-    .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel { color: ${t.title}; }
-    ${t.accent ? `
-    .hhctl-root .${dlg.Toggle}.${dlg.On} .${dlg.ToggleRail} { background: ${t.accent} !important; }
-    .hhctl-root [style*="--normalized-slider-value"] .${sl.SliderTrack},
-    .hhctl-root .${sl.SliderTrack}[style*="--normalized-slider-value"] {
-      background: linear-gradient(to right, ${t.accent} 0%, ${t.accent} ${fill},
-        rgba(255, 255, 255, 0.18) ${fill}, rgba(255, 255, 255, 0.18) 100%) !important;
-    }` : ""}
+    .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel, ${labels} { color: ${t.title}; }
+    ${t.filter ? `${controls} { filter: ${t.filter}; }` : ""}
   `;
 };
 
@@ -450,7 +450,17 @@ function Content() {
     const fit = () => {
       const top = root.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
       const pad = parseFloat(getComputedStyle(sc).paddingBottom) || 0;
-      setFitHeight(Math.max(240, Math.floor(sc.clientHeight - top - pad)));
+      const h = Math.max(240, Math.floor(sc.clientHeight - top - pad));
+      // Switch layouts before measuring: unfitted, the settings overflow the panel.
+      root.classList.replace("hhctl-sticky", "hhctl-fit");
+      root.style.height = `${h}px`;
+      // Anything after the panel (Decky's own padding or spacers) still makes
+      // the outer area scroll: take that off too, so only the settings scroll.
+      const extra = sc.scrollHeight - sc.clientHeight;
+      const fitted = extra > 0 ? Math.max(240, h - extra) : h;
+      root.style.height = `${fitted}px`;
+      sc.scrollTop = 0;
+      setFitHeight(fitted);
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -1328,10 +1338,10 @@ function TitleView() {
   return (
     <div
       className={staticClasses.Title}
-      style={{ display: "flex", flexDirection: "row", alignItems: "baseline", gap: "8px", whiteSpace: "nowrap" }}
+      style={{ display: "flex", flexDirection: "row", alignItems: "baseline", gap: "6px", whiteSpace: "nowrap", minWidth: 0 }}
     >
-      <span>Handheld Control</span>
-      {version && <span style={{ fontSize: "0.65em", opacity: 0.6 }}>v{version}</span>}
+      <span style={{ fontSize: "0.8em", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>Handheld Control</span>
+      {version && <span style={{ fontSize: "0.55em", opacity: 0.6, flexShrink: 0 }}>v{version}</span>}
     </div>
   );
 }
