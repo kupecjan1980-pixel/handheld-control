@@ -1248,7 +1248,7 @@ function Content() {
             ) : (
               <>
                 <PanelSectionRow>
-                  <Field label={<span className="hhctl-headlabel">Fan status</span>}>
+                  <Field label={<span className="hhctl-headlabel">FAN</span>}>
                     <span className="hhctl-inline">
                       {[
                         fan.temp != null ? `${Math.round(fan.temp)} °C` : null,
@@ -1309,7 +1309,7 @@ function Content() {
 
           <PanelSection>
             <PanelSectionRow>
-              <Field label={<span className="hhctl-headlabel">Battery status</span>}>
+              <Field label={<span className="hhctl-headlabel">BATT</span>}>
                 <span className="hhctl-inline">
                   {[
                     battery.capacity != null ? `${battery.capacity}%` : null,
