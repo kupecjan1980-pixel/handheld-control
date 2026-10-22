@@ -871,6 +871,7 @@ class Controller:
         return {
             "cpu_mhz": self.freqcap.avg_mhz() if ok else None,
             "cpu_peak_mhz": self.freqcap.peak_mhz() if ok else None,
+            "cpu_temp_c": round(t) if (t := fan.cpu_temp()) is not None else None,
             "ram_used_mb": used, "ram_total_mb": total,
             "tdp_w": tdp_now,
             "limits": self._limits(g, tdp_now),

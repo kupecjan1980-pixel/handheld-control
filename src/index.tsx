@@ -10,7 +10,7 @@ import {
   ToggleField,
   staticClasses,
 } from "@decky/ui";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { FaMicrochip } from "react-icons/fa";
 
 type Settings = {
@@ -67,6 +67,7 @@ type State = {
   perf: {
     cpu_mhz: number | null;
     cpu_peak_mhz: number | null;
+    cpu_temp_c: number | null;
     ram_used_mb: number | null;
     ram_total_mb: number | null;
     tdp_w: number | null;
@@ -117,6 +118,7 @@ type State = {
     pkg_w: number | null;
     cpu_w: number | null;
     cpu_w_est: boolean;
+    temp_c: number | null;
     freq_mhz: number | null;
     vram_mb: number | null;
     gtt_mb: number | null;
@@ -232,6 +234,18 @@ const THROTTLE_LABELS: Record<string, string> = {
 };
 
 const reasons = (xs: string[]) => xs.map((r) => THROTTLE_LABELS[r] ?? r).join(", ");
+
+// CPU/GPU table at the top of the TDP section; header and cap rows are dimmer.
+const READOUT_CSS = `
+  .hhctl-readout {
+    display: grid; grid-template-columns: auto auto auto auto minmax(0, 1fr); gap: 2px 8px;
+    font-size: 12px; line-height: 16px; color: #dcdedf; padding: 4px 0; white-space: nowrap;
+  }
+  .hhctl-readout > span { overflow: hidden; text-overflow: ellipsis; }
+  .hhctl-readout > span:nth-child(-n + 5) { color: #8b929a; font-size: 11px; }
+  .hhctl-readout .hhctl-capped { grid-column: 2 / -1; color: #ffb35c; font-style: normal; white-space: normal; }
+  .hhctl-readout .hhctl-total { grid-column: 1 / -1; color: #8b929a; }
+`;
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 
@@ -405,25 +419,29 @@ function Content() {
   const { tdp, fan, battery, rgb, gpu, display } = state;
   const e = draft.epp;
   const { perf } = state;
-  const join = (xs: (string | null)[]) => xs.filter(Boolean).join(" · ");
-  const readout = [
-    join([
-      perf.cpu_mhz != null ? `CPU ${ghz(perf.cpu_mhz)}` : null,
-      gpu.cpu_w != null ? `${gpu.cpu_w_est ? "≈" : ""}${gpu.cpu_w} W` : null,
-    ]),
-    join([gpu.freq_mhz != null ? `GPU ${gpu.freq_mhz} MHz` : null, gpu.gpu_w != null ? `${gpu.gpu_w} W` : null]),
-    join([
-      gpu.pkg_w != null ? `TDP ${gpu.pkg_w}${perf.tdp_w ? ` / ${perf.tdp_w}` : ""} W` : null,
-      perf.ram_used_mb != null && perf.ram_total_mb ? `RAM ${gb(perf.ram_used_mb)} / ${gb(perf.ram_total_mb)}` : null,
-    ]),
-    join([
-      gpu.vram_mb != null ? `VRAM ${gb(gpu.vram_mb)}` : null,
-      gpu.gtt_mb != null ? `GTT ${gb(gpu.gtt_mb)}` : null,
-      gpu.mem_mb != null ? `GPU mem ${gb(gpu.mem_mb)}` : null,
-    ]),
-    perf.limits.cpu.length ? `CPU capped by ${reasons(perf.limits.cpu)}` : null,
-    perf.limits.gpu.length ? `GPU capped by ${reasons(perf.limits.gpu)}` : null,
-  ].filter(Boolean) as string[];
+  const dash = "–";
+  const rows: { name: string; clock: string; power: string; temp: string; mem: string; capped: string[] }[] = [
+    {
+      name: "CPU",
+      clock: perf.cpu_mhz != null ? ghz(perf.cpu_mhz) : dash,
+      power: gpu.cpu_w != null ? `${gpu.cpu_w_est ? "≈" : ""}${gpu.cpu_w} W` : dash,
+      temp: perf.cpu_temp_c != null ? `${perf.cpu_temp_c}°C` : dash,
+      mem:
+        perf.ram_used_mb != null && perf.ram_total_mb
+          ? `${(perf.ram_used_mb / 1024).toFixed(1)}/${Math.round(perf.ram_total_mb / 1024)} GB`
+          : dash,
+      capped: perf.limits.cpu,
+    },
+    {
+      name: "GPU",
+      clock: gpu.freq_mhz != null ? `${gpu.freq_mhz} MHz` : dash,
+      power: gpu.gpu_w != null ? `${gpu.gpu_w} W` : dash,
+      temp: gpu.temp_c != null ? `${gpu.temp_c}°C` : dash,
+      mem: gpu.vram_mb != null ? gb(gpu.vram_mb) : gpu.mem_mb != null ? gb(gpu.mem_mb) : dash,
+      capped: perf.limits.gpu,
+    },
+  ];
+  const showReadout = !!gpu.driver || perf.cpu_mhz != null;
   const t = draft.tdp;
   const g = draft.gpu;
   const f = draft.fan;
@@ -434,20 +452,35 @@ function Content() {
 
   return (
     <div className="hhctl-root" style={bgUrl ? imageStyle(bgUrl, draft.ui?.bg_dim ?? 55) : undefined}>
+      <style>{READOUT_CSS}</style>
       <style>{themeCss(theme, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
       <PanelSection title="TDP">
-        {readout.length > 0 && (
+        {showReadout && (
           <PanelSectionRow>
-            <Field
-              description={
-                <>
-                  {readout.map((line) => (
-                    <div key={line}>{line}</div>
-                  ))}
-                </>
-              }
-            />
+            <div className="hhctl-readout">
+              <span />
+              <span>Clock</span>
+              <span>Power</span>
+              <span>Temp</span>
+              <span>Memory</span>
+              {rows.map((r) => (
+                <Fragment key={r.name}>
+                  <b>{r.name}</b>
+                  <span>{r.clock}</span>
+                  <span>{r.power}</span>
+                  <span>{r.temp}</span>
+                  <span>{r.mem}</span>
+                  {r.capped.length > 0 && <i className="hhctl-capped">capped by {reasons(r.capped)}</i>}
+                </Fragment>
+              ))}
+              {gpu.pkg_w != null && (
+                <span className="hhctl-total">
+                  TDP {gpu.pkg_w}
+                  {perf.tdp_w ? ` / ${perf.tdp_w}` : ""} W
+                </span>
+              )}
+            </div>
           </PanelSectionRow>
         )}
         {!tdp.backend ? (

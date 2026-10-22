@@ -28,7 +28,11 @@ g.pkg = M(); g._gpu_watts = lambda: 12.0
 st = g.state(); assert st["cpu_w"] == 8.0 and st["cpu_w_est"] is True
 class C: watts = 6.04
 g.core = C(); st = g.state(); assert st["cpu_w"] == 6.0 and st["cpu_w_est"] is False
-print("cpu watts: RAPL core, or package - GPU estimate ok")
+hw = os.path.join(tmp, "hwmon"); os.makedirs(hw)
+open(f"{hw}/temp1_input", "w").write("64500\n"); g.hwmon = hw
+assert g.state()["temp_c"] == 64
+g.hwmon = None; assert g.state()["temp_c"] is None, "integrated Intel: no GPU hwmon"
+print("cpu watts: RAPL core, or package - GPU estimate ok; GPU temp from hwmon ok")
 
 # controller reasons
 from hhctl import controller, fan
@@ -53,5 +57,6 @@ ctl.gpuclk.files = {"x": 1}; ctl.gpuclk.throttle = lambda: ["pl1"]
 assert ctl._limits({"pkg_w": 5.0}, 20) == {"cpu": ["pl1"], "gpu": ["pl1"]}
 ctl.gpuclk = gpu.GpuClock(None, None)
 st = ctl.state(); json.dumps(st)
-assert set(st["perf"]) >= {"cpu_mhz", "ram_used_mb", "ram_total_mb", "tdp_w", "limits"}
+assert set(st["perf"]) >= {"cpu_mhz", "cpu_temp_c", "ram_used_mb", "ram_total_mb", "tdp_w", "limits"}
+assert st["perf"]["cpu_temp_c"] == 70 and "temp_c" in st["gpu"]
 shutil.rmtree(tmp); print("all perf tests passed")

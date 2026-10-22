@@ -164,9 +164,21 @@ class Gpu:
                 return val
         return None
 
+    def _temp_c(self) -> float | None:
+        """GPU temperature from the card's hwmon (amdgpu "edge", xe). Integrated
+        Intel GPUs usually have none; the GPU then shares the CPU package."""
+        if not self.hwmon:
+            return None
+        for path in sorted(glob.glob(f"{self.hwmon}/temp*_input")):
+            val = sysfs.read_int(path)
+            if val:
+                return round(val / 1000)
+        return None
+
     def state(self) -> dict:
         out = {
             "driver": self.driver,
+            "temp_c": self._temp_c(),
             "gpu_w": self._gpu_watts(),
             "pkg_w": self.pkg.watts if self.pkg else None,
             "cpu_w": self.core.watts if self.core else None,
