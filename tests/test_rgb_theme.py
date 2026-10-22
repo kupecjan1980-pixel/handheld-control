@@ -40,6 +40,9 @@ assert "Zone test" in ctl.rgb_zone_test()["errors"]["rgb"]
 sent.clear()
 o = rgb.OxpHidV1.__new__(rgb.OxpHidV1); o.send = lambda pkts: sent.extend(pkts)
 o.apply("solid", 0, 100, 100, None)
-assert sorted({p[4] for p in sent}) == [1, 2, 3, 5], "all four OXP3 zones: stick rings, logo, power / Steam rings"
+assert [p[4] for p in sent] == [z for z in range(1, 9) for _ in (0, 1)], "zones 1-8, switch-on then color each"
+assert [p[3] for p in sent[:2]] == [0xFD, 0xFE] and sent[1][6:9] == bytes([255, 0, 0])
+sent.clear(); o.apply("off", 0, 100, 100, None)
+assert len(sent) == 8 and all(p[3] == 0xFD and p[6] == 0 for p in sent), "off: switch-off for every zone, no colors"
 print("oxp zone test ok")
 shutil.rmtree(tmp); print("all rgb theme tests passed")

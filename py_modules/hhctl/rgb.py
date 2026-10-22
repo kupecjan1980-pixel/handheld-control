@@ -167,8 +167,10 @@ class OxpHidV1(_Hidraw):
     modes = ["off", "solid", "effect"]
     effects = list(OXP_V1_EFFECTS)
     # ONEXPLAYER 3 (light zone test): 1 left stick ring, 2 right stick ring,
-    # 3 top logo, 5 power and Steam button rings.
-    sides = (0x01, 0x02, 0x03, 0x05)
+    # 3 top logo, 5 power and Steam button rings. Writing only those left the
+    # power ring on the test's zone 6 color (cyan), so every zone the test
+    # touched gets the color; zones without lights ignore it, as in the test.
+    sides = tuple(range(0x01, 0x09))
 
     @classmethod
     def find(cls):
@@ -178,14 +180,18 @@ class OxpHidV1(_Hidraw):
     def apply(self, mode: str, hue: int, sat: int, bright: int, effect: str | None) -> None:
         on = mode != "off"
         level = 0x01 if bright < 34 else 0x03 if bright < 67 else 0x04
-        pkts = [_oxp_v1_cmd(0xB8, [0xFD, s, 0x02, int(on), 0x05, level]) for s in self.sides]
-        if on:
-            for s in self.sides:
-                if mode == "effect" and effect in OXP_V1_EFFECTS:
-                    pkts.append(_oxp_v1_cmd(0xB8, [OXP_V1_EFFECTS[effect], s, 0x02]))
-                else:
-                    r, g, b = hsv(hue, sat, 100)
-                    pkts.append(_oxp_v1_cmd(0xB8, [0xFE, s, 0x02] + 18 * [r, g, b] + [r, g]))
+        r, g, b = hsv(hue, sat, 100)
+        pkts = []
+        # Each zone's switch-on right before its color, like the zone test,
+        # which is the order every zone followed.
+        for s in self.sides:
+            pkts.append(_oxp_v1_cmd(0xB8, [0xFD, s, 0x02, int(on), 0x05, level]))
+            if not on:
+                continue
+            if mode == "effect" and effect in OXP_V1_EFFECTS:
+                pkts.append(_oxp_v1_cmd(0xB8, [OXP_V1_EFFECTS[effect], s, 0x02]))
+            else:
+                pkts.append(_oxp_v1_cmd(0xB8, [0xFE, s, 0x02] + 18 * [r, g, b] + [r, g]))
         self.send(pkts)
 
 
