@@ -86,8 +86,9 @@ def _ec_restore(spec: dict) -> None:
 
 def restore(spec: dict) -> None:
     if spec["kind"] == "hwmon":
-        with open(f"{spec['path']}/pwm1_enable", "w") as f:
-            f.write("2\n")
+        for n in spec.get("channels", [1]):
+            with open(f"{spec['path']}/pwm{n}_enable", "w") as f:
+                f.write(f"{spec.get('auto', 2)}\n")
     elif spec["kind"] == "ec":
         _ec_restore(spec)
 

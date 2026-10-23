@@ -13,7 +13,7 @@ import threading
 import time
 
 from . import background, backlight, buttons, fonts, updater, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
-from .device import detect
+from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
 
@@ -40,7 +40,8 @@ DEFAULTS = {
     # bg_pos: which part of the picture shows (CSS background-position %) and zoom (%).
     # Extra buttons open Steam things (AYN -> this plugin, Win+D -> keyboard).
     "controller": {"buttons": True},
-    "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
+    # device_name: the user's name for the device ("" = detected name).
+    "ui": {"device_name": "", "theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
     "battery": {"limit": 100, "bypass": "off"},
@@ -107,6 +108,7 @@ class Controller:
         self.after_update = updater.restart_loader
         self.update_note = "Decky restarts in a moment and loads it."
         self.dev = detect()
+        self.cpu_model = cpu_model()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
         # Intel only: firmware-attributes already selects "custom", ryzenadj needs nothing.
@@ -1124,7 +1126,8 @@ class Controller:
             except Exception:
                 rpm = None
         return {
-            "device": {"name": d.name, "board": d.board, "vendor": d.vendor, "notes": d.notes},
+            "device": {"name": d.name, "board": d.board, "vendor": d.vendor, "notes": d.notes, "cpu": self.cpu_model,
+                       "generic": d.key == "generic"},
             "conflicts": running_services(),
             "settings": self.settings,
             "errors": self.errors,

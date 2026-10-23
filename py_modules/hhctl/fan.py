@@ -1,8 +1,10 @@
 """Fan control through hwmon (ayaneo-ec / oxpec) or raw EC fallback."""
 
 import glob
+import os
+import subprocess
 
-from . import ec, sysfs
+from . import ec, proc, sysfs
 from .device import Device
 
 CURVES = {
@@ -40,23 +42,75 @@ def cpu_temp() -> float | None:
 
 
 class HwmonFan:
-    def __init__(self, path: str):
+    """hwmon pwmN channels (1 = manual). auto: the pwmN_enable value that
+    hands the fan back to the firmware/chip (2 for the handheld EC drivers;
+    for Super I/O chips, whatever automatic mode the BIOS had set)."""
+
+    def __init__(self, path: str, channels: tuple[int, ...] = (1,), auto: int = 2):
         self.path = path
+        self.channels = channels
+        self.auto = auto
         self.name = f"hwmon ({sysfs.read(f'{path}/name')})"
+        if channels != (1,):
+            self.name += " fan " + ", ".join(map(str, channels))
 
     def set_auto(self) -> None:
-        sysfs.write(f"{self.path}/pwm1_enable", 2)
+        for n in self.channels:
+            sysfs.write(f"{self.path}/pwm{n}_enable", self.auto)
 
     def set_percent(self, pct: int) -> None:
-        if sysfs.read(f"{self.path}/pwm1_enable") != "1":
-            sysfs.write(f"{self.path}/pwm1_enable", 1)
-        sysfs.write(f"{self.path}/pwm1", round(pct * 255 / 100))
+        for n in self.channels:
+            if sysfs.read(f"{self.path}/pwm{n}_enable") != "1":
+                sysfs.write(f"{self.path}/pwm{n}_enable", 1)
+            sysfs.write(f"{self.path}/pwm{n}", round(pct * 255 / 100))
 
     def rpm(self) -> int | None:
-        return sysfs.read_int(f"{self.path}/fan1_input")
+        vals = [v for n in self.channels if (v := sysfs.read_int(f"{self.path}/fan{n}_input")) is not None]
+        return max(vals) if vals else None
 
     def restore_spec(self) -> dict:
-        return {"kind": "hwmon", "path": self.path}
+        return {"kind": "hwmon", "path": self.path, "channels": list(self.channels), "auto": self.auto}
+
+
+# Super I/O hwmon drivers of desktop and mini-PC boards (ASRock DeskMini
+# X300 / X600 have Nuvoton chips). Each only binds if it finds its chip.
+SUPERIO_MODULES = ("nct6775", "nct6683", "it87")
+SUPERIO_NAMES = ("nct", "it8")
+HWMON = "/sys/class/hwmon"
+
+
+def superio_fan():
+    """(HwmonFan or None, why). Picks the chip's spinning fan headers; with
+    none spinning (fans stopped at idle), every header with a tach."""
+    for mod in SUPERIO_MODULES:
+        try:
+            proc.run(["modprobe", mod], timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    read_only = None
+    for hw in sorted(glob.glob(f"{HWMON}/hwmon*")):
+        name = sysfs.read(f"{hw}/name") or ""
+        if not name.startswith(SUPERIO_NAMES):
+            continue
+        tachs = {}
+        for f in glob.glob(f"{hw}/fan[0-9]*_input"):
+            n = int(os.path.basename(f)[3:].split("_")[0])
+            tachs[n] = sysfs.read_int(f) or 0
+        ctl = [n for n in sorted(tachs) if sysfs.writable(f"{hw}/pwm{n}_enable") and sysfs.writable(f"{hw}/pwm{n}")]
+        if not ctl:
+            if tachs:
+                read_only = name
+            continue
+        spinning = tuple(n for n in ctl if tachs[n] > 0)
+        channels = spinning or tuple(ctl)
+        # Back to the mode the BIOS chose; 1 (manual) means we were cut off
+        # mid-run last time, so fall back to the chip's automatic mode.
+        orig = sysfs.read_int(f"{hw}/pwm{channels[0]}_enable")
+        auto = orig if orig not in (None, 1) else (5 if name.startswith("nct") else 2)
+        return HwmonFan(hw, channels, auto), None
+    if read_only:
+        return None, f"{read_only} reads the fans but its driver can't control them"
+    return None, None
 
 
 class EcFanCtl:
@@ -98,6 +152,9 @@ def find_backend(dev: Device, allow_ec: bool):
         return HwmonFan(hw), None
     if not dev.ec_fan:
         if dev.key == "generic":
+            ctl, why = superio_fan()
+            if ctl or why:
+                return ctl, why
             # e.g. the GenMachine Ren (7730U): no ACPI EC, no Super I/O, no fan
             # in its ACPI tables (checked with sensors-detect and the DSDT/SSDTs).
             return None, ("Linux sees no fan controller on this PC (no embedded controller, "

@@ -9,6 +9,7 @@ import {
   PanelSection,
   PanelSectionRow,
   SliderField,
+  TextField,
   ToggleField,
   gamepadDialogClasses,
   gamepadSliderClasses,
@@ -48,6 +49,7 @@ type Settings = {
   ec: { enabled: boolean };
   controller: { buttons: boolean };
   ui: {
+    device_name: string;
     theme: string;
     font: string;
     bg: string | null;
@@ -73,7 +75,7 @@ type Listing = {
 };
 
 type State = {
-  device: { name: string; board: string; vendor: string; notes: string[] };
+  device: { name: string; board: string; vendor: string; notes: string[]; cpu: string | null; generic: boolean };
   conflicts: string[];
   settings: Settings;
   errors: Record<string, string>;
@@ -405,6 +407,7 @@ const READOUT_CSS = `
   .hhctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; }
   .hhctl-device { font-size: 14px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; }
   .hhctl-tdp { font-size: 12px; color: #dcdedf; }
+  .hhctl-cpu { font-size: 11px; color: #b8bcbf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hhctl-readout {
     display: grid; grid-template-columns: auto auto auto auto auto minmax(0, 1fr); gap: 0 7px;
     font-size: 12px; line-height: 15px; color: #dcdedf; padding-top: 2px; white-space: nowrap;
@@ -987,6 +990,14 @@ function Content() {
   const r = draft.rgb;
 
   const theme = draft.ui?.theme ?? "default";
+  const customName = (draft.ui?.device_name ?? "").trim();
+  const deviceName = customName || state.device.name;
+  // The CPU under the name when the user named the device, or on PCs the
+  // plugin doesn't know (handhelds keep the compact one-line header).
+  const cpuLine =
+    state.device.cpu && (customName || state.device.generic)
+      ? state.device.cpu
+      : null;
   const pos = draft.ui?.bg_pos ?? DEFAULT_POS;
   const boxW = rootRef.current?.clientWidth;
   const boxH = fitHeight ?? rootRef.current?.clientHeight;
@@ -1008,7 +1019,7 @@ function Content() {
       <div className="hhctl-header">
         <div className="hhctl-top">
           <span className="hhctl-device" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
-            {state.device.name}
+            {deviceName}
           </span>
           {gpu.pkg_w != null && (
             <span className="hhctl-tdp">
@@ -1019,6 +1030,7 @@ function Content() {
             </span>
           )}
         </div>
+        {cpuLine && !deviceName.includes(cpuLine) && <div className="hhctl-cpu">{cpuLine}</div>}
         {showReadout && (
           <div className="hhctl-readout">
             <span />
@@ -2054,6 +2066,14 @@ function Content() {
                 </>
               );
             })()}
+            <PanelSectionRow>
+              <TextField
+                label="Device name"
+                description={`Shown at the top with the CPU. Empty: ${state.device.name}`}
+                value={draft.ui?.device_name ?? ""}
+                onChange={(e) => change("ui", { device_name: e.target.value.slice(0, 40) }, 800)}
+              />
+            </PanelSectionRow>
             <PanelSectionRow>
               <DropdownItem
                 label="Theme color"

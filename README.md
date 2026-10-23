@@ -64,6 +64,16 @@ gamepad's Start, so games keep it. The plugin only
 reads those keys, so nothing is taken from Steam or games. The back buttons
 and the touchpads need a virtual controller; that comes later.
 
+On PCs that aren't one of the handhelds, the fan goes through the board's
+Super I/O chip (`nct6775`, `nct6683` or `it87`, loaded at start; e.g. ASRock
+DeskMini X300 / X600): the headers with a spinning fan are driven together,
+and Auto hands them back to the mode the BIOS had set. Mini PCs without an
+embedded controller or Super I/O chip (e.g. GenMachine Ren) give Linux no fan
+control at all; the panel says so.
+
+**Device name** (last section) replaces the detected name in the header; the
+CPU model is shown under it.
+
 Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
 released below 80 °C.

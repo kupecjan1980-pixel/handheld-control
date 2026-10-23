@@ -159,6 +159,19 @@ def _oxp3(vendor: str, board: str) -> Device:
 DMI_JUNK = {"", "default string", "to be filled by o.e.m.", "system product name", "system manufacturer", "o.e.m.", "oem"}
 
 
+def cpu_model(cpuinfo: str | None = None) -> str | None:
+    """'AMD Ryzen 7 PRO 7730U with Radeon Graphics' -> 'Ryzen 7 PRO 7730U'."""
+    if cpuinfo is None:
+        cpuinfo = sysfs.read("/proc/cpuinfo") or ""
+    for line in cpuinfo.splitlines():
+        if line.startswith("model name"):
+            name = re.sub(r"\s+w(ith|/)\s+Radeon.*", "", line.split(":", 1)[1]).strip()
+            name = re.sub(r"\s+\d+-Core Processor$", "", name)
+            name = re.sub(r"\((R|TM)\)", "", name)
+            return re.sub(r"^(AMD|Intel)\s+", "", name).strip() or None
+    return None
+
+
 def _generic_name(vendor: str, board: str, cpuinfo: str) -> str:
     """vendor + board, or the CPU model when the firmware left placeholders."""
     parts = [p for p in (vendor, board) if p.strip().lower() not in DMI_JUNK]
