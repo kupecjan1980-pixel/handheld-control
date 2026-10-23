@@ -49,7 +49,8 @@ try:
 except OSError:
     pass
 # the real release zip passes the checks
-real = sorted(f for f in os.listdir(sys.argv[1] + "/out") if f.endswith(".zip")) if os.path.isdir(sys.argv[1] + "/out") else []
+out = sys.argv[1] + "/out"
+real = sorted(f for f in os.listdir(out) if f.endswith(".zip") and "desktop" not in f) if os.path.isdir(out) else []
 if real:
     updater.install_zip(open(f"{sys.argv[1]}/out/{real[-1]}", "rb").read(), pd)
     assert os.path.exists(f"{pd}/py_modules/hhctl/updater.py") or os.path.exists(f"{pd}/main.py")
