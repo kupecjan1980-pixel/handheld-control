@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Handheld Control on this PC: starts the plugin's backend as root (sudo asks
+# for your password in this terminal) and opens the panel in its own window.
+# Close the window to stop; everything the plugin changed is put back.
+#   hhc-desktop          root: settings can be changed
+#   hhc-desktop --user   no root: read-only, nothing on the PC changes
+set -euo pipefail
+DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+PORT=${HHC_PORT:-8765}
+URL="http://127.0.0.1:$PORT"
+
+if curl -s -m 1 "$URL/ping" >/dev/null; then
+    echo "Something already runs on port $PORT (another Handheld Control window?)."
+    echo "Close it first, or start with HHC_PORT=8766 $0"
+    read -rp "Press Enter to close." _
+    exit 1
+fi
+if [ ! -f "$DIR/dist/bundle.js" ] || [ -n "$(find "$DIR/../src" "$DIR/shims" "$DIR/entry.tsx" "$DIR/index.html" -newer "$DIR/dist/bundle.js" 2>/dev/null)" ]; then
+    echo "Building the panel…"
+    (cd "$DIR/.." && npm install --no-audit --no-fund >/dev/null && npx rollup -c desktop/rollup.config.mjs)
+fi
+
+TOKEN=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+RUN=(python3 "$DIR/server.py" --port "$PORT" --token - --home "$HOME" --uid "$(id -u)")
+if [ "${1:-}" = "--user" ]; then
+    printf '%s\n' "$TOKEN" | "${RUN[@]}" &
+else
+    sudo -v  # ask for the password now, in the foreground
+    printf '%s\n' "$TOKEN" | sudo "${RUN[@]}" &
+fi
+SERVER=$!
+for _ in $(seq 80); do curl -s -m 1 "$URL/ping" >/dev/null && break; sleep 0.25; done
+
+# Its own profile, so this is a separate window that returns when it's closed.
+chromium --app="$URL/?token=$TOKEN" --class=hhc-desktop --user-data-dir="$HOME/.cache/hhc-desktop/chromium" \
+    --window-size=420,900 >/dev/null 2>&1 || true
+
+curl -s -m 5 -X POST -H "X-HHC-Token: $TOKEN" "$URL/quit" >/dev/null || true
+wait "$SERVER" || true

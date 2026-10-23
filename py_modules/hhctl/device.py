@@ -154,6 +154,21 @@ def _oxp3(vendor: str, board: str) -> Device:
     )
 
 
+# Placeholders boards ship with instead of a real name.
+DMI_JUNK = {"", "default string", "to be filled by o.e.m.", "system product name", "system manufacturer", "o.e.m.", "oem"}
+
+
+def _generic_name(vendor: str, board: str, cpuinfo: str) -> str:
+    """vendor + board, or the CPU model when the firmware left placeholders."""
+    parts = [p for p in (vendor, board) if p.strip().lower() not in DMI_JUNK]
+    if parts:
+        return " ".join(parts)
+    for line in cpuinfo.splitlines():
+        if line.startswith("model name"):
+            return line.split(":", 1)[1].replace("with Radeon Graphics", "").strip()
+    return "Unknown device"
+
+
 def detect() -> Device:
     vendor = sysfs.read(f"{DMI}/board_vendor") or sysfs.read(f"{DMI}/sys_vendor") or ""
     board = sysfs.read(f"{DMI}/board_name") or ""
@@ -163,10 +178,11 @@ def detect() -> Device:
         return _oxp3(vendor, board)
 
     # Unknown device: only use kernel interfaces, never raw EC writes.
-    cpu = "intel" if "GenuineIntel" in (sysfs.read("/proc/cpuinfo") or "") else "amd"
+    cpuinfo = sysfs.read("/proc/cpuinfo") or ""
+    cpu = "intel" if "GenuineIntel" in cpuinfo else "amd"
     return Device(
         key="generic",
-        name=f"{vendor} {board}".strip() or "Unknown device",
+        name=_generic_name(vendor, board, cpuinfo),
         cpu=cpu,
         tdp_min=5,
         tdp_max=30,

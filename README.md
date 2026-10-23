@@ -34,6 +34,15 @@ the touchpads. It only reads, nothing is grabbed or remapped, and saves
 Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
+**On a desktop PC** (for testing): `desktop/hhc-desktop` runs the plugin's
+real backend on the PC and opens the same panel in its own Chromium window
+(`desktop/install.sh` adds it to the app launcher). It asks for your sudo
+password in a terminal so it can change settings, or runs read-only with
+`--user`. Closing the window puts everything back, as unloading the plugin
+does. The panel is built from `src/index.tsx` with browser stand-ins for
+Decky's UI (`desktop/shims`). It listens on 127.0.0.1 only, and every request
+needs a random token made at start. TDP on AMD PCs needs `ryzenadj`.
+
 **Updates** (last section): **Check for updates** lists this plugin's GitHub
 releases (pre-releases included); pick any version and install it, newer or
 older. The zip must come from this repository's releases; it's checked,
@@ -277,6 +286,7 @@ py_modules/hhctl/
   backlight.py          brightness
   background.py         custom panel background picture, picture browser
   updater.py            install any GitHub release from the panel
+desktop/              run the plugin on a desktop PC (hhc-desktop, server.py, shims/)
   buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)
