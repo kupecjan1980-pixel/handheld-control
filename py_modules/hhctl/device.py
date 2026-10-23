@@ -197,6 +197,10 @@ def detect() -> Device:
     cpu = "intel" if "GenuineIntel" in cpuinfo else "amd"
     notes = ["Not one of the supported handhelds, so only standard kernel interfaces are used."]
     limits = desktop_apu_limits(cpuinfo) if cpu == "amd" else None
+    if cpu == "amd" and not limits and "Ryzen AI" in cpuinfo:
+        # Strix / Krackan Point: AMD's configurable TDP goes to 54 W (HX 370);
+        # handhelds with them top out around 35-40 W.
+        limits = (5, 40, 20, 45)
     if limits:
         notes.append("Desktop APU: the TDP slider sets the socket power limit (PPT).")
     lo, hi, default, boost_max = limits or (5, 30, 15, 35)

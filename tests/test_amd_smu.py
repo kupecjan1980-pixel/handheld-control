@@ -12,6 +12,9 @@ assert fam(23, 17) == fam(23, 24) == fam(23, 32) == "Raven / Picasso / Dali", "A
 assert fam(25, 116) == fam(25, 117) == fam(25, 120) == "Phoenix / Hawk Point", "8700G, 8840U"
 assert S.detect(cpu(25, 116)).rep == 0x3B10578 and S.detect(cpu(25, 80)).rep == 0x3B10564
 assert S.detect(cpu(23, 17)).mp1 == (0x1A, 0x1B, 0x1C) and S.detect(cpu(23, 17)).rsmu == (0x2E, 0x2F, 0x30)
+assert fam(26, 36) == fam(26, 32) == fam(26, 96) == "Strix Point / Krackan Point", "AI 9 370, AI 7 350"
+assert S(S.detect(cpu(26, 36))).mp1 == (0x3B10928, 0x3B10978, 0x3B10998)
+assert S(S.detect(cpu(25, 80))).mp1 == (0x3B10528, 0x3B10564, 0x3B10998)
 assert not S.supported(cpu(25, 33)), "Vermeer: no APU"
 assert not S.supported(cpu(25, 80, "GenuineIntel")) and not S.supported("")
 print("family detection ok")
@@ -70,6 +73,9 @@ r = FakeSmu(family=S.detect(cpu(23, 17))); r.apply(dev, 30, False)
 assert [m[1] for m in r.msgs] == [0x1B, 0x2F, 0x1C, 0x30, 0x1A, 0x2E]
 p = FakeSmu(family=S.detect(cpu(25, 117))); p.apply(dev, 30, False)
 assert p.REP == 0x3B10578 and [m[1] for m in p.msgs if m[0] == "mp1"] == [0x15, 0x16, 0x14]
+x = FakeSmu(family=S.detect(cpu(26, 36))); x.apply(dev, 28, False)
+assert [m[:2] for m in x.msgs] == [("mp1", 0x15), ("rsmu", 0x32), ("mp1", 0x16), ("rsmu", 0x33), ("mp1", 0x14), ("rsmu", 0x31)]
+assert x.regs[0x3B10928] == 0x14 and x.regs[0x3B10978] == 1, "Strix MP1 registers"
 try:
     FakeSmu(answer=0xFE, rsmu=0xFF).apply(dev, 12, False); raise AssertionError("both refused")
 except OSError as e:

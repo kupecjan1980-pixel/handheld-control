@@ -5,7 +5,7 @@
 2. Intel RAPL powercap (package MSR zone and the MMIO zone, both enforced).
 3. ryzenadj, if the binary is installed.
 4. AMD SMU mailbox, directly (what ryzenadj does), for the APUs listed in
-   SMU_FAMILIES (Raven to Hawk Point), so those PCs need nothing installed.
+   SMU_FAMILIES (Raven to Strix Point), so those PCs need nothing installed.
 
 On Intel the ACPI platform profile matters too: in "low-power" the firmware
 holds the package near 15 W whatever RAPL says (seen on the ONEXPLAYER 3,
@@ -253,6 +253,7 @@ class SmuFamily:
     rep: int  # MP1 response register
     mp1: tuple[int, int, int]  # stapm, fast, slow message ids
     rsmu: tuple[int, int, int]
+    msg: int = 0x3B10528  # MP1 message register
 
 
 _ZEN2_3 = ((0x14, 0x15, 0x16), (0x31, 0x32, 0x33))
@@ -264,6 +265,9 @@ SMU_FAMILIES = [
     SmuFamily("Cezanne / Barcelo", 0x19, tuple(range(0x50, 0x60)), 0x3B10564, *_ZEN2_3),
     # Rembrandt and later answer at 0x3B10578.
     SmuFamily("Phoenix / Hawk Point", 0x19, (0x74, 0x75, 0x78), 0x3B10578, *_ZEN2_3),
+    # Strix Point (Ryzen AI 9 365/370/HX 375) and Krackan Point moved MP1's
+    # message and response registers; the ids stay (APUSettings1_Strix).
+    SmuFamily("Strix Point / Krackan Point", 0x1A, (0x20, 0x24, 0x60), 0x3B10978, *_ZEN2_3, msg=0x3B10928),
 ]
 
 
@@ -286,7 +290,7 @@ class AmdSmu:
     INDEX, DATA = 0xB8, 0xBC
     # (message, response, first argument). MP1's response register depends
     # on the family: with the wrong one the 7730U "didn't answer" (2026-10-23).
-    MP1_MSG, MP1_ARGS = 0x3B10528, 0x3B10998
+    MP1_ARGS = 0x3B10998
     RSMU = (0x3B10A20, 0x3B10A80, 0x3B10A88)
     TEST, GET_VERSION = 0x01, 0x02  # the same on every mailbox
     TIMEOUT = 0.5
@@ -294,7 +298,7 @@ class AmdSmu:
     def __init__(self, family: SmuFamily, pci: str | None = None):
         self.family = family
         self.pci = pci or self.PCI
-        self.mp1 = (self.MP1_MSG, family.rep, self.MP1_ARGS)
+        self.mp1 = (family.msg, family.rep, self.MP1_ARGS)
         self.silent: set[tuple[int, int, int]] = set()  # mailboxes that never answered
         self.last: int | None = None
 
