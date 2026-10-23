@@ -1045,8 +1045,8 @@ function Content() {
   const r = draft.rgb;
 
   const theme = draft.ui?.theme ?? "default";
-  // CPU model next to the TDP, the device's (firmware) name on its own row
-  // below, so long names ("ONEXPLAYER F1 EVA-02") fit whole. When the name
+  // The device's (firmware) name on its own row on top, so long names
+  // ("ONEXPLAYER F1 EVA-02") fit whole; the CPU model next to the TDP below. When the name
   // is the CPU (BIOS placeholders), it stays a single row.
   const deviceName = state.device.name;
   const cpuLine = state.device.cpu;
@@ -1070,6 +1070,11 @@ function Content() {
       <style>{themeCss(theme, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
       <div className="hhctl-header">
+        {splitName && (
+          <div className="hhctl-device hhctl-name" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
+            {deviceName}
+          </div>
+        )}
         <div className="hhctl-top">
           {splitName ? (
             <span className="hhctl-cpu">{cpuLine}</span>
@@ -1087,11 +1092,6 @@ function Content() {
             </span>
           )}
         </div>
-        {splitName && (
-          <div className="hhctl-device hhctl-name" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
-            {deviceName}
-          </div>
-        )}
         {showReadout && (
           <div className="hhctl-readout">
             <span />
