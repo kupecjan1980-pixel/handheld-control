@@ -295,6 +295,64 @@ def parse_dpm_levels(text: str) -> list[int]:
     return [int(m) for m in re.findall(r"^\s*\d+:\s*(\d+)\s*mhz", text or "", re.I | re.M)]
 
 
+class PowerProfile:
+    """amdgpu's workload profile (pp_power_profile_mode): how eagerly the
+    power firmware ramps clocks up and down. 3D_FULL_SCREEN ramps fast for
+    steady frame times, POWER_SAVING slowly for battery.
+
+    Only used with the GPU clock on auto: a locked clock leaves the profile
+    nothing to decide, so the controller makes the two exclusive.
+    """
+
+    # CUSTOM needs a parameter list; BOOTUP_DEFAULT is what "off" restores.
+    SKIP = ("CUSTOM",)
+
+    def __init__(self, dev: str | None, driver: str | None):
+        self.path = f"{dev}/pp_power_profile_mode" if dev and driver == "amdgpu" else None
+        self.orig = self.current()
+        self.changed = False
+
+    def _parse(self) -> list[tuple[int, str, bool]]:
+        # SMU:        " 1 3D_FULL_SCREEN*"   powerplay: "  1 3D_FULL_SCREEN*:  70 ..."
+        # Per-clock detail rows ("  0(  GFXCLK)") don't match.
+        out = []
+        for line in (sysfs.read(self.path) or "").splitlines() if self.path else []:
+            m = re.match(r"\s*(\d+)\s+([A-Z0-9_]+)\s*(\*)?", line)
+            if m:
+                out.append((int(m.group(1)), m.group(2), bool(m.group(3))))
+        return out
+
+    def available(self) -> tuple[bool, str | None]:
+        if not self.path:
+            return False, "AMD GPUs only"
+        if not self._parse():
+            return False, "this driver has no power profiles"
+        return True, None
+
+    def options(self) -> list[str]:
+        return [name for _, name, _ in self._parse() if name not in self.SKIP]
+
+    def current(self) -> str | None:
+        return next((name for _, name, on in self._parse() if on), None)
+
+    def apply(self, name: str) -> None:
+        idx = next((i for i, n, _ in self._parse() if n == name), None)
+        if idx is None:
+            raise OSError(f"no GPU power profile {name}")
+        if self.current() != name:
+            sysfs.write(self.path, idx)
+        self.changed = True
+
+    def restore(self) -> None:
+        if not self.changed:
+            return
+        want = self.orig or "BOOTUP_DEFAULT"
+        idx = next((i for i, n, _ in self._parse() if n == want), None)
+        if idx is not None and self.current() != want:
+            sysfs.write(self.path, idx)
+        self.changed = False
+
+
 class GpuClock:
     """Lock the GPU clock: auto / min / max / manual (MHz).
 

@@ -46,7 +46,7 @@ unloading the plugin does. `desktop/hhc-desktop --user` runs from the
 repository as you, read-only. `sudo desktop/install.sh --remove` undoes the
 setup. The panel is built from `src/index.tsx` with browser stand-ins for
 Decky's UI (`desktop/shims`). It listens on 127.0.0.1 only, and every request
-needs a random token made at start. TDP on AMD PCs needs `ryzenadj`.
+needs a random token made at start.
 
 **Updates** (last section): **Check for updates** lists this plugin's GitHub
 releases (pre-releases included); pick any version and install it, newer or
@@ -68,7 +68,7 @@ Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
 released below 80 °C.
 
-The title bar shows the plugin version. A header fixed at the top of the panel shows the device name, TDP used / set, and a CPU/GPU table (clock, power, temperature, RAM and VRAM used / total, and what caps each); the settings scroll below it. The last section shows device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue, Green, Gold) that tints the plugin's panel, labels, toggles and sliders (RGB can follow it with **Match theme color**), a **background picture** chosen from thumbnails and adjustable (zoom, position, dimming), and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch), and **Fraktur** (UnifrakturMaguntia, German blackletter). The games' own lettering can't be redistributed. Each theme brings a font (Gold: Quake, Green: Matrix, Red: Diablo, Blue: Doom; Gold is the default), which can be changed afterwards, and tints all text in shades of its color.
+The title bar shows the plugin version. A header fixed at the top of the panel shows the device name, TDP used / set, battery time left (h:mm, while discharging, like MangoHud), and a CPU/GPU table (clock, power, temperature, RAM and VRAM used / total, and what caps each); the settings scroll below it. The last section shows device notes and conflict warnings, and has a **Theme color** option (Default, Red, Blue, Green, Gold) that tints the plugin's panel, labels, toggles and sliders (RGB can follow it with **Match theme color**), a **background picture** chosen from thumbnails and adjustable (zoom, position, dimming), and a **Font** option: Default, or a free font (SIL Open Font License, bundled in `fonts/` with each license) in the style of a game: **Diablo** (Cinzel), **Matrix** (Share Tech Mono), **Doom** (Metal Mania), **Quake** (Grenze Gotisch), and **Fraktur** (UnifrakturMaguntia, German blackletter). The games' own lettering can't be redistributed. Each theme brings a font (Gold: Quake, Green: Matrix, Red: Diablo, Blue: Doom; Gold is the default), which can be changed afterwards, and tints all text in shades of its color.
 
 Nothing is changed until you enable a section. Settings persist in
 `~/homebrew/settings/Handheld Control/settings.json` and are re-applied at
@@ -182,6 +182,39 @@ Intel CPUs, such as the ONEXPLAYER 3's Panther Lake, don't use ITMT; the
 scheduler uses core capacities instead, so the toggle shows as unavailable.
 It's also blocked under Secure Boot lockdown. Boost and preferred cores are
 left alone until you change them, then re-applied at boot and every 10 s.
+
+**More CPU controls** (each shown only where it works):
+
+- **Cores for apps and games** (CPUs with two core types: Ryzen AI 300's
+  Zen 5 + Zen 5c, hybrid Intel's P- + E-cores): All, fast cores only, or
+  efficient cores only. `user.slice` (desktop, Steam, games) gets a runtime
+  systemd `AllowedCPUs`; system services keep every core. Nothing goes
+  offline, so CPU 0 (a fast core) is no obstacle. Reset when the plugin unloads.
+- **SMT** off halves the threads (`/sys/devices/system/cpu/smt/control`);
+  turned back on when the plugin unloads.
+- **HWP dynamic boost** (Intel, `intel_pstate/hwp_dynamic_boost`) raises the
+  minimum clock for a moment after I/O wakeups.
+- **EPP boost** (amd-pstate `epp_boost`) only appears on kernels carrying that
+  patch; it isn't upstream.
+- **CPU scheduler**: the kernel's own, or a sched_ext scheduler (scx_lavd,
+  scx_bpfland, ...) and its mode, through scx_loader's D-Bus service
+  (`busctl`). A scheduler that fails or exits isn't restarted more than once
+  a minute.
+
+**GPU power profile** (amdgpu `pp_power_profile_mode`): 3D fullscreen, power
+saving, video, VR or compute. It and a GPU clock lock exclude each other:
+picking a profile sets the clock mode to Auto, and locking the clock turns the
+profile off. **Second graphics pipe** reports whether the kernel runs
+amdgpu's second graphics queue (RDNA 3 / 3.5 APUs, Linux 7.3+); it can't be
+switched from userspace.
+
+**TDP without ryzenadj** on AMD APUs: the plugin talks to the SMU mailbox
+itself for Raven / Picasso / Dali (Athlon 3000G, Ryzen 2000G/3000G), Renoir /
+Lucienne, Cezanne / Barcelo (5700G, 7730U), Phoenix / Hawk Point (8700G,
+8840U) and Strix / Krackan Point (Ryzen AI 300). Message ids come from
+ryzenadj and ZenStates-Core. Each limit goes to both the MP1 and the RSMU
+mailbox, since desktop APUs may only take RSMU. Desktop G-series APUs get a
+10–88 W range (35 W parts: 5–35 W). Blocked under Secure Boot lockdown.
 
 **GPU readout.** The TDP section shows package power, GPU power, GPU memory
 and GPU clock. The TDP limit is a package limit, so CPU and GPU share it.

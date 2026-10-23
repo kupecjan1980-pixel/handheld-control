@@ -30,7 +30,8 @@ DEFAULTS = {
         "cores": None,
     },
     # GPU clock: "auto" leaves the driver alone; min/max/manual lock it.
-    "gpu": {"mode": "auto", "mhz": None},
+    # profile: amdgpu power profile, only with mode "auto" (exclusive with a lock).
+    "gpu": {"mode": "auto", "mhz": None, "profile": None},
     # Game Mode HDR: "steam" leaves gamescope alone; others only after confirm.
     "gamescope": {"hdr": "steam"},
     # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
@@ -128,6 +129,7 @@ class Controller:
         self.cpu_util = cpu.Util()
         self.limit_reasons = cpu.LimitReasons()
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
+        self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
         self.emit = lambda action: None  # set by main.py: sends a button action to the panel
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
         self.gs: gamescope.Gamescope | None = None
@@ -189,6 +191,12 @@ class Controller:
         os.replace(tmp, self.settings_path)
 
     def update(self, section: str, values: dict) -> dict:
+        if section == "gpu":
+            # A power profile and a clock lock exclude each other: the newer wins.
+            if values.get("profile"):
+                values = {**values, "mode": "auto"}
+            elif values.get("mode", "auto") != "auto":
+                values = {**values, "profile": None}
         self.settings[section].update(values)
         self.save()
         getattr(self, f"apply_{section}")()
@@ -458,7 +466,14 @@ class Controller:
         if not self.gpuclk.available()[0]:
             return
         s = self.settings["gpu"]
+        if s.get("profile") and s["mode"] != "auto":
+            s["profile"] = None  # settings from before the two were exclusive
+        # Profile off first, so a lock never runs with a profile set.
+        if self.gpu_profile.available()[0] and not s.get("profile"):
+            self._guard("gpu", self.gpu_profile.restore)
         self._guard("gpu", lambda: self.gpuclk.apply(s["mode"], s.get("mhz")))
+        if self.gpu_profile.available()[0] and s.get("profile"):
+            self._guard("gpu", lambda: self.gpu_profile.apply(s["profile"]))
 
     def apply_fan(self) -> None:
         if not self.fan:
@@ -991,6 +1006,7 @@ class Controller:
             # Clock limits go back to the driver; they're re-applied on load.
             self._guard("cpu", self.freqcap.restore)
             self._guard("gpu", self.gpuclk.restore)
+            self._guard("gpu", self.gpu_profile.restore)
             if self.profile:
                 self._guard("tdp", self.profile.restore)
         if self.fan and self.settings["fan"]["mode"] != "auto":
@@ -1153,7 +1169,14 @@ class Controller:
             | {"scx": self._scx_state(), "cores": self._cores_state()}
             | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()}
             | {"cap": self._cap_state()},
-            "gpu": gpu_state | {"clock": self._gpu_clock_state(), "pipes": self.gfx_pipes},
+            "gpu": gpu_state | {
+                "clock": self._gpu_clock_state(), "pipes": self.gfx_pipes,
+                "profile": {
+                    "available": self.gpu_profile.available()[0],
+                    "options": self.gpu_profile.options(),
+                    "current": self.gpu_profile.current(),
+                },
+            },
             "perf": self._perf_state(gpu_state, cur),
             "display": self._display_state(),
             "version": self.version,

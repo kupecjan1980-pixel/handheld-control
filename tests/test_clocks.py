@@ -90,7 +90,7 @@ ctl = controller.Controller(os.path.join(tmp, "s", "s.json"))
 ctl.freqcap = cpu.FreqCap(); ctl.gpuclk = gpu.GpuClock(f"{tmp}/xe", "xe")
 for k in ("boost", "prefcore", "ccx"):
     getattr(ctl, k).available = lambda: (False, "test")
-assert ctl.settings["gpu"] == {"mode": "auto", "mhz": None} and ctl.settings["cpu"]["cap"] is False
+assert ctl.settings["gpu"] == {"mode": "auto", "mhz": None, "profile": None} and ctl.settings["cpu"]["cap"] is False
 ctl.update("gpu", {"mode": "manual", "mhz": 1800}); assert ctl.gpuclk.current() == (1800, 1800)
 ctl.update("cpu", {"cap": True, "cap_mhz": 3000}); assert ctl.freqcap.limits_mhz() == [3000]
 st = ctl.state(); json.dumps(st)

@@ -33,7 +33,7 @@ type Settings = {
     scx_mode: string;
     cores: "all" | "fast" | "small" | null;
   };
-  gpu: { mode: GpuMode; mhz: number | null };
+  gpu: { mode: GpuMode; mhz: number | null; profile: string | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
   rgb: {
     enabled: boolean;
@@ -209,6 +209,7 @@ type State = {
     vram_total_mb: number | null;
     gtt_mb: number | null;
     mem_mb: number | null;
+    profile: { available: boolean; options: string[]; current: string | null };
     pipes: { gc: string | null; state: "on" | "off" | "unsupported" | "unknown" } | null;
     clock: {
       available: boolean;
@@ -318,6 +319,14 @@ const EPP_LABELS: Record<string, string> = {
   balance_performance: "Balance performance",
   balance_power: "Balance power",
   power: "Power saver",
+};
+
+const GPU_PROFILES: Record<string, string> = {
+  "3D_FULL_SCREEN": "3D fullscreen (games)",
+  POWER_SAVING: "Power saving",
+  VIDEO: "Video",
+  VR: "VR",
+  COMPUTE: "Compute",
 };
 
 const SCX_MODES: Record<string, string> = {
@@ -1342,7 +1351,7 @@ function Content() {
                     step={50}
                     showValue
                     valueSuffix=" MHz"
-                    onChange={(v) => change("gpu", { mode: "manual", mhz: v })}
+                    onChange={(v) => change("gpu", { mode: "manual", mhz: v, profile: null })}
                   />
                 </PanelSectionRow>
               )}
@@ -1357,9 +1366,37 @@ function Content() {
                     label: GPU_MODES[m].label,
                   }))}
                   selectedOption={g.mode}
-                  onChange={(o) => change("gpu", { mode: o.data, mhz: g.mhz ?? gpu.clock.max }, 0)}
+                  onChange={(o) =>
+                    change(
+                      "gpu",
+                      { mode: o.data, mhz: g.mhz ?? gpu.clock.max, profile: o.data === "auto" ? g.profile : null },
+                      0,
+                    )
+                  }
                 />
               </PanelSectionRow>
+              {gpu.profile.available && (
+                <PanelSectionRow>
+                  <DropdownItem
+                    label="GPU power profile"
+                    description={
+                      g.mode !== "auto"
+                        ? "Off while the GPU clock is locked; picking one sets the clock mode back to Auto"
+                        : "How eagerly the GPU ramps its clock. Picking one sets the clock mode to Auto."
+                    }
+                    rgOptions={[
+                      { data: "off", label: "Off (driver default)" },
+                      ...gpu.profile.options
+                        .filter((o) => o !== "BOOTUP_DEFAULT")
+                        .map((o) => ({ data: o, label: GPU_PROFILES[o] ?? titleCase(o.toLowerCase()) })),
+                    ]}
+                    selectedOption={g.profile ?? "off"}
+                    onChange={(o) =>
+                      change("gpu", o.data === "off" ? { profile: null } : { profile: o.data, mode: "auto" }, 0)
+                    }
+                  />
+                </PanelSectionRow>
+              )}
               {gpu.clock.throttle.length > 0 && (
                 <PanelSectionRow>
                   <Field
