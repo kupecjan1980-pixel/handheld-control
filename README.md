@@ -34,9 +34,14 @@ the touchpads. It only reads, nothing is grabbed or remapped, and saves
 Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
-**On a desktop PC** (for testing): run `sudo desktop/install.sh` once (again
-to update), then open **Handheld Control** from the app launcher. The panel
-opens in its own Chromium window, with no terminal and no password. The
+**HHC Desktop** (desktop PCs): run `sudo desktop/install.sh` once, then open
+**HHC Desktop** from the app launcher. It's a system monitor in the style of
+Mission Center: a sidebar of devices with live graphs (CPU overall and per
+core, memory, GPU, each disk and network connection), plus processes
+(sortable, searchable), sensors and file systems. Its **Controls** page is
+the plugin's own panel, with everything it can change on the PC. It opens in
+its own Chromium window, with no terminal and no password, and updates
+itself from each release's desktop zip. The
 plugin's real backend runs as a root system service, copied to
 `/opt/handheld-control-desktop` (root-owned). systemd starts it when the window
 connects and it stops when the window closes, putting everything back as
@@ -289,7 +294,8 @@ py_modules/hhctl/
   backlight.py          brightness
   background.py         custom panel background picture, picture browser
   updater.py            install any GitHub release from the panel
-desktop/              run the plugin on a desktop PC (hhc-desktop, server.py, shims/)
+desktop/              HHC Desktop: monitor + plugin panel on a PC (app.tsx, server.py, shims/)
+  sysmon.py             CPU, memory, GPU, disks, network, sensors, processes for HHC Desktop
   buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)

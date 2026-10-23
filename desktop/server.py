@@ -161,6 +161,21 @@ def main() -> None:
     asyncio.set_event_loop(loop)
     loop.run_until_complete(plugin._main())
     ctl = plugin.ctl
+    from hhctl import sysmon
+
+    monitor = sysmon.Monitor()
+    mon_lock = threading.Lock()
+
+    async def get_monitor():
+        # Desktop only: the dashboard beside the panel. Its own lock, so it
+        # never waits behind the plugin's tick.
+        def sample():
+            with mon_lock:
+                return monitor.sample()
+
+        return await asyncio.to_thread(sample)
+
+    plugin.get_monitor = get_monitor
     st = os.stat(ROOT)
     if st.st_uid == 0 and not os.path.exists(os.path.join(ROOT, ".git")):
         # Installed copy (/opt, root-owned): it updates itself from the desktop

@@ -4,7 +4,7 @@
 #   owned by root, so nothing running as you can change what runs as root;
 # - installs hhc-desktop.socket / .service: systemd starts the backend as root
 #   when the app opens (no password, no terminal) and it exits when it closes;
-# - adds "Handheld Control" to your app launcher.
+# - adds "HHC Desktop" to your app launcher.
 # Remove everything with: sudo desktop/install.sh --remove
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Run with sudo: sudo $0"; exit 1; }
@@ -77,12 +77,12 @@ mkdir -p "$APPS"
 cat > "$APPS/handheld-control.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Handheld Control
-Comment=The Handheld Control plugin on this PC: TDP, CPU and GPU clocks, fan, RGB, battery
+Name=HHC Desktop
+Comment=System monitor (CPU, memory, GPU, disks, network, processes, sensors) and Handheld Control's settings
 Exec=$DIR/hhc-desktop
 Terminal=false
 Icon=utilities-system-monitor
 Categories=System;Settings;HardwareSettings;
 DESKTOP
 chown "$USER_NAME:" "$APPS/handheld-control.desktop"
-echo "Done. Open Handheld Control from the app launcher."
+echo "Done. Open HHC Desktop from the app launcher."
