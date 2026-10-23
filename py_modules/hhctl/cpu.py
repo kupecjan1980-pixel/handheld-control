@@ -284,6 +284,17 @@ class CoreTypes:
         self.fast, self.small = self._split(groups)
 
     @staticmethod
+    def cores(cpus: list[int]) -> int:
+        """Physical cores among these logical CPUs (SMT siblings counted once)."""
+        seen = set()
+        for c in cpus:
+            sib = sysfs.read(f"{CPU_ROOT}/cpu{c}/topology/core_cpus_list") or sysfs.read(
+                f"{CPU_ROOT}/cpu{c}/topology/thread_siblings_list"
+            )
+            seen.add(sib or f"cpu{c}")
+        return len(seen)
+
+    @staticmethod
     def _split(groups: list[list[int]]) -> tuple[list[int], list[int]]:
         core = parse_cpulist(sysfs.read("/sys/devices/cpu_core/cpus") or "")
         if core:  # hybrid Intel: the P-core PMU lists the P-cores

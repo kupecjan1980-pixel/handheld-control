@@ -174,6 +174,8 @@ type State = {
       unavailable: string | null;
       fast: number;
       small: number;
+      fast_cores: number;
+      small_cores: number;
       fast_name: string;
       small_name: string;
       current: string | null;
@@ -342,6 +344,10 @@ const SCX_NOTES: Record<string, string> = {
   rustland: "Decides scheduling in a userspace Rust program. Mostly a showcase; favors interactive tasks.",
   tickless: "Cuts timer interrupts on busy CPUs. For servers and isolated workloads, not for gaming.",
 };
+
+// "4 cores / 8 threads", or just "8 cores" without SMT.
+const coreCount = (cores: number, threads: number) =>
+  cores && cores !== threads ? `${cores} cores / ${threads} threads` : `${threads} cores`;
 
 const SCX_TAGS: Record<string, string> = {
   lavd: "handhelds",
@@ -1298,8 +1304,8 @@ function Content() {
                   description="System services keep every core. Resets on reboot until the plugin applies it again."
                   rgOptions={[
                     { data: "all", label: "All cores" },
-                    { data: "fast", label: `${state.cpu.cores.fast_name} only (${state.cpu.cores.fast} threads)` },
-                    { data: "small", label: `${state.cpu.cores.small_name} only (${state.cpu.cores.small} threads)` },
+                    { data: "fast", label: `${state.cpu.cores.fast_name} only (${coreCount(state.cpu.cores.fast_cores, state.cpu.cores.fast)})` },
+                    { data: "small", label: `${state.cpu.cores.small_name} only (${coreCount(state.cpu.cores.small_cores, state.cpu.cores.small)})` },
                   ]}
                   selectedOption={draft.cpu.cores ?? (state.cpu.cores.current === "custom" ? null : state.cpu.cores.current) ?? "all"}
                   onChange={(o) => change("cpu", { cores: o.data }, 0)}

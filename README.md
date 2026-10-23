@@ -187,7 +187,8 @@ SMT siblings included. CCXs are told apart by their shared L3 cache; the layout
 is cached so it's still known while CPUs are offline. It saves some power at
 light loads, and heavily threaded games run slower. EPP is re-applied when the
 cores come back, and unloading the plugin brings them back online. Not shown
-on single-CCX CPUs (including the ONEXPLAYER 3).
+on single-CCX CPUs (including the ONEXPLAYER 3), nor on Ryzen AI 300, whose two CCXs are
+its Zen 5 and Zen 5c cores: **Cores for apps and games** covers that (it shows cores / threads).
 
 **Preferred cores** turns on the scheduler's ITMT switch
 (`/sys/kernel/debug/x86/sched_itmt_enabled`), which places work on the cores

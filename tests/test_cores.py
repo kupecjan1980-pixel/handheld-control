@@ -28,6 +28,11 @@ sysfs.read = lambda p, d=None: "0-3" if p.endswith("cpu_core/cpus") else real_re
 i = cpu.CoreTypes([])
 assert i.fast == [0, 1, 2, 3] and i.small == sorted(set(range(24)) - {0, 1, 2, 3})
 sysfs.read = real_read
+# 370: core counts from SMT siblings (4 Zen 5 = 8 threads, 8 Zen 5c = 16 threads)
+for c in range(24):
+    core = c % 12
+    w(f"{cpu.CPU_ROOT}/cpu{c}/topology/core_cpus_list", f"{core},{core + 12}")
+assert cpu.CoreTypes.cores(zen5) == 4 and cpu.CoreTypes.cores(zen5c) == 8
 print("core split ok")
 # systemctl
 allowed = {"v": ""}

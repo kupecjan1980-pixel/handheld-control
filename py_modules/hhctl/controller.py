@@ -123,6 +123,10 @@ class Controller:
         self.ccx = cpu.Ccx(os.path.join(os.path.dirname(settings_path), "ccx-groups.json"))
         self.freqcap = cpu.FreqCap()
         self.cores = cpu.CoreTypes(self.ccx.groups)
+        # Ryzen AI 300: its two CCXs are the Zen 5 and the Zen 5c cores, so
+        # "First CCX only" would just be "Zen 5 only"; the core dropdown does that.
+        self.ccx_hybrid = bool(self.cores.small) and len(self.ccx.groups) > 1
+        self.core_counts = (self.cores.cores(self.cores.fast), self.cores.cores(self.cores.small))
         self.smt = cpu.Smt()
         self.hwp_boost = cpu.HwpBoost()
         self.epp_boost = cpu.EppBoost()
@@ -441,7 +445,12 @@ class Controller:
             self._guard("cpu", lambda: changed.append(self.smt.set(bool(s["smt"]))))
             if any(changed) and s["smt"]:
                 self.apply_epp()  # threads coming back online start with default EPP
-        if s.get("ccx_off") is not None and self.ccx.available()[0]:
+        if self.ccx_hybrid and s.get("ccx_off"):
+            s["ccx_off"] = None  # set before the toggle was hidden: bring the cores back
+            self.save()
+            self._guard("cpu", lambda: self.ccx.set(False))
+            self.apply_epp()
+        if s.get("ccx_off") is not None and self.ccx.available()[0] and not self.ccx_hybrid:
             changed = []
             self._guard("cpu", lambda: changed.append(self.ccx.set(bool(s["ccx_off"]))))
             if any(changed) and not s["ccx_off"]:
@@ -1084,6 +1093,7 @@ class Controller:
         return {
             "available": ok, "unavailable": why,
             "fast": len(self.cores.fast), "small": len(self.cores.small),
+            "fast_cores": self.core_counts[0], "small_cores": self.core_counts[1],
             "fast_name": "P-cores" if intel else "Zen 5", "small_name": "E-cores" if intel else "Zen 5c",
             "current": self.cores.current() if ok else None,
         }
@@ -1166,7 +1176,10 @@ class Controller:
                     "on": ctl.on() if ok else None,
                 }
                 for name, ctl in (*self._toggles(), ("ccx", self.ccx), ("smt", self.smt))
-                for ok, why in [ctl.available()]
+                for ok, why in [
+                    (False, "the CCXs are the two core types; use Cores for apps and games")
+                    if name == "ccx" and self.ccx_hybrid else ctl.available()
+                ]
             }
             | {"scx": self._scx_state(), "cores": self._cores_state()}
             | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()}
