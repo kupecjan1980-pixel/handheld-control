@@ -22,6 +22,9 @@ CPUFREQ = "/sys/devices/system/cpu/cpufreq"
 NO_TURBO = "/sys/devices/system/cpu/intel_pstate/no_turbo"
 ITMT = "/sys/kernel/debug/x86/sched_itmt_enabled"
 AMD_PREFCORE = "/sys/devices/system/cpu/amd_pstate/prefcore"
+SMT = "/sys/devices/system/cpu/smt/control"
+HWP_BOOST = "/sys/devices/system/cpu/intel_pstate/hwp_dynamic_boost"
+EPP_BOOST = "/sys/module/amd_pstate/parameters/epp_boost"
 
 
 class Boost:
@@ -84,6 +87,69 @@ class Prefcore:
     def set(self, on: bool) -> None:
         if self.on() != on:
             sysfs.write(ITMT, int(on))
+
+
+class Smt:
+    """SMT (Hyper-Threading) on/off through the kernel's smt/control switch."""
+
+    def available(self) -> tuple[bool, str | None]:
+        val = sysfs.read(SMT)
+        if val is None:
+            return False, "the kernel has no SMT control"
+        if val not in ("on", "off"):
+            return False, f"SMT is '{val}'"
+        return True, None
+
+    def on(self) -> bool | None:
+        val = sysfs.read(SMT)
+        return {"on": True, "off": False}.get(val or "")
+
+    def set(self, on: bool) -> bool:
+        """Returns True if it changed."""
+        if self.on() == on:
+            return False
+        sysfs.write(SMT, "on" if on else "off")
+        return True
+
+
+class HwpBoost:
+    """intel_pstate's HWP dynamic boost: raises the minimum performance for a
+    while after a task wakes from I/O, then lets it drop back."""
+
+    def available(self) -> tuple[bool, str | None]:
+        if os.path.exists(HWP_BOOST):
+            return True, None
+        if os.path.exists(NO_TURBO):
+            return False, "needs intel_pstate in active mode with HWP"
+        return False, "Intel only (intel_pstate)"
+
+    def on(self) -> bool | None:
+        val = sysfs.read(HWP_BOOST)
+        return {"1": True, "0": False}.get(val or "")
+
+    def set(self, on: bool) -> None:
+        if self.on() != on:
+            sysfs.write(HWP_BOOST, int(on))
+
+
+class EppBoost:
+    """amd-pstate's per-core EPP boost: busy cores get EPP performance for a
+    moment. Only in kernels carrying that patch (not upstream yet)."""
+
+    def available(self) -> tuple[bool, str | None]:
+        if not os.path.exists(EPP_BOOST):
+            return False, "not in this kernel"
+        if os.geteuid() == 0 and not sysfs.writable(EPP_BOOST):
+            return False, "only settable at boot (amd_pstate.epp_boost=1)"
+        return True, None
+
+    def on(self) -> bool | None:
+        val = sysfs.read(EPP_BOOST)
+        return {"1": True, "Y": True, "0": False, "N": False}.get(val or "")
+
+    def set(self, on: bool) -> None:
+        if self.on() != on:
+            sysfs.write(EPP_BOOST, int(on))
 
 
 def parse_cpulist(text: str) -> list[int]:
@@ -166,11 +232,17 @@ class Ccx:
     def set(self, off: bool) -> bool:
         """Returns True if any CPU changed state."""
         changed = False
+        smt_off = sysfs.read(SMT) in ("off", "forceoff")
         for c in self.others():
             path = f"{CPU_ROOT}/cpu{c}/online"
             want = "0" if off else "1"
             if sysfs.read(path) != want:
-                sysfs.write(path, want)
+                try:
+                    sysfs.write(path, want)
+                except OSError:
+                    if off or not smt_off:
+                        raise
+                    continue  # a sibling thread: stays off while SMT is off
                 changed = True
         return changed
 

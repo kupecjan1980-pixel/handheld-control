@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, buttons, fonts, updater, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, sysfs, tdp, watchdog
+from . import background, backlight, buttons, fonts, updater, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
 from .device import detect
 
 log = logging.getLogger("hhctl")
@@ -22,7 +22,11 @@ DEFAULTS = {
     "tdp": {"enabled": False, "watts": None, "boost": True},
     "epp": {"enabled": False, "value": "balance_performance"},
     # None = leave as the system set it; True/False once the user toggles.
-    "cpu": {"boost": None, "prefcore": None, "ccx_off": None, "cap": False, "cap_mhz": None},
+    # scx: None, "off" (kernel scheduler) or a scx_loader scheduler name.
+    "cpu": {
+        "boost": None, "prefcore": None, "ccx_off": None, "cap": False, "cap_mhz": None,
+        "smt": None, "hwp_boost": None, "epp_boost": None, "scx": None, "scx_mode": "gaming",
+    },
     # GPU clock: "auto" leaves the driver alone; min/max/manual lock it.
     "gpu": {"mode": "auto", "mhz": None},
     # Game Mode HDR: "steam" leaves gamescope alone; others only after confirm.
@@ -112,6 +116,10 @@ class Controller:
         self.prefcore = cpu.Prefcore()
         self.ccx = cpu.Ccx(os.path.join(os.path.dirname(settings_path), "ccx-groups.json"))
         self.freqcap = cpu.FreqCap()
+        self.smt = cpu.Smt()
+        self.hwp_boost = cpu.HwpBoost()
+        self.epp_boost = cpu.EppBoost()
+        self.scx = scx.Scx()
         self.cpu_util = cpu.Util()
         self.limit_reasons = cpu.LimitReasons()
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
@@ -413,20 +421,31 @@ class Controller:
 
     def apply_cpu(self) -> None:
         s = self.settings["cpu"]
+        # Before the CCX: SMT on would bring back the other CCX's threads.
+        if s.get("smt") is not None and self.smt.available()[0]:
+            changed = []
+            self._guard("cpu", lambda: changed.append(self.smt.set(bool(s["smt"]))))
+            if any(changed) and s["smt"]:
+                self.apply_epp()  # threads coming back online start with default EPP
         if s.get("ccx_off") is not None and self.ccx.available()[0]:
             changed = []
             self._guard("cpu", lambda: changed.append(self.ccx.set(bool(s["ccx_off"]))))
             if any(changed) and not s["ccx_off"]:
                 self.apply_epp()  # CPUs coming back online start with default EPP
-        for key, ctl in (("boost", self.boost), ("prefcore", self.prefcore)):
-            if s[key] is not None and ctl.available()[0]:
+        for key, ctl in self._toggles():
+            if s.get(key) is not None and ctl.available()[0]:
                 self._guard("cpu", lambda: ctl.set(bool(s[key])))
+        if s.get("scx") is not None and self.scx.available()[0]:
+            self._guard("scx", lambda: self.scx.apply(s["scx"], s.get("scx_mode") or "gaming"))
         # After boost and CCX: toggling either can reset the policies' limits.
         if self.freqcap.available()[0]:
             if s.get("cap") and s.get("cap_mhz"):
                 self._guard("cpu", lambda: self.freqcap.apply(int(s["cap_mhz"])))
             else:
                 self._guard("cpu", self.freqcap.restore)
+
+    def _toggles(self) -> tuple:
+        return (("boost", self.boost), ("prefcore", self.prefcore), ("hwp_boost", self.hwp_boost), ("epp_boost", self.epp_boost))
 
     def apply_gpu(self) -> None:
         if not self.gpuclk.available()[0]:
@@ -954,6 +973,8 @@ class Controller:
 
     def restore(self, unload: bool = False) -> None:
         """Hand control back to firmware (unload, exit, EC switch)."""
+        if unload and self.settings["cpu"].get("smt") is False and self.smt.on() is False:
+            self._guard("cpu", lambda: self.smt.set(True))
         if unload and self.settings["cpu"].get("ccx_off") and self.ccx.on():
             self._guard("cpu", lambda: self.ccx.set(False))
         if unload:
@@ -1031,6 +1052,15 @@ class Controller:
             "limits": self.freqcap.limits_mhz() if ok else [], "avg": self.freqcap.avg_mhz() if ok else None,
         }
 
+    def _scx_state(self) -> dict:
+        ok, why = self.scx.available()
+        return {
+            "available": ok, "unavailable": why,
+            "schedulers": [{"name": n, "label": scx.short(n)} for n in self.scx.supported()] if ok else [],
+            "modes": list(scx.MODES),
+            "running": self.scx.running(),
+        }
+
     def _gpu_clock_state(self) -> dict:
         ok, why = self.gpuclk.available()
         lo, hi = self.gpuclk.hw_range() if ok else (0, 0)
@@ -1098,9 +1128,10 @@ class Controller:
                     "unavailable": why,
                     "on": ctl.on() if ok else None,
                 }
-                for name, ctl in (("boost", self.boost), ("prefcore", self.prefcore), ("ccx", self.ccx))
+                for name, ctl in (*self._toggles(), ("ccx", self.ccx), ("smt", self.smt))
                 for ok, why in [ctl.available()]
             }
+            | {"scx": self._scx_state()}
             | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()}
             | {"cap": self._cap_state()},
             "gpu": gpu_state | {"clock": self._gpu_clock_state()},

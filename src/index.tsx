@@ -26,6 +26,11 @@ type Settings = {
     ccx_off: boolean | null;
     cap: boolean;
     cap_mhz: number | null;
+    smt: boolean | null;
+    hwp_boost: boolean | null;
+    epp_boost: boolean | null;
+    scx: string | null;
+    scx_mode: string;
   };
   gpu: { mode: GpuMode; mhz: number | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
@@ -158,7 +163,17 @@ type State = {
     options: string[];
     current: string | null;
   };
-  cpu: Record<"boost" | "prefcore" | "ccx", { available: boolean; unavailable: string | null; on: boolean | null }> & {
+  cpu: Record<
+    "boost" | "prefcore" | "ccx" | "smt" | "hwp_boost" | "epp_boost",
+    { available: boolean; unavailable: string | null; on: boolean | null }
+  > & {
+    scx: {
+      available: boolean;
+      unavailable: string | null;
+      schedulers: { name: string; label: string }[];
+      modes: string[];
+      running: string | null;
+    };
     ccx_keep: number;
     ccx_total: number;
     cap: {
@@ -291,6 +306,13 @@ const EPP_LABELS: Record<string, string> = {
   balance_performance: "Balance performance",
   balance_power: "Balance power",
   power: "Power saver",
+};
+
+const SCX_MODES: Record<string, string> = {
+  auto: "Auto",
+  gaming: "Gaming",
+  powersave: "Power save",
+  lowlatency: "Low latency",
 };
 
 const GPU_MODES: Record<GpuMode, { label: string; description: string }> = {
@@ -1162,6 +1184,36 @@ function Content() {
                 onChange={(v) => change("cpu", { prefcore: v }, 0)}
               />
             </PanelSectionRow>
+            {state.cpu.hwp_boost.available && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="HWP dynamic boost"
+                  description="Briefly raises the CPU's minimum clock when a task wakes from I/O. Can smooth frame times; costs a little power."
+                  checked={draft.cpu.hwp_boost ?? state.cpu.hwp_boost.on ?? false}
+                  onChange={(v) => change("cpu", { hwp_boost: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            {state.cpu.epp_boost.available && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="EPP boost"
+                  description="Busy cores get EPP Performance for a moment, the rest keep your EPP. Steadier frame times than EPP Performance for less power."
+                  checked={draft.cpu.epp_boost ?? state.cpu.epp_boost.on ?? false}
+                  onChange={(v) => change("cpu", { epp_boost: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            {state.cpu.smt.available && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="SMT (2 threads per core)"
+                  description="Off halves the threads: saves a little power and can steady frame times in older games. Heavily threaded games run slower."
+                  checked={draft.cpu.smt ?? state.cpu.smt.on ?? true}
+                  onChange={(v) => change("cpu", { smt: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
             {state.cpu.ccx.available && (
               <PanelSectionRow>
                 <ToggleField
@@ -1212,6 +1264,37 @@ function Content() {
                     />
                   </PanelSectionRow>
                 )}
+              </>
+            )}
+            {state.cpu.scx.available && (
+              <>
+                <PanelSectionRow>
+                  <DropdownItem
+                    label="CPU scheduler"
+                    description={`sched_ext through scx_loader · now ${state.cpu.scx.running ?? "kernel default"}. LAVD was made for handhelds.`}
+                    rgOptions={[
+                      { data: "off", label: "Kernel default" },
+                      ...state.cpu.scx.schedulers.map((x) => ({ data: x.name, label: x.name })),
+                    ]}
+                    selectedOption={
+                      draft.cpu.scx ??
+                      state.cpu.scx.schedulers.find((x) => x.label === state.cpu.scx.running)?.name ??
+                      "off"
+                    }
+                    onChange={(o) => change("cpu", { scx: o.data }, 0)}
+                  />
+                </PanelSectionRow>
+                {draft.cpu.scx != null && draft.cpu.scx !== "off" && (
+                  <PanelSectionRow>
+                    <DropdownItem
+                      label="Scheduler mode"
+                      rgOptions={state.cpu.scx.modes.map((m) => ({ data: m, label: SCX_MODES[m] ?? titleCase(m) }))}
+                      selectedOption={draft.cpu.scx_mode}
+                      onChange={(o) => change("cpu", { scx_mode: o.data }, 0)}
+                    />
+                  </PanelSectionRow>
+                )}
+                <ErrorRow msg={state.errors.scx} />
               </>
             )}
             <ErrorRow msg={state.errors.cpu} />
