@@ -458,6 +458,7 @@ type Theme = {
   desc?: string;
   filter?: string;
   font?: string;
+  button?: [number, number, number]; // buttons and dropdowns, instead of Steam's gray
 };
 const THEMES: Record<string, Theme> = {
   default: { label: "Default (black)" },
@@ -470,6 +471,7 @@ const THEMES: Record<string, Theme> = {
     desc: "#d49a9a",
     filter: "hue-rotate(150deg) saturate(1.6) brightness(0.94)",
     font: "diablo",
+    button: [150, 30, 40],
   },
   blue: {
     label: "Blue",
@@ -479,6 +481,7 @@ const THEMES: Record<string, Theme> = {
     text: "#d6e6ff",
     desc: "#93a9c9",
     font: "doom",
+    button: [35, 85, 170],
   },
   green: {
     label: "Green",
@@ -489,6 +492,7 @@ const THEMES: Record<string, Theme> = {
     desc: "#8fb898",
     filter: "hue-rotate(-84deg) saturate(0.7) brightness(1.06)",
     font: "matrix",
+    button: [30, 120, 55],
   },
   gold: {
     label: "Gold",
@@ -499,6 +503,7 @@ const THEMES: Record<string, Theme> = {
     desc: "#c9b07a",
     filter: "hue-rotate(-156deg) saturate(0.8) brightness(1.24)",
     font: "quake",
+    button: [150, 110, 20],
   },
 };
 
@@ -552,6 +557,21 @@ const fontCss = (name: string, faces: string | null) => {
     .hhctl-root, .hhctl-root * { font-family: '${font.family}', ${font.fallback ?? "serif"} !important; }`;
 };
 
+// Buttons (Check for updates, ...) and dropdowns in a shade of the theme.
+// The focused one keeps Steam's own highlight, so gamepad focus stays obvious.
+const buttonCss = ([r, g, b]: [number, number, number]) => {
+  const btn = ["DialogButton", "DropDownControlButton"]
+    .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible)`)
+    .join(", ");
+  const hover = ["DialogButton", "DropDownControlButton"]
+    .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible):hover:not(:disabled)`)
+    .join(", ");
+  return `
+    ${btn} { background: rgba(${r}, ${g}, ${b}, 0.55) !important; }
+    ${hover} { background: rgba(${r}, ${g}, ${b}, 0.8) !important; }
+  `;
+};
+
 const themeCss = (name: string, hasImage: boolean) => {
   const t = THEMES[name];
   if (!t?.bg) return "";
@@ -585,6 +605,7 @@ const themeCss = (name: string, hasImage: boolean) => {
     .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel,
     .hhctl-root .hhctl-readout b, .hhctl-root .hhctl-readout .hhctl-capped:not(.hhctl-free) { color: ${t.title}; }
     ${t.filter ? `${controls} { filter: ${t.filter}; }` : ""}
+    ${t.button ? buttonCss(t.button) : ""}
   `;
 };
 
