@@ -78,7 +78,7 @@ cat > "$APPS/handheld-control.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=HHC Desktop
-Comment=System monitor (CPU, memory, GPU, disks, network, processes, sensors) and Handheld Control's settings
+Comment=Handheld Control on this PC: TDP, CPU and GPU clocks, fan, RGB, themes
 Exec=$DIR/hhc-desktop
 Terminal=false
 Icon=utilities-system-monitor

@@ -4,6 +4,8 @@
    asus-armoury, ...). This is what Bazzite's kernel exposes for the NEXT 2.
 2. Intel RAPL powercap (package MSR zone and the MMIO zone, both enforced).
 3. ryzenadj, if the binary is installed.
+4. AMD SMU mailbox, directly (what ryzenadj does), for the Zen 2 / Zen 3 APUs
+   listed in AmdSmu.FAMILIES, so those PCs need nothing installed.
 
 On Intel the ACPI platform profile matters too: in "low-power" the firmware
 holds the package near 15 W whatever RAPL says (seen on the ONEXPLAYER 3,
@@ -15,7 +17,9 @@ import glob
 import logging
 import os
 import shutil
+import struct
 import subprocess
+import time
 
 from . import proc, sysfs
 from .device import Device
@@ -240,10 +244,109 @@ class RyzenAdj:
         return self.last
 
 
+class AmdSmu:
+    """TDP through the SMU mailbox of AMD APUs, as ryzenadj does it.
+
+    The SMU's registers are reached through the host bridge's (00:00.0) SMN
+    index/data pair at 0xB8 / 0xBC of its PCI config space (the kernel uses
+    0x60 / 0x64, so the two don't race). A message: clear the response
+    register, write six arguments, write the message id, wait for the
+    response (1 = OK). Limits are in mW. Needs root and no kernel lockdown.
+    """
+
+    name = "amd smu"
+    PCI = "/sys/bus/pci/devices/0000:00:00.0/config"
+    INDEX, DATA = 0xB8, 0xBC
+    # MP1 mailbox (msg, response, first argument) for Renoir and later APUs.
+    MSG, REP, ARGS = 0x3B10528, 0x3B10578, 0x3B10998
+    # (cpu family, first model, last model): Renoir, Lucienne, Cezanne / Barcelo.
+    FAMILIES = [(0x17, 0x60, 0x6F), (0x19, 0x50, 0x5F)]
+    GET_VERSION, STAPM, FAST, SLOW = 0x02, 0x14, 0x15, 0x16
+    TIMEOUT = 0.5
+
+    def __init__(self, pci: str | None = None):
+        self.pci = pci or self.PCI
+        self.last: int | None = None
+
+    @classmethod
+    def supported(cls, cpuinfo: str) -> bool:
+        info = {}
+        for line in cpuinfo.splitlines():
+            k, _, v = line.partition(":")
+            info.setdefault(k.strip(), v.strip())
+        if info.get("vendor_id") != "AuthenticAMD":
+            return False
+        try:
+            fam, model = int(info["cpu family"]), int(info["model"])
+        except (KeyError, ValueError):
+            return False
+        return any(f == fam and lo <= model <= hi for f, lo, hi in cls.FAMILIES)
+
+    @classmethod
+    def find(cls, cpuinfo: str | None = None):
+        if not cls.supported(cpuinfo if cpuinfo is not None else (sysfs.read("/proc/cpuinfo") or "")):
+            return None
+        smu = cls()
+        try:
+            ver = smu.version()
+        except OSError as e:
+            log.info("amd smu: not usable (%s)", e)
+            return None
+        log.info("amd smu: firmware %s", ver)
+        return smu
+
+    def _rw(self, fd: int, addr: int, value: int | None = None) -> int:
+        os.pwrite(fd, struct.pack("<I", addr), self.INDEX)
+        if value is not None:
+            os.pwrite(fd, struct.pack("<I", value & 0xFFFFFFFF), self.DATA)
+            return value
+        return struct.unpack("<I", os.pread(fd, 4, self.DATA))[0]
+
+    def send(self, msg: int, args: list[int] | None = None) -> list[int]:
+        args = (args or []) + [0] * (6 - len(args or []))
+        fd = self._open()
+        try:
+            self._rw(fd, self.REP, 0)
+            for i, a in enumerate(args):
+                self._rw(fd, self.ARGS + 4 * i, a)
+            self._rw(fd, self.MSG, msg)
+            deadline = time.monotonic() + self.TIMEOUT
+            while (rep := self._rw(fd, self.REP)) == 0:
+                if time.monotonic() > deadline:
+                    raise OSError(f"SMU didn't answer message {msg:#x}")
+                time.sleep(0.001)
+            if rep != 1:
+                raise OSError(f"SMU refused message {msg:#x} (response {rep:#x})")
+            return [self._rw(fd, self.ARGS + 4 * i) for i in range(6)]
+        finally:
+            self._close(fd)
+
+    def _open(self) -> int:
+        return os.open(self.pci, os.O_RDWR)
+
+    def _close(self, fd: int) -> None:
+        os.close(fd)
+
+    def version(self) -> str:
+        v = self.send(self.GET_VERSION)[0]
+        return f"{v >> 16 & 0xFF}.{v >> 8 & 0xFF}.{v & 0xFF}"
+
+    def apply(self, dev: Device, watts: int, boost: bool) -> None:
+        slow, fast = boost_limits(dev, watts, boost)  # short boost, peak boost
+        # Ceilings first, as with firmware-attributes: sustained never above boost.
+        self.send(self.FAST, [fast * 1000])
+        self.send(self.SLOW, [slow * 1000])
+        self.send(self.STAPM, [watts * 1000])
+        self.last = watts
+
+    def current(self) -> int | None:
+        return self.last
+
+
 def find_backend(dev: Device):
     fw = FirmwareAttrs.find()
     if fw:
         return fw
     if dev.cpu == "intel":
         return Rapl.find()
-    return RyzenAdj.find()
+    return RyzenAdj.find() or AmdSmu.find()

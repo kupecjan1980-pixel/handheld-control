@@ -930,7 +930,7 @@ class Controller:
             return
         # Firmware tends to reset power limits on AC changes; ryzenadj
         # limits also drift, so re-assert them every minute.
-        if ac_changed or (isinstance(self.tdp, tdp.RyzenAdj) and time.monotonic() - self.last_tdp_apply > 60):
+        if ac_changed or (isinstance(self.tdp, (tdp.RyzenAdj, tdp.AmdSmu)) and time.monotonic() - self.last_tdp_apply > 60):
             self.apply_tdp()
         # power-profiles-daemon / tuned rewrite EPP (and sometimes boost) on
         # profile or AC changes, so re-assert our CPU choices every 10 s.

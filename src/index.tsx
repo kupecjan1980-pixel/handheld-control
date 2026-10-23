@@ -1063,7 +1063,7 @@ function Content() {
         <div style={view === "main" ? undefined : { display: "none" }}>
           <PanelSection>
             {!tdp.backend ? (
-              <Unavailable why="No TDP interface found (firmware-attributes, RAPL or ryzenadj)." />
+              <Unavailable why="No TDP interface found (firmware-attributes, RAPL, ryzenadj or the AMD SMU)." />
             ) : (
               <>
                 <PanelSectionRow>

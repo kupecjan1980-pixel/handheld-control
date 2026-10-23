@@ -35,13 +35,10 @@ Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
 **HHC Desktop** (desktop PCs): run `sudo desktop/install.sh` once, then open
-**HHC Desktop** from the app launcher. It's a system monitor in the style of
-Mission Center: a sidebar of devices with live graphs (CPU overall and per
-core, memory, GPU, each disk and network connection), plus processes
-(sortable, searchable), sensors and file systems. Its **Controls** page is
-the plugin's own panel, with everything it can change on the PC. It opens in
-its own Chromium window, with no terminal and no password, and updates
-itself from each release's desktop zip. The
+**HHC Desktop** from the app launcher. It's the plugin's panel in its own
+Chromium window, with everything it can change on the PC, and no terminal or
+password. It updates itself from each release's desktop zip (Check for
+updates). The
 plugin's real backend runs as a root system service, copied to
 `/opt/handheld-control-desktop` (root-owned). systemd starts it when the window
 connects and it stops when the window closes, putting everything back as
@@ -90,7 +87,7 @@ In Decky, enable **Settings → General → Developer mode**, then use
 **Developer → Install plugin from URL** with:
 
 ```
-https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.17/handheld-control-0.10.17.zip
+https://github.com/kupecjan1980-pixel/handheld-control/releases/download/v0.10.18/handheld-control-0.10.18.zip
 ```
 
 To build it yourself, run `./package.sh` (needs node, npm and zip). Copy
@@ -294,8 +291,7 @@ py_modules/hhctl/
   backlight.py          brightness
   background.py         custom panel background picture, picture browser
   updater.py            install any GitHub release from the panel
-desktop/              HHC Desktop: monitor + plugin panel on a PC (app.tsx, server.py, shims/)
-  sysmon.py             CPU, memory, GPU, disks, network, sensors, processes for HHC Desktop
+desktop/              HHC Desktop: the plugin's panel as a desktop app (server.py, shims/)
   buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)
