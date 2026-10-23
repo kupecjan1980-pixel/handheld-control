@@ -76,8 +76,9 @@ the vendor HID interface (`1a2c:b001`, Handheld Daemon's "hid_v2" commands:
 solid color, effects, brightness, off). Nothing is sent until the RGB section
 is turned on. If Handheld Daemon also runs, turn its RGB off.
 
-**Device name** (last section) replaces the detected name in the header; the
-CPU model is shown under it.
+The header shows the device's name from the firmware (DMI: vendor + product,
+else vendor + board; the CPU model when the BIOS left placeholders) with the
+CPU model under it.
 
 Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and

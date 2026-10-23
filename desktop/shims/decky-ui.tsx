@@ -87,26 +87,6 @@ export function ToggleField(p: {
   );
 }
 
-export function TextField(p: {
-  label?: ReactNode;
-  description?: ReactNode;
-  value?: string;
-  disabled?: boolean;
-  onChange?: (e: { target: { value: string } }) => void;
-}) {
-  return (
-    <Field label={p.label} description={p.description}>
-      <input
-        className="hhc-text"
-        type="text"
-        value={p.value ?? ""}
-        disabled={p.disabled}
-        onChange={(e) => p.onChange?.({ target: { value: e.target.value } })}
-      />
-    </Field>
-  );
-}
-
 export function SliderField(p: {
   label?: ReactNode;
   description?: ReactNode;

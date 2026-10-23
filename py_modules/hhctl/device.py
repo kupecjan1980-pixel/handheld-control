@@ -172,9 +172,24 @@ def cpu_model(cpuinfo: str | None = None) -> str | None:
     return None
 
 
+# Vendors whose product names already carry the brand ("ONEXPLAYER F1 EVA-02").
+VENDOR_IN_PRODUCT = {"one-netbook"}
+
+
+def _real(val: str | None) -> str:
+    return "" if (val or "").strip().lower() in DMI_JUNK else (val or "").strip()
+
+
 def _generic_name(vendor: str, board: str, cpuinfo: str) -> str:
-    """vendor + board, or the CPU model when the firmware left placeholders."""
-    parts = [p for p in (vendor, board) if p.strip().lower() not in DMI_JUNK]
+    """The firmware's (BIOS) name: vendor + product ("ASRock DeskMini X600"),
+    else vendor + board ("ASRock X600M-STX"), else the CPU model when every
+    field is a placeholder (GenMachine Ren: "Default string")."""
+    sys_vendor, product = _real(sysfs.read(f"{DMI}/sys_vendor")), _real(sysfs.read(f"{DMI}/product_name"))
+    if product:
+        v = sys_vendor or _real(vendor)
+        skip = not v or v.lower() in VENDOR_IN_PRODUCT or v.split()[0].lower() in product.lower()
+        return product if skip else f"{v} {product}"
+    parts = [p for p in (_real(vendor), _real(board)) if p]
     if parts:
         return " ".join(parts)
     for line in cpuinfo.splitlines():

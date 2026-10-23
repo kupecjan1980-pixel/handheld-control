@@ -40,8 +40,7 @@ DEFAULTS = {
     # bg_pos: which part of the picture shows (CSS background-position %) and zoom (%).
     # Extra buttons open Steam things (AYN -> this plugin, Win+D -> keyboard).
     "controller": {"buttons": True},
-    # device_name: the user's name for the device ("" = detected name).
-    "ui": {"device_name": "", "theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
+    "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
     "battery": {"limit": 100, "bypass": "off"},

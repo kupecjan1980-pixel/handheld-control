@@ -9,7 +9,6 @@ import {
   PanelSection,
   PanelSectionRow,
   SliderField,
-  TextField,
   ToggleField,
   gamepadDialogClasses,
   gamepadSliderClasses,
@@ -49,7 +48,6 @@ type Settings = {
   ec: { enabled: boolean };
   controller: { buttons: boolean };
   ui: {
-    device_name: string;
     theme: string;
     font: string;
     bg: string | null;
@@ -1011,14 +1009,9 @@ function Content() {
   const r = draft.rgb;
 
   const theme = draft.ui?.theme ?? "default";
-  const customName = (draft.ui?.device_name ?? "").trim();
-  const deviceName = customName || state.device.name;
-  // The CPU under the name when the user named the device, or on PCs the
-  // plugin doesn't know (handhelds keep the compact one-line header).
-  const cpuLine =
-    state.device.cpu && (customName || state.device.generic)
-      ? state.device.cpu
-      : null;
+  // The firmware's name for the device, with the CPU model under it.
+  const deviceName = state.device.name;
+  const cpuLine = state.device.cpu;
   const pos = draft.ui?.bg_pos ?? DEFAULT_POS;
   const boxW = rootRef.current?.clientWidth;
   const boxH = fitHeight ?? rootRef.current?.clientHeight;
@@ -2087,14 +2080,6 @@ function Content() {
                 </>
               );
             })()}
-            <PanelSectionRow>
-              <TextField
-                label="Device name"
-                description={`Shown at the top with the CPU. Empty: ${state.device.name}`}
-                value={draft.ui?.device_name ?? ""}
-                onChange={(e) => change("ui", { device_name: e.target.value.slice(0, 40) }, 800)}
-              />
-            </PanelSectionRow>
             <PanelSectionRow>
               <DropdownItem
                 label="Theme color"
