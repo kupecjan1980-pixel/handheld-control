@@ -198,6 +198,7 @@ type State = {
     vram_total_mb: number | null;
     gtt_mb: number | null;
     mem_mb: number | null;
+    pipes: { gc: string | null; state: "on" | "off" | "unsupported" | "unknown" } | null;
     clock: {
       available: boolean;
       unavailable: string | null;
@@ -1336,6 +1337,21 @@ function Content() {
                   <Field
                     label="Held back by"
                     description={`${reasons(gpu.clock.throttle)}. Raise the TDP or limit the CPU clock to give the GPU more power.`}
+                  />
+                </PanelSectionRow>
+              )}
+              {gpu.pipes && (
+                <PanelSectionRow>
+                  <Field
+                    label="Second graphics pipe"
+                    description={
+                      {
+                        on: "On: the kernel runs two graphics queues",
+                        off: "Off: needs Linux 7.3+ (RDNA 3 / 3.5 APUs only); turns on by itself after a kernel update",
+                        unsupported: `Not on this GPU (GFX ${gpu.pipes.gc}): only RDNA 3 / 3.5 APUs have it`,
+                        unknown: "Can't tell: debugfs isn't readable (kernel lockdown?)",
+                      }[gpu.pipes.state]
+                    }
                   />
                 </PanelSectionRow>
               )}

@@ -13,9 +13,10 @@ plugin reads the same data itself:
 import glob
 import os
 import re
+import subprocess
 import time
 
-from . import sysfs
+from . import proc, sysfs
 
 
 def memory_mb() -> tuple[int | None, int | None]:
@@ -117,6 +118,39 @@ def drm_client_memory(driver: str) -> int | None:
                 except (ValueError, KeyError):
                     pass
     return total if found else None
+
+
+DEBUG_DRI = "/sys/kernel/debug/dri"
+
+
+def gfx_pipes(dev: str | None) -> dict:
+    """Is amdgpu's second graphics pipe running? (GFX11 APUs, Linux 7.3+)
+
+    The kernel only offers it on RDNA 3 / 3.5 APUs (GC 11.x) with F32
+    firmware, and nothing can switch it on from userspace: this only reports.
+    The second pipe shows up as an extra gfx ring (gfx_0.1.0) in debugfs.
+    """
+    gc = [sysfs.read(f"{dev}/ip_discovery/die/0/GC/0/{k}") for k in ("major", "minor", "revision")] if dev else []
+    version = ".".join(gc) if gc and all(gc) else None
+    out = {"gc": version, "state": "unknown"}
+    if version and not version.startswith("11."):
+        out["state"] = "unsupported"
+        return out
+    if not os.path.ismount("/sys/kernel/debug"):
+        try:
+            proc.run(["mount", "-t", "debugfs", "none", "/sys/kernel/debug"], timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    pci = os.path.basename(dev or "")
+    for name in glob.glob(f"{DEBUG_DRI}/*/name"):
+        if pci and pci in (sysfs.read(name) or ""):
+            d = os.path.dirname(name)
+            if os.path.exists(f"{d}/amdgpu_ring_gfx_0.1.0"):
+                out["state"] = "on"
+            elif os.path.exists(f"{d}/amdgpu_ring_gfx_0.0.0"):
+                out["state"] = "off"
+            break
+    return out
 
 
 class Gpu:

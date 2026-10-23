@@ -110,6 +110,8 @@ class Controller:
         self.profile = tdp.PlatformProfile() if isinstance(self.tdp, tdp.Rapl) else None
         self.rgb = rgb.find_backend(self.dev)
         self.gpu = gpu.Gpu()
+        # Fixed while the driver is loaded, so read once.
+        self.gfx_pipes = gpu.gfx_pipes(self.gpu.dev) if self.gpu.driver == "amdgpu" else None
         self.epp = epp.Epp()  # snapshots the original EPP before anything is applied
         self.last_epp_check = 0.0
         self.boost = cpu.Boost()
@@ -1134,7 +1136,7 @@ class Controller:
             | {"scx": self._scx_state()}
             | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()}
             | {"cap": self._cap_state()},
-            "gpu": gpu_state | {"clock": self._gpu_clock_state()},
+            "gpu": gpu_state | {"clock": self._gpu_clock_state(), "pipes": self.gfx_pipes},
             "perf": self._perf_state(gpu_state, cur),
             "display": self._display_state(),
             "version": self.version,
