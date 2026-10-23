@@ -490,6 +490,18 @@ const THEMES: Record<string, Theme> = {
     font: "diablo",
     button: [175, 25, 35],
   },
+  // Bright red panel; bright yellow headlines, toggles and sliders; Steam's font.
+  redyellow: {
+    label: "Red + Yellow",
+    bg: "linear-gradient(180deg, rgba(235, 20, 25, 0.60) 0%, rgba(150, 8, 12, 0.42) 100%)",
+    title: "#ffe600",
+    label2: "#fff27a",
+    text: "#fff8e0",
+    desc: "#f5b8a8",
+    filter: "hue-rotate(-148deg) saturate(1.3) brightness(1.4)",
+    font: "default",
+    button: [190, 20, 25],
+  },
   blue: {
     label: "Blue",
     bg: "linear-gradient(180deg, rgba(25, 80, 190, 0.40) 0%, rgba(10, 30, 80, 0.25) 100%)",
@@ -528,6 +540,7 @@ const THEMES: Record<string, Theme> = {
 const THEME_RGB: Record<string, [number, number]> = {
   red: [0, 100],
   redgold: [0, 100],
+  redyellow: [0, 100],
   blue: [215, 100],
   green: [130, 100],
   gold: [42, 100],
