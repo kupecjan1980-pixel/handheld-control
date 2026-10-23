@@ -71,6 +71,11 @@ and Auto hands them back to the mode the BIOS had set. Mini PCs without an
 embedded controller or Super I/O chip (e.g. GenMachine Ren) give Linux no fan
 control at all; the panel says so.
 
+**OneXFly F1 family** (F1, F1 OLED, F1L, F1 Pro, EVA-01, EVA-02): RGB over
+the vendor HID interface (`1a2c:b001`, Handheld Daemon's "hid_v2" commands:
+solid color, effects, brightness, off). Nothing is sent until the RGB section
+is turned on. If Handheld Daemon also runs, turn its RGB off.
+
 **Device name** (last section) replaces the detected name in the header; the
 CPU model is shown under it.
 

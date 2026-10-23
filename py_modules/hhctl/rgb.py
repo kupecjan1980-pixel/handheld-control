@@ -2,6 +2,7 @@
 
 - AYANEO NEXT 2: vendor HID (1c4f:0002, usage page 0xFF00), 65-byte report,
   command 21 09 with a checksum in bytes 1-2 (protocol from HHD).
+- OneXFly F1 family: OXP HID v2 (1a2c:b001, usage page 0xFF01), from HHD.
 - OneXPlayer: the OXP HID v1 vendor protocol (1a86:fe00, usage page 0xFF00),
   else the hid-oxp kernel LED (`oxp:rgb:*`). On the ONEXPLAYER 3 the kernel
   LED left the lights on rainbow; the vendor protocol reaches every zone
@@ -195,6 +196,41 @@ class OxpHidV1(_Hidraw):
         self.send(pkts)
 
 
+def _oxp_v2_cmd(cid: int, payload: list[int]) -> bytes:
+    base = bytes([cid, 0xFF, *payload])
+    return base + bytes(64 - len(base))
+
+
+class OxpHidV2(_Hidraw):
+    """OneXFly F1 family (F1, F1 OLED, F1L, F1 Pro, EVA-01, EVA-02): vendor
+    HID 1a2c:b001, usage page 0xFF01, HHD's "hid_v2" commands (oxp/hid_v2.py):
+    0x07 FD <on> 05 <level> switches the stick lights and sets brightness,
+    0x07 FE + 20 x RGB a solid color, 0x07 <id> an effect (same ids as v1).
+    HHD sends nothing until the user changes the lights, since an early RGB
+    write broke rumble; this only writes when the RGB section is on."""
+
+    name = "oxp hid v2"
+    modes = ["off", "solid", "effect"]
+    effects = list(OXP_V1_EFFECTS)
+
+    @classmethod
+    def find(cls):
+        path = find_hidraw(0x1A2C, 0xB001, 0xFF01)
+        return cls(path) if path else None
+
+    def apply(self, mode: str, hue: int, sat: int, bright: int, effect: str | None) -> None:
+        on = mode != "off"
+        level = 0x01 if bright < 34 else 0x03 if bright < 67 else 0x04
+        pkts = [_oxp_v2_cmd(0x07, [0xFD, int(on), 0x05, level])]
+        if on:
+            if mode == "effect" and effect in OXP_V1_EFFECTS:
+                pkts.append(_oxp_v2_cmd(0x07, [OXP_V1_EFFECTS[effect]]))
+            else:
+                r, g, b = hsv(hue, sat, 100)
+                pkts.append(_oxp_v2_cmd(0x07, [0xFE] + 20 * [r, g, b] + [0x00]))
+        self.send(pkts)
+
+
 # Light zone test: every candidate zone id gets its own color at once, so the
 # user can say which part (stick rings, top logo, power button ring) is which.
 ZONE_TEST = [
@@ -221,4 +257,5 @@ def find_backend(dev: Device):
         return AyaneoHid.find()
     if dev.rgb == "oxp":
         return OxpHidV1.find() or OxpLed.find()
-    return OxpLed.find()
+    # Unlisted devices: a OneXFly's vendor interface, else the kernel LED.
+    return OxpHidV2.find() or OxpLed.find()
