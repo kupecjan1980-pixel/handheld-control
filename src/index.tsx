@@ -102,6 +102,7 @@ type State = {
     capacity?: number | null;
     status?: string | null;
     power_w?: number | null;
+    remaining_min?: number | null;
     inhibited?: boolean;
     ac?: boolean;
   };
@@ -979,6 +980,8 @@ function Content() {
             <span className="hhctl-tdp">
               TDP {gpu.pkg_w}
               {perf.tdp_w ? ` / ${perf.tdp_w}` : ""} W
+              {state.battery.remaining_min != null &&
+                ` · ${Math.floor(state.battery.remaining_min / 60)}:${String(state.battery.remaining_min % 60).padStart(2, "0")}`}
             </span>
           )}
         </div>

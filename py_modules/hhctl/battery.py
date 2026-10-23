@@ -7,6 +7,8 @@ plugin's background loop.
 """
 
 import glob
+import math
+import time
 
 from . import ec, sysfs
 from .device import Device
@@ -32,6 +34,7 @@ class Battery:
     def __init__(self, dev: Device, allow_ec: bool):
         self.dev = dev
         self.bat = find_battery()
+        self.draw: tuple[float, float] | None = None  # (smoothed draw, when)
         self.ec_ok = False
         self.ec_why = ""
         self.native_limit = bool(self.bat) and sysfs.writable(f"{self.bat}/charge_control_end_threshold")
@@ -135,6 +138,26 @@ class Battery:
     def capacity(self) -> int | None:
         return sysfs.read_int(f"{self.bat}/capacity") if self.bat else None
 
+    def remaining_min(self) -> int | None:
+        """Minutes left on battery, like MangoHud's: what's left divided by
+        the draw. The draw is smoothed over ~30 s so the time doesn't jump
+        with every frame-rate spike."""
+        if sysfs.read(f"{self.bat}/status") != "Discharging":
+            self.draw = None
+            return None
+        # Energy (µWh / µW) where the battery reports it, else charge (µAh / µA).
+        left, draw = sysfs.read_int(f"{self.bat}/energy_now"), sysfs.read_int(f"{self.bat}/power_now")
+        if left is None or not draw:
+            left, draw = sysfs.read_int(f"{self.bat}/charge_now"), sysfs.read_int(f"{self.bat}/current_now")
+        if left is None or not draw:
+            return None
+        now, draw = time.monotonic(), abs(draw)
+        if self.draw:
+            k = 1 - math.exp(-(now - self.draw[1]) / 30)
+            draw = self.draw[0] + k * (draw - self.draw[0])
+        self.draw = (draw, now)
+        return int(60 * left / draw)
+
     def status(self) -> dict:
         if not self.bat:
             return {}
@@ -146,6 +169,7 @@ class Battery:
         return {
             "capacity": self.capacity(),
             "status": sysfs.read(f"{self.bat}/status"),
+            "remaining_min": self.remaining_min(),
             # 0 W is real information (bypass working), so only None hides it.
             "power_w": round(abs(power) / 1_000_000, 1) if power is not None else None,
             "ac": ac_online(),
