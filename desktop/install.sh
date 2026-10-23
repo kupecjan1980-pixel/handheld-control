@@ -26,8 +26,16 @@ if [ "${1:-}" = "--remove" ]; then
     exit 0
 fi
 
-echo "Building the panel (as $USER_NAME)…"
-sudo -u "$USER_NAME" bash -c "cd '$REPO' && npm install --no-audit --no-fund >/dev/null && npx rollup -c desktop/rollup.config.mjs" >/dev/null
+# Build the panel as the user, unless it's already up to date. sudo's PATH
+# lacks the user's node (e.g. mise shims), so add the usual places.
+if [ ! -f "$DIR/dist/bundle.js" ] || [ -n "$(find "$REPO/src" "$DIR/shims" "$DIR/entry.tsx" "$DIR/index.html" -newer "$DIR/dist/bundle.js" 2>/dev/null)" ]; then
+    echo "Building the panel (as $USER_NAME)…"
+    USER_PATH="$USER_HOME/.local/share/mise/shims:$USER_HOME/.local/bin:$USER_HOME/.volta/bin:/usr/local/bin:/usr/bin:/bin"
+    sudo -u "$USER_NAME" env PATH="$USER_PATH" HOME="$USER_HOME" bash -c \
+        "cd '$REPO' && npm install --no-audit --no-fund >/dev/null && npx rollup -c desktop/rollup.config.mjs" >/dev/null \
+        || { echo "Couldn't build the panel. Run this as yourself, then this script again:"
+             echo "  cd $REPO && npm install && npx rollup -c desktop/rollup.config.mjs"; exit 1; }
+fi
 
 echo "Copying to $DEST…"
 systemctl stop hhc-desktop.service 2>/dev/null || true
