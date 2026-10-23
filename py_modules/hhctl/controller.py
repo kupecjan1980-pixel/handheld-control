@@ -112,6 +112,7 @@ class Controller:
         self.prefcore = cpu.Prefcore()
         self.ccx = cpu.Ccx(os.path.join(os.path.dirname(settings_path), "ccx-groups.json"))
         self.freqcap = cpu.FreqCap()
+        self.cpu_util = cpu.Util()
         self.limit_reasons = cpu.LimitReasons()
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.emit = lambda action: None  # set by main.py: sends a button action to the panel
@@ -916,6 +917,7 @@ class Controller:
 
     def tick(self) -> None:
         self.gpu.sample()
+        self.cpu_util.sample()
         self.tick_gamescope()
         offset = _sleep_offset()
         resumed = offset - self.sleep_offset > 2
@@ -1014,6 +1016,7 @@ class Controller:
         return {
             "cpu_mhz": self.freqcap.avg_mhz() if ok else None,
             "cpu_peak_mhz": self.freqcap.peak_mhz() if ok else None,
+            "cpu_util": round(self.cpu_util.value) if self.cpu_util.value is not None else None,
             "cpu_temp_c": round(t) if (t := fan.cpu_temp()) is not None else None,
             "ram_used_mb": used, "ram_total_mb": total,
             "tdp_w": tdp_now,

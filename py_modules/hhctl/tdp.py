@@ -257,8 +257,10 @@ class AmdSmu:
     name = "amd smu"
     PCI = "/sys/bus/pci/devices/0000:00:00.0/config"
     INDEX, DATA = 0xB8, 0xBC
-    # MP1 mailbox (msg, response, first argument) for Renoir and later APUs.
-    MSG, REP, ARGS = 0x3B10528, 0x3B10578, 0x3B10998
+    # MP1 mailbox (msg, response, first argument). Renoir to Cezanne answer at
+    # 0x3B10564; 0x3B10578 is Rembrandt and later (ryzenadj's two MP1 sets):
+    # with the wrong one the 7730U "didn't answer" (HHC Desktop log, 2026-10-23).
+    MSG, REP, ARGS = 0x3B10528, 0x3B10564, 0x3B10998
     # (cpu family, first model, last model): Renoir, Lucienne, Cezanne / Barcelo.
     FAMILIES = [(0x17, 0x60, 0x6F), (0x19, 0x50, 0x5F)]
     GET_VERSION, STAPM, FAST, SLOW = 0x02, 0x14, 0x15, 0x16

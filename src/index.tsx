@@ -112,6 +112,7 @@ type State = {
   perf: {
     cpu_mhz: number | null;
     cpu_peak_mhz: number | null;
+    cpu_util: number | null;
     cpu_temp_c: number | null;
     ram_used_mb: number | null;
     ram_total_mb: number | null;
@@ -177,6 +178,7 @@ type State = {
     cpu_w_est: boolean;
     temp_c: number | null;
     freq_mhz: number | null;
+    util: number | null;
     vram_mb: number | null;
     vram_total_mb: number | null;
     gtt_mb: number | null;
@@ -336,11 +338,11 @@ const READOUT_CSS = `
   .hhctl-device { font-size: 14px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; }
   .hhctl-tdp { font-size: 12px; color: #dcdedf; }
   .hhctl-readout {
-    display: grid; grid-template-columns: auto auto auto auto minmax(0, 1fr); gap: 0 8px;
+    display: grid; grid-template-columns: auto auto auto auto auto minmax(0, 1fr); gap: 0 7px;
     font-size: 12px; line-height: 15px; color: #dcdedf; padding-top: 2px; white-space: nowrap;
   }
   .hhctl-readout > span { overflow: hidden; text-overflow: ellipsis; }
-  .hhctl-readout > span:nth-child(-n + 5) { color: #8b929a; font-size: 11px; }
+  .hhctl-readout > span:nth-child(-n + 6) { color: #8b929a; font-size: 11px; }
   .hhctl-readout .hhctl-capped {
     grid-column: 2 / -1; color: #ffb35c; font-style: normal; font-size: 11px;
     overflow: hidden; text-overflow: ellipsis;
@@ -507,7 +509,7 @@ const themeCss = (name: string, hasImage: boolean) => {
   return `
     ${hasImage ? "" : `.hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }`}
     ${texts} { color: ${t.text}; }
-    ${descs}, .hhctl-root .hhctl-readout > span:nth-child(-n + 5), .hhctl-root .hhctl-readout .hhctl-free { color: ${t.desc}; }
+    ${descs}, .hhctl-root .hhctl-readout > span:nth-child(-n + 6), .hhctl-root .hhctl-readout .hhctl-free { color: ${t.desc}; }
     ${labels} { color: ${t.label2}; }
     .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel,
     .hhctl-root .hhctl-readout b, .hhctl-root .hhctl-readout .hhctl-capped:not(.hhctl-free) { color: ${t.title}; }
@@ -873,6 +875,7 @@ function Content() {
   const rows: {
     name: string;
     clock: string;
+    util: string;
     power: string;
     temp: string;
     mem: string;
@@ -880,6 +883,7 @@ function Content() {
   }[] = [
     {
       name: "CPU",
+      util: perf.cpu_util != null ? `${perf.cpu_util}%` : dash,
       clock: perf.cpu_mhz != null ? ghz(perf.cpu_mhz) : dash,
       power: gpu.cpu_w != null ? `${gpu.cpu_w_est ? "≈" : ""}${gpu.cpu_w} W` : dash,
       temp: perf.cpu_temp_c != null ? `${perf.cpu_temp_c}°C` : dash,
@@ -891,6 +895,7 @@ function Content() {
     },
     {
       name: "GPU",
+      util: gpu.util != null ? `${gpu.util}%` : dash,
       clock: gpu.freq_mhz != null ? `${gpu.freq_mhz} MHz` : dash,
       power: gpu.gpu_w != null ? `${gpu.gpu_w} W` : dash,
       temp: gpu.temp_c != null ? `${gpu.temp_c}°C` : dash,
@@ -947,6 +952,7 @@ function Content() {
         {showReadout && (
           <div className="hhctl-readout">
             <span />
+            <span>Util</span>
             <span>Clock</span>
             <span>Power</span>
             <span>Temp</span>
@@ -954,6 +960,7 @@ function Content() {
             {rows.map((r) => (
               <Fragment key={r.name}>
                 <b>{r.name}</b>
+                <span>{r.util}</span>
                 <span>{r.clock}</span>
                 <span>{r.power}</span>
                 <span>{r.temp}</span>
@@ -1963,7 +1970,7 @@ function TitleView() {
           minWidth: 0,
         }}
       >
-        HHC
+        {(window as any).HHC_DESKTOP ? "HHC Desktop" : "HHC"}
       </span>
       {version && <span style={{ fontSize: "0.55em", opacity: 0.6, flexShrink: 0 }}>v{version}</span>}
     </div>

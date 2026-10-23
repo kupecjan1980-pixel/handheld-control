@@ -181,6 +181,27 @@ class Ccx:
         return sum(len(g) for g in self.groups)
 
 
+class Util:
+    """Whole-CPU utilization (%) since the previous sample, from /proc/stat."""
+
+    STAT = "/proc/stat"
+
+    def __init__(self):
+        self.prev: tuple[int, int] | None = None
+        self.value: float | None = None
+
+    def sample(self) -> float | None:
+        line = (sysfs.read(self.STAT) or "").split("\n", 1)[0].split()
+        if not line or line[0] != "cpu":
+            return self.value
+        v = [int(x) for x in line[1:9]]
+        busy, total = sum(v) - v[3] - v[4], sum(v)  # minus idle and iowait
+        if self.prev and total > self.prev[1]:
+            self.value = round(100 * (busy - self.prev[0]) / (total - self.prev[1]), 1)
+        self.prev = (busy, total)
+        return self.value
+
+
 class FreqCap:
     """Cap the CPU clock through each cpufreq policy's scaling_max_freq.
 

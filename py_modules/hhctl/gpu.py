@@ -133,12 +133,41 @@ class Gpu:
                 self.gpu_meter = EnergyMeter(energy)
             else:
                 self.gpu_meter = _meter(_rapl_zone("uncore"))
+        # Utilization: amdgpu reports it; on Intel it's 100% minus the share of
+        # time the GT spent idle (xe gtidle, i915 RC6) since the last tick.
+        self.idle_file = self._idle_file()
+        self.idle_prev: tuple[float, int] | None = None
+        self.util: float | None = None
+
+    def _idle_file(self) -> str | None:
+        if self.driver == "xe":
+            files = sorted(glob.glob(f"{self.dev}/tile0/gt0/gtidle/idle_residency_ms"))
+        elif self.driver == "i915":
+            files = sorted(glob.glob(f"{self.dev}/drm/card*/power/rc6_residency_ms"))
+        else:
+            return None
+        return files[0] if files else None
 
     def sample(self) -> None:
         """Called every tick so energy deltas stay fresh."""
         for m in (self.pkg, self.core, self.gpu_meter):
             if m:
                 m.sample()
+        if self.idle_file:
+            idle = sysfs.read_int(self.idle_file)
+            now = time.monotonic()
+            if idle is not None:
+                if self.idle_prev:
+                    t0, i0 = self.idle_prev
+                    ms = (now - t0) * 1000
+                    if ms > 0:
+                        self.util = max(0.0, min(100.0, 100 * (1 - (idle - i0) / ms)))
+                self.idle_prev = (now, idle)
+
+    def _util(self) -> int | None:
+        if self.driver == "amdgpu" and self.dev:
+            return sysfs.read_int(f"{self.dev}/gpu_busy_percent")
+        return round(self.util) if self.util is not None else None
 
     def _gpu_watts(self) -> float | None:
         if self.driver == "amdgpu" and self.hwmon:
@@ -184,6 +213,7 @@ class Gpu:
             "cpu_w": self.core.watts if self.core else None,
             "cpu_w_est": False,
             "freq_mhz": self._freq_mhz(),
+            "util": self._util(),
             "vram_mb": None,
             "vram_total_mb": None,
             "gtt_mb": None,
