@@ -68,7 +68,7 @@ On PCs that aren't one of the handhelds, the fan goes through the board's
 Super I/O chip (`nct6775`, `nct6683` or `it87`, loaded at start; e.g. ASRock
 DeskMini X300 / X600): the headers with a spinning fan are driven together,
 and Auto hands them back to the mode the BIOS had set. Mini PCs without an
-embedded controller or Super I/O chip (e.g. GenMachine Ren) give Linux no fan
+embedded controller or Super I/O chip (e.g. GenMachine Ren7000) give Linux no fan
 control at all; the panel says so.
 
 **OneXFly F1 family** (F1, F1 OLED, F1L, F1 Pro, EVA-01, EVA-02): RGB over
@@ -77,7 +77,7 @@ solid color, effects, brightness, off). Nothing is sent until the RGB section
 is turned on. If Handheld Daemon also runs, turn its RGB off.
 
 The header shows the device's name from the firmware (DMI: vendor + product,
-else vendor + board; the CPU model when the BIOS left placeholders) with the
+else vendor + board; the CPU model when the BIOS left placeholders, except known PCs such as the GenMachine Ren7000, recognized by BIOS date and version) with the
 CPU model under it.
 
 Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or

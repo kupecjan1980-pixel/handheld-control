@@ -180,6 +180,22 @@ def _real(val: str | None) -> str:
     return "" if (val or "").strip().lower() in DMI_JUNK else (val or "").strip()
 
 
+# PCs whose BIOS left every name field as a placeholder, told apart by BIOS
+# date + version + CPU instead. Only the shown name comes from here.
+KNOWN_UNNAMED = [
+    # GenMachine Ren7000 mini PC (Ryzen 7 PRO 7730U), all DMI names "Default string".
+    {"bios_date": "04/15/2023", "bios_version": "5.19", "cpu": "7730U", "name": "GenMachine Ren7000"},
+]
+
+
+def _known_unnamed(cpuinfo: str) -> str | None:
+    date, ver = sysfs.read(f"{DMI}/bios_date"), sysfs.read(f"{DMI}/bios_version")
+    for k in KNOWN_UNNAMED:
+        if (date, ver) == (k["bios_date"], k["bios_version"]) and k["cpu"] in cpuinfo:
+            return k["name"]
+    return None
+
+
 def _generic_name(vendor: str, board: str, cpuinfo: str) -> str:
     """The firmware's (BIOS) name: vendor + product ("ASRock DeskMini X600"),
     else vendor + board ("ASRock X600M-STX"), else the CPU model when every
@@ -192,6 +208,9 @@ def _generic_name(vendor: str, board: str, cpuinfo: str) -> str:
     parts = [p for p in (_real(vendor), _real(board)) if p]
     if parts:
         return " ".join(parts)
+    known = _known_unnamed(cpuinfo)
+    if known:
+        return known
     for line in cpuinfo.splitlines():
         if line.startswith("model name"):
             # "... with Radeon Graphics", "... w/ Radeon 780M Graphics"
