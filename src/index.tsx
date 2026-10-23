@@ -405,7 +405,8 @@ const READOUT_CSS = `
   .hhctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; }
   .hhctl-device { font-size: 14px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; }
   .hhctl-tdp { font-size: 12px; color: #dcdedf; }
-  .hhctl-cpu { font-size: 11px; color: #b8bcbf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hhctl-cpu { font-size: 12px; color: #b8bcbf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .hhctl-name { white-space: normal; overflow-wrap: anywhere; }
   .hhctl-readout {
     display: grid; grid-template-columns: auto auto auto auto auto minmax(0, 1fr); gap: 0 7px;
     font-size: 12px; line-height: 15px; color: #dcdedf; padding-top: 2px; white-space: nowrap;
@@ -588,6 +589,7 @@ const themeCss = (name: string, hasImage: boolean) => {
     `.hhctl-root [class*="DropDownControlButton"]`,
     ".hhctl-root .hhctl-readout",
     ".hhctl-root .hhctl-tdp",
+    ".hhctl-root .hhctl-cpu",
   ].join(", ");
   const controls = [
     `.hhctl-root .${dlg.Toggle}`,
@@ -1009,9 +1011,12 @@ function Content() {
   const r = draft.rgb;
 
   const theme = draft.ui?.theme ?? "default";
-  // The firmware's name for the device, with the CPU model under it.
+  // CPU model next to the TDP, the device's (firmware) name on its own row
+  // below, so long names ("ONEXPLAYER F1 EVA-02") fit whole. When the name
+  // is the CPU (BIOS placeholders), it stays a single row.
   const deviceName = state.device.name;
   const cpuLine = state.device.cpu;
+  const splitName = !!cpuLine && !deviceName.includes(cpuLine);
   const pos = draft.ui?.bg_pos ?? DEFAULT_POS;
   const boxW = rootRef.current?.clientWidth;
   const boxH = fitHeight ?? rootRef.current?.clientHeight;
@@ -1032,9 +1037,13 @@ function Content() {
       <style>{fontCss(fontName, fontFaces)}</style>
       <div className="hhctl-header">
         <div className="hhctl-top">
-          <span className="hhctl-device" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
-            {deviceName}
-          </span>
+          {splitName ? (
+            <span className="hhctl-cpu">{cpuLine}</span>
+          ) : (
+            <span className="hhctl-device" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
+              {deviceName}
+            </span>
+          )}
           {gpu.pkg_w != null && (
             <span className="hhctl-tdp">
               TDP {gpu.pkg_w}
@@ -1044,7 +1053,11 @@ function Content() {
             </span>
           )}
         </div>
-        {cpuLine && !deviceName.includes(cpuLine) && <div className="hhctl-cpu">{cpuLine}</div>}
+        {splitName && (
+          <div className="hhctl-device hhctl-name" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
+            {deviceName}
+          </div>
+        )}
         {showReadout && (
           <div className="hhctl-readout">
             <span />

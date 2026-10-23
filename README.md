@@ -77,8 +77,7 @@ solid color, effects, brightness, off). Nothing is sent until the RGB section
 is turned on. If Handheld Daemon also runs, turn its RGB off.
 
 The header shows the device's name from the firmware (DMI: vendor + product,
-else vendor + board; the CPU model when the BIOS left placeholders, except known PCs such as the GenMachine Ren7000, recognized by BIOS date and version) with the
-CPU model under it.
+else vendor + board; the CPU model when the BIOS left placeholders, except known PCs such as the GenMachine Ren7000, recognized by BIOS date and version) on its own row, under the CPU model and the TDP.
 
 Fan modes: **Auto** (firmware), **Curve** (quiet / balanced / performance) or
 **Fixed** %. In every manual mode the fan is forced to 100% above 90 °C, and
