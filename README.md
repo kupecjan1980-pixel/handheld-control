@@ -34,12 +34,15 @@ the touchpads. It only reads, nothing is grabbed or remapped, and saves
 Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
-**On a desktop PC** (for testing): `desktop/hhc-desktop` runs the plugin's
-real backend on the PC and opens the same panel in its own Chromium window
-(`desktop/install.sh` adds it to the app launcher). It asks for your sudo
-password in a terminal so it can change settings, or runs read-only with
-`--user`. Closing the window puts everything back, as unloading the plugin
-does. The panel is built from `src/index.tsx` with browser stand-ins for
+**On a desktop PC** (for testing): run `sudo desktop/install.sh` once (again
+to update), then open **Handheld Control** from the app launcher. The panel
+opens in its own Chromium window, with no terminal and no password. The
+plugin's real backend runs as a root system service, copied to
+`/opt/handheld-control-desktop` (root-owned). systemd starts it when the window
+connects and it stops when the window closes, putting everything back as
+unloading the plugin does. `desktop/hhc-desktop --user` runs from the
+repository as you, read-only. `sudo desktop/install.sh --remove` undoes the
+setup. The panel is built from `src/index.tsx` with browser stand-ins for
 Decky's UI (`desktop/shims`). It listens on 127.0.0.1 only, and every request
 needs a random token made at start. TDP on AMD PCs needs `ryzenadj`.
 

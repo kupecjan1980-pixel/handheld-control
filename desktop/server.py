@@ -5,9 +5,14 @@ The panel (desktop/dist, built from the same src/index.tsx) calls the
 backend's methods over HTTP, like Decky's callable() does. Run as root to
 let it change hardware settings; as a normal user it can only read.
 
-Only 127.0.0.1, and every request needs the token the launcher made, so web
-pages and other users can't drive it. Everything the plugin changed is put
-back when the server stops (window closed, Ctrl+C), as on plugin unload.
+Installed (desktop/install.sh), systemd starts it as root when the app
+connects (socket activation on 127.0.0.1:8765) and it exits when the window
+closes; it then makes its own token and leaves it in --token-file, readable
+only by the desktop user.
+
+Only 127.0.0.1, and every request needs the token, so web pages and other
+users can't drive it. Everything the plugin changed is put back when the
+server stops (window closed, Ctrl+C), as on plugin unload.
 """
 
 import argparse
@@ -16,7 +21,9 @@ import json
 import logging
 import os
 import queue
+import secrets
 import signal
+import socket
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,12 +38,17 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--token", required=True, help="request token; '-' reads it from stdin")
+    ap.add_argument("--token", help="request token; '-' reads it from stdin")
+    ap.add_argument("--token-file", help="make a token and write it here, readable only by --uid")
     ap.add_argument("--home", default=os.path.expanduser("~"), help="the desktop user's home")
     ap.add_argument("--uid", type=int, default=os.getuid(), help="owner for the settings files")
     args = ap.parse_args()
     if args.token == "-":
         args.token = sys.stdin.readline().strip()
+    if not args.token:
+        if not args.token_file:
+            ap.error("--token or --token-file is needed")
+        args.token = secrets.token_hex(16)
 
     os.environ["HHC_USER_HOME"] = args.home
     sys.path[:0] = [HERE, ROOT, os.path.join(ROOT, "py_modules")]
@@ -152,7 +164,20 @@ def main() -> None:
     plugin.ctl.install_update = no_install
     own_settings()
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    if args.token_file:
+        # Written before the first request is answered, so the launcher finds it.
+        fd = os.open(args.token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(args.token)
+        os.chown(args.token_file, args.uid, -1)
+
+    if os.environ.get("LISTEN_PID") == str(os.getpid()) and int(os.environ.get("LISTEN_FDS", "0")) >= 1:
+        # Started by hhc-desktop.socket: systemd hands over the listening socket as fd 3.
+        httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler, bind_and_activate=False)
+        httpd.socket = socket.socket(fileno=3)
+        httpd.server_address = httpd.socket.getsockname()
+    else:
+        httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     for sig in (signal.SIGINT, signal.SIGTERM):
