@@ -6,6 +6,7 @@ Register maps come from the upstream kernel drivers:
 - ONEXPLAYER 3: mapped to oxp_g1_i in oxpec (pdx86 for-next).
 """
 
+import re
 from dataclasses import dataclass, field
 
 from . import sysfs
@@ -165,8 +166,22 @@ def _generic_name(vendor: str, board: str, cpuinfo: str) -> str:
         return " ".join(parts)
     for line in cpuinfo.splitlines():
         if line.startswith("model name"):
-            return line.split(":", 1)[1].replace("with Radeon Graphics", "").strip()
+            # "... with Radeon Graphics", "... w/ Radeon 780M Graphics"
+            return re.sub(r"\s+w(ith|/)\s+Radeon.*", "", line.split(":", 1)[1]).strip()
     return "Unknown device"
+
+
+def desktop_apu_limits(cpuinfo: str) -> tuple[int, int, int, int] | None:
+    """(min, max, default, boost max) W for AM4/AM5 G-series APUs, from the
+    model name: 65 W parts (5700G, 8700G) allow 88 W PPT, 35 W parts (GE,
+    Athlon 3000G) 35 W."""
+    name = next((l.split(":", 1)[1] for l in cpuinfo.splitlines() if l.startswith("model name")), "")
+    m = re.search(r"\b\d{4}G(E)?\b", name)
+    if not m:
+        return None
+    if m.group(1) or "Athlon" in name:
+        return 5, 35, 35, 35
+    return 10, 88, 65, 88
 
 
 def detect() -> Device:
@@ -180,16 +195,21 @@ def detect() -> Device:
     # Unknown device: only use kernel interfaces, never raw EC writes.
     cpuinfo = sysfs.read("/proc/cpuinfo") or ""
     cpu = "intel" if "GenuineIntel" in cpuinfo else "amd"
+    notes = ["Not one of the supported handhelds, so only standard kernel interfaces are used."]
+    limits = desktop_apu_limits(cpuinfo) if cpu == "amd" else None
+    if limits:
+        notes.append("Desktop APU: the TDP slider sets the socket power limit (PPT).")
+    lo, hi, default, boost_max = limits or (5, 30, 15, 35)
     return Device(
         key="generic",
         name=_generic_name(vendor, board, cpuinfo),
         cpu=cpu,
-        tdp_min=5,
-        tdp_max=30,
-        tdp_default=15,
-        tdp_boost_max=35,
+        tdp_min=lo,
+        tdp_max=hi,
+        tdp_default=default,
+        tdp_boost_max=boost_max,
         hwmon_names=("ayaneo_ec", "oxp_ec"),
-        notes=["Not one of the supported handhelds, so only standard kernel interfaces are used."],
+        notes=notes,
         board=board,
         vendor=vendor,
     )

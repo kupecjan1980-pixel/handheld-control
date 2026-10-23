@@ -4,8 +4,8 @@
    asus-armoury, ...). This is what Bazzite's kernel exposes for the NEXT 2.
 2. Intel RAPL powercap (package MSR zone and the MMIO zone, both enforced).
 3. ryzenadj, if the binary is installed.
-4. AMD SMU mailbox, directly (what ryzenadj does), for the Zen 2 / Zen 3 APUs
-   listed in AmdSmu.FAMILIES, so those PCs need nothing installed.
+4. AMD SMU mailbox, directly (what ryzenadj does), for the APUs listed in
+   SMU_FAMILIES (Raven to Hawk Point), so those PCs need nothing installed.
 
 On Intel the ACPI platform profile matters too: in "low-power" the firmware
 holds the package near 15 W whatever RAPL says (seen on the ONEXPLAYER 3,
@@ -20,6 +20,7 @@ import shutil
 import struct
 import subprocess
 import time
+from dataclasses import dataclass
 
 from . import proc, sysfs
 from .device import Device
@@ -244,57 +245,92 @@ class RyzenAdj:
         return self.last
 
 
+@dataclass(frozen=True)
+class SmuFamily:
+    name: str
+    cpu_family: int
+    models: tuple[int, ...]
+    rep: int  # MP1 response register
+    mp1: tuple[int, int, int]  # stapm, fast, slow message ids
+    rsmu: tuple[int, int, int]
+
+
+_ZEN2_3 = ((0x14, 0x15, 0x16), (0x31, 0x32, 0x33))
+SMU_FAMILIES = [
+    # Message ids from ryzenadj (lib/api.c, nb_smu_ops.c) and ZenStates-Core
+    # (APUSettings0 / APUSettings1 / APUSettings1_Phoenix); both agree.
+    SmuFamily("Raven / Picasso / Dali", 0x17, (0x11, 0x18, 0x20), 0x3B10564, (0x1A, 0x1B, 0x1C), (0x2E, 0x2F, 0x30)),
+    SmuFamily("Renoir / Lucienne", 0x17, tuple(range(0x60, 0x70)), 0x3B10564, *_ZEN2_3),
+    SmuFamily("Cezanne / Barcelo", 0x19, tuple(range(0x50, 0x60)), 0x3B10564, *_ZEN2_3),
+    # Rembrandt and later answer at 0x3B10578.
+    SmuFamily("Phoenix / Hawk Point", 0x19, (0x74, 0x75, 0x78), 0x3B10578, *_ZEN2_3),
+]
+
+
 class AmdSmu:
-    """TDP through the SMU mailbox of AMD APUs, as ryzenadj does it.
+    """TDP through the SMU mailboxes of AMD APUs, as ryzenadj does it.
 
     The SMU's registers are reached through the host bridge's (00:00.0) SMN
     index/data pair at 0xB8 / 0xBC of its PCI config space (the kernel uses
     0x60 / 0x64, so the two don't race). A message: clear the response
     register, write six arguments, write the message id, wait for the
     response (1 = OK). Limits are in mW. Needs root and no kernel lockdown.
+
+    Each limit goes to the MP1 mailbox and then to the RSMU one. Laptop
+    firmware takes it on MP1; desktop APUs (5700G, 8700G, ...) may refuse it
+    there or ignore it, and take it on RSMU. It fails only if both refuse.
     """
 
     name = "amd smu"
     PCI = "/sys/bus/pci/devices/0000:00:00.0/config"
     INDEX, DATA = 0xB8, 0xBC
-    # MP1 mailbox (msg, response, first argument). Renoir to Cezanne answer at
-    # 0x3B10564; 0x3B10578 is Rembrandt and later (ryzenadj's two MP1 sets):
-    # with the wrong one the 7730U "didn't answer" (HHC Desktop log, 2026-10-23).
-    MSG, REP, ARGS = 0x3B10528, 0x3B10564, 0x3B10998
-    # (cpu family, first model, last model): Renoir, Lucienne, Cezanne / Barcelo.
-    FAMILIES = [(0x17, 0x60, 0x6F), (0x19, 0x50, 0x5F)]
-    GET_VERSION, STAPM, FAST, SLOW = 0x02, 0x14, 0x15, 0x16
+    # (message, response, first argument). MP1's response register depends
+    # on the family: with the wrong one the 7730U "didn't answer" (2026-10-23).
+    MP1_MSG, MP1_ARGS = 0x3B10528, 0x3B10998
+    RSMU = (0x3B10A20, 0x3B10A80, 0x3B10A88)
+    TEST, GET_VERSION = 0x01, 0x02  # the same on every mailbox
     TIMEOUT = 0.5
 
-    def __init__(self, pci: str | None = None):
+    def __init__(self, family: SmuFamily, pci: str | None = None):
+        self.family = family
         self.pci = pci or self.PCI
+        self.mp1 = (self.MP1_MSG, family.rep, self.MP1_ARGS)
+        self.silent: set[tuple[int, int, int]] = set()  # mailboxes that never answered
         self.last: int | None = None
 
-    @classmethod
-    def supported(cls, cpuinfo: str) -> bool:
+    @staticmethod
+    def detect(cpuinfo: str) -> SmuFamily | None:
         info = {}
         for line in cpuinfo.splitlines():
             k, _, v = line.partition(":")
             info.setdefault(k.strip(), v.strip())
         if info.get("vendor_id") != "AuthenticAMD":
-            return False
+            return None
         try:
             fam, model = int(info["cpu family"]), int(info["model"])
         except (KeyError, ValueError):
-            return False
-        return any(f == fam and lo <= model <= hi for f, lo, hi in cls.FAMILIES)
+            return None
+        return next((f for f in SMU_FAMILIES if f.cpu_family == fam and model in f.models), None)
+
+    @classmethod
+    def supported(cls, cpuinfo: str) -> bool:
+        return cls.detect(cpuinfo) is not None
 
     @classmethod
     def find(cls, cpuinfo: str | None = None):
-        if not cls.supported(cpuinfo if cpuinfo is not None else (sysfs.read("/proc/cpuinfo") or "")):
+        family = cls.detect(cpuinfo if cpuinfo is not None else (sysfs.read("/proc/cpuinfo") or ""))
+        if not family:
             return None
-        smu = cls()
+        smu = cls(family)
         try:
-            ver = smu.version()
+            smu.send(cls.TEST)
         except OSError as e:
-            log.info("amd smu: not usable (%s)", e)
+            log.info("amd smu (%s): not usable (%s)", family.name, e)
             return None
-        log.info("amd smu: firmware %s", ver)
+        try:
+            log.info("amd smu (%s): firmware %s", family.name, smu.version())
+        except OSError as e:
+            log.info("amd smu (%s): no version (%s)", family.name, e)
         return smu
 
     def _rw(self, fd: int, addr: int, value: int | None = None) -> int:
@@ -304,22 +340,23 @@ class AmdSmu:
             return value
         return struct.unpack("<I", os.pread(fd, 4, self.DATA))[0]
 
-    def send(self, msg: int, args: list[int] | None = None) -> list[int]:
+    def send(self, msg: int, args: list[int] | None = None, box: tuple[int, int, int] | None = None) -> list[int]:
+        msg_reg, rep_reg, arg_reg = box or self.mp1
         args = (args or []) + [0] * (6 - len(args or []))
         fd = self._open()
         try:
-            self._rw(fd, self.REP, 0)
+            self._rw(fd, rep_reg, 0)
             for i, a in enumerate(args):
-                self._rw(fd, self.ARGS + 4 * i, a)
-            self._rw(fd, self.MSG, msg)
+                self._rw(fd, arg_reg + 4 * i, a)
+            self._rw(fd, msg_reg, msg)
             deadline = time.monotonic() + self.TIMEOUT
-            while (rep := self._rw(fd, self.REP)) == 0:
+            while (rep := self._rw(fd, rep_reg)) == 0:
                 if time.monotonic() > deadline:
                     raise OSError(f"SMU didn't answer message {msg:#x}")
                 time.sleep(0.001)
             if rep != 1:
                 raise OSError(f"SMU refused message {msg:#x} (response {rep:#x})")
-            return [self._rw(fd, self.ARGS + 4 * i) for i in range(6)]
+            return [self._rw(fd, arg_reg + 4 * i) for i in range(6)]
         finally:
             self._close(fd)
 
@@ -333,12 +370,28 @@ class AmdSmu:
         v = self.send(self.GET_VERSION)[0]
         return f"{v >> 16 & 0xFF}.{v >> 8 & 0xFF}.{v & 0xFF}"
 
+    def _limit(self, which: int, mw: int) -> None:
+        """which: 0 stapm, 1 fast, 2 slow."""
+        errors, ok = [], False
+        for box, ids in ((self.mp1, self.family.mp1), (self.RSMU, self.family.rsmu)):
+            if box in self.silent:
+                continue
+            try:
+                self.send(ids[which], [mw], box)
+                ok = True
+            except OSError as e:
+                if "didn't answer" in str(e):
+                    self.silent.add(box)  # don't wait for it on every limit
+                errors.append(str(e))
+        if not ok:
+            raise OSError("; ".join(errors) or "no SMU mailbox answers")
+
     def apply(self, dev: Device, watts: int, boost: bool) -> None:
         slow, fast = boost_limits(dev, watts, boost)  # short boost, peak boost
         # Ceilings first, as with firmware-attributes: sustained never above boost.
-        self.send(self.FAST, [fast * 1000])
-        self.send(self.SLOW, [slow * 1000])
-        self.send(self.STAPM, [watts * 1000])
+        self._limit(1, fast * 1000)
+        self._limit(2, slow * 1000)
+        self._limit(0, watts * 1000)
         self.last = watts
 
     def current(self) -> int | None:
