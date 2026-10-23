@@ -464,6 +464,7 @@ type Theme = {
   filter?: string;
   font?: string;
   button?: [number, number, number]; // buttons and dropdowns, instead of Steam's gray
+  buttonText?: string; // their text, for light button colors
 };
 const THEMES: Record<string, Theme> = {
   default: { label: "Default (black)" },
@@ -500,7 +501,8 @@ const THEMES: Record<string, Theme> = {
     desc: "#f5b8a8",
     filter: "hue-rotate(-148deg) saturate(1.3) brightness(1.4)",
     font: "default",
-    button: [190, 20, 25],
+    button: [255, 215, 0],
+    buttonText: "#2a0505",
   },
   blue: {
     label: "Blue",
@@ -590,7 +592,7 @@ const fontCss = (name: string, faces: string | null) => {
 
 // Buttons (Check for updates, ...) and dropdowns in a shade of the theme.
 // The focused one keeps Steam's own highlight, so gamepad focus stays obvious.
-const buttonCss = ([r, g, b]: [number, number, number]) => {
+const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
   const btn = ["DialogButton", "DropDownControlButton"]
     .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible)`)
     .join(", ");
@@ -598,8 +600,8 @@ const buttonCss = ([r, g, b]: [number, number, number]) => {
     .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible):hover:not(:disabled)`)
     .join(", ");
   return `
-    ${btn} { background: rgba(${r}, ${g}, ${b}, 0.55) !important; }
-    ${hover} { background: rgba(${r}, ${g}, ${b}, 0.8) !important; }
+    ${btn} { background: rgba(${r}, ${g}, ${b}, ${text ? 0.9 : 0.55}) !important;${text ? ` color: ${text} !important;` : ""} }
+    ${hover} { background: rgba(${r}, ${g}, ${b}, ${text ? 1 : 0.8}) !important; }
   `;
 };
 
@@ -637,7 +639,7 @@ const themeCss = (name: string, hasImage: boolean) => {
     .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel,
     .hhctl-root .hhctl-readout b, .hhctl-root .hhctl-readout .hhctl-capped:not(.hhctl-free) { color: ${t.title}; }
     ${t.filter ? `${controls} { filter: ${t.filter}; }` : ""}
-    ${t.button ? buttonCss(t.button) : ""}
+    ${t.button ? buttonCss(t.button, t.buttonText) : ""}
   `;
 };
 
