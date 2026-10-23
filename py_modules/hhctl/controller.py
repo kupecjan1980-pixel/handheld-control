@@ -302,7 +302,7 @@ class Controller:
 
     # (hue, saturation) the lights take with "Match theme color"; the default
     # theme has no color, so the RGB section's own hue stays.
-    THEME_RGB = {"red": (0, 100), "blue": (215, 100), "green": (130, 100), "gold": (42, 100)}
+    THEME_RGB = {"red": (0, 100), "redgold": (0, 100), "blue": (215, 100), "green": (130, 100), "gold": (42, 100)}
 
     def apply_ui(self) -> None:
         # The panel itself reads ui from settings; only the lights follow it.

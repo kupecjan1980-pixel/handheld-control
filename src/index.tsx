@@ -478,6 +478,18 @@ const THEMES: Record<string, Theme> = {
     font: "diablo",
     button: [150, 30, 40],
   },
+  // Bright red panel; gold headlines, toggles and sliders.
+  redgold: {
+    label: "Red + Gold",
+    bg: "linear-gradient(180deg, rgba(225, 25, 35, 0.55) 0%, rgba(130, 10, 18, 0.38) 100%)",
+    title: "#ffc940",
+    label2: "#ffe2a0",
+    text: "#fff0e6",
+    desc: "#f0b0a8",
+    filter: "hue-rotate(-156deg) saturate(0.8) brightness(1.24)",
+    font: "diablo",
+    button: [175, 25, 35],
+  },
   blue: {
     label: "Blue",
     bg: "linear-gradient(180deg, rgba(25, 80, 190, 0.40) 0%, rgba(10, 30, 80, 0.25) 100%)",
@@ -515,6 +527,7 @@ const THEMES: Record<string, Theme> = {
 // Light color for RGB "Match theme color"; mirrors THEME_RGB in controller.py.
 const THEME_RGB: Record<string, [number, number]> = {
   red: [0, 100],
+  redgold: [0, 100],
   blue: [215, 100],
   green: [130, 100],
   gold: [42, 100],
