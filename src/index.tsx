@@ -329,6 +329,31 @@ const GPU_PROFILES: Record<string, string> = {
   COMPUTE: "Compute",
 };
 
+// Short notes per scheduler, keyed without the scx_ prefix (from the scx
+// project's descriptions). Unknown ones just show no note.
+const SCX_NOTES: Record<string, string> = {
+  off: "EEVDF, the kernel's own fair scheduler. Solid all-rounder.",
+  lavd: "Made for handhelds (Steam Deck): favors latency-critical game threads for steady frame times, packs work onto fewer cores to save power.",
+  bpfland: "Favors interactive tasks (ones that sleep often): keeps the desktop and games responsive while something heavy runs in the background.",
+  flash: "Fair and latency-aware: aims for even, predictable latency. Good for audio, video and consistent frame pacing.",
+  cosmos: "Lightweight: keeps tasks on the same CPU for cache locality. Low overhead, good general use.",
+  p2dq: "Picks the less busy of two CPUs to balance load. General purpose, scales to many cores.",
+  rusty: "Balances load between cache domains (CCXs). Flexible general-purpose scheduler, more desktop/server than handheld.",
+  rustland: "Decides scheduling in a userspace Rust program. Mostly a showcase; favors interactive tasks.",
+  tickless: "Cuts timer interrupts on busy CPUs. For servers and isolated workloads, not for gaming.",
+};
+
+const SCX_TAGS: Record<string, string> = {
+  lavd: "handhelds",
+  bpfland: "responsive",
+  flash: "even latency",
+  cosmos: "lightweight",
+  p2dq: "many cores",
+  rusty: "general",
+  rustland: "showcase",
+  tickless: "servers",
+};
+
 const SCX_MODES: Record<string, string> = {
   auto: "Auto",
   gaming: "Gaming",
@@ -1309,10 +1334,20 @@ function Content() {
                 <PanelSectionRow>
                   <DropdownItem
                     label="CPU scheduler"
-                    description={`sched_ext through scx_loader · now ${state.cpu.scx.running ?? "kernel default"}. LAVD was made for handhelds.`}
+                    description={(() => {
+                      const sel =
+                        draft.cpu.scx ??
+                        state.cpu.scx.schedulers.find((x) => x.label === state.cpu.scx.running)?.name ??
+                        "off";
+                      const note = SCX_NOTES[sel.replace(/^scx_/, "")];
+                      return `now ${state.cpu.scx.running ?? "kernel default"}${note ? ` · ${note}` : ""}`;
+                    })()}
                     rgOptions={[
                       { data: "off", label: "Kernel default" },
-                      ...state.cpu.scx.schedulers.map((x) => ({ data: x.name, label: x.name })),
+                      ...state.cpu.scx.schedulers.map((x) => ({
+                        data: x.name,
+                        label: SCX_TAGS[x.label] ? `${x.name} · ${SCX_TAGS[x.label]}` : x.name,
+                      })),
                     ]}
                     selectedOption={
                       draft.cpu.scx ??
