@@ -97,6 +97,12 @@ def find_backend(dev: Device, allow_ec: bool):
     if hw and sysfs.writable(f"{hw}/pwm1_enable"):
         return HwmonFan(hw), None
     if not dev.ec_fan:
+        if dev.key == "generic":
+            # e.g. the GenMachine Ren (7730U): no ACPI EC, no Super I/O, no fan
+            # in its ACPI tables (checked with sensors-detect and the DSDT/SSDTs).
+            return None, ("Linux sees no fan controller on this PC (no embedded controller, "
+                          "Super I/O chip or fan driver); the firmware runs the fan. "
+                          "Its curve can only be changed in the BIOS setup.")
         return None, "no fan driver for this device"
     if not allow_ec:
         return None, "no kernel fan driver; enable raw EC writes under Advanced to use the EC fallback"
