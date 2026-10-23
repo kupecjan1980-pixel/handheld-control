@@ -189,7 +189,7 @@ def detect() -> Device:
         tdp_default=15,
         tdp_boost_max=35,
         hwmon_names=("ayaneo_ec", "oxp_ec"),
-        notes=["Unsupported device: EC fallbacks are disabled."],
+        notes=["Not one of the supported handhelds, so only standard kernel interfaces are used."],
         board=board,
         vendor=vendor,
     )

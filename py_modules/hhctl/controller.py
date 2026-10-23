@@ -95,6 +95,10 @@ class Controller:
         self.upd = {"busy": False, "releases": [], "error": None, "message": None}
         self.zone_test: str | None = None  # legend of the last OXP light zone test
         self.plugin_dir: str | None = None  # set by main.py; where updates are installed
+        # The desktop app (desktop/server.py) installs its own zips and restarts itself.
+        self.update_kind = "plugin"
+        self.after_update = updater.restart_loader
+        self.update_note = "Decky restarts in a moment and loads it."
         self.dev = detect()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
@@ -755,7 +759,7 @@ class Controller:
 
         def run():
             try:
-                self.upd["releases"] = updater.releases()
+                self.upd["releases"] = updater.releases(self.update_kind)
                 self.upd["message"] = None if self.upd["releases"] else "No releases found"
             except Exception as e:
                 log.warning("update check failed: %s", e)
@@ -774,10 +778,10 @@ class Controller:
 
         def run():
             try:
-                updater.install(rel["url"], self.plugin_dir)
-                self.upd["message"] = f"Installed {tag}. Decky restarts in a moment and loads it."
-                # Give the panel a moment to show that before the loader goes away.
-                threading.Timer(2.0, updater.restart_loader).start()
+                updater.install(rel["url"], self.plugin_dir, self.update_kind)
+                self.upd["message"] = f"Installed {tag}. {self.update_note}"
+                # Give the panel a moment to show that before the backend goes away.
+                threading.Timer(2.0, self.after_update).start()
             except Exception as e:
                 log.exception("update to %s failed", tag)
                 self.upd.update(error=f"Install failed, nothing was changed: {e}", message=None, busy=False)

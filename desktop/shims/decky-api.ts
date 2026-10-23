@@ -6,15 +6,37 @@ const TOKEN = new URLSearchParams(location.search).get("token") ?? "";
 export const callable =
   <Args extends any[] = [], Ret = unknown>(name: string) =>
   async (...args: Args): Promise<Ret> => {
-    const r = await fetch(`/api/${name}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-HHC-Token": TOKEN },
-      body: JSON.stringify(args),
-    });
+    let r: Response;
+    try {
+      r = await fetch(`/api/${name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-HHC-Token": TOKEN },
+        body: JSON.stringify(args),
+      });
+    } catch (e) {
+      // The backend restarts after an update; reload once it's back.
+      reloadWhenBack();
+      throw e;
+    }
     const data = await r.json();
     if (!r.ok) throw new Error(String(data));
     return data as Ret;
   };
+
+let reloading = false;
+const reloadWhenBack = () => {
+  if (reloading) return;
+  reloading = true;
+  const tryReload = async () => {
+    try {
+      if ((await fetch("/ping")).ok) return location.reload();
+    } catch {
+      // still restarting
+    }
+    setTimeout(tryReload, 1000);
+  };
+  setTimeout(tryReload, 1500);
+};
 
 type Listener = (...args: any[]) => any;
 const listeners = new Map<string, Set<Listener>>();

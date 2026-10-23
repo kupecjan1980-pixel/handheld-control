@@ -48,7 +48,13 @@ def main() -> None:
     if not args.token:
         if not args.token_file:
             ap.error("--token or --token-file is needed")
-        args.token = secrets.token_hex(16)
+        # Kept across restarts (after an update), so the open window carries on.
+        try:
+            with open(args.token_file) as f:
+                args.token = f.read().strip()
+        except OSError:
+            pass
+        args.token = args.token or secrets.token_hex(16)
 
     os.environ["HHC_USER_HOME"] = args.home
     sys.path[:0] = [HERE, ROOT, os.path.join(ROOT, "py_modules")]
@@ -154,14 +160,25 @@ def main() -> None:
 
     asyncio.set_event_loop(loop)
     loop.run_until_complete(plugin._main())
-    # Installing a release would overwrite this repository: the updater is for the handheld.
-    plugin.ctl.plugin_dir = None
+    ctl = plugin.ctl
+    st = os.stat(ROOT)
+    if st.st_uid == 0 and not os.path.exists(os.path.join(ROOT, ".git")):
+        # Installed copy (/opt, root-owned): it updates itself from the desktop
+        # zips, then exits; systemd starts the new version on the next request
+        # and the window reloads.
+        ctl.plugin_dir = ROOT
+        ctl.update_kind = "desktop"
+        ctl.update_note = "The app restarts in a moment and reloads."
+        ctl.after_update = lambda: loop.call_soon_threadsafe(loop.stop)
+    else:
+        # Running from the repository: installing a release would overwrite it.
+        ctl.plugin_dir = None
 
-    def no_install(tag):
-        plugin.ctl.upd["error"] = "The desktop app runs from the repository; install releases on the handheld."
-        return plugin.ctl.state()
+        def no_install(tag):
+            ctl.upd["error"] = "Running from the repository: update with git, or install the app (desktop/install.sh)."
+            return ctl.state()
 
-    plugin.ctl.install_update = no_install
+        ctl.install_update = no_install
     own_settings()
 
     if args.token_file:

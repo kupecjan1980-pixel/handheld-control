@@ -7,6 +7,10 @@ then Decky's plugin loader restarts to load it. Settings live in Decky's
 settings folder, not the plugin folder, so they survive.
 
 Only zips from this repository's release downloads are accepted.
+
+Each release has two zips: handheld-control-<v>.zip (the Decky plugin) and
+handheld-control-desktop-<v>.zip (the plugin plus the desktop app's server
+and panel, installed in /opt by desktop/install.sh). `kind` picks one.
 """
 
 import json
@@ -59,12 +63,21 @@ def version_key(v: str) -> tuple:
     return tuple(int(p) if p.isdigit() else 0 for p in v.lstrip("v").split("."))
 
 
-def parse_releases(raw: list) -> list[dict]:
+# What each kind of install must contain, besides plugin.json.
+NEEDS = {"plugin": ("main.py", "dist/index.js"), "desktop": ("main.py", "desktop/server.py", "desktop/dist/bundle.js")}
+
+
+def _is_kind(name: str, kind: str) -> bool:
+    desktop = name.startswith("handheld-control-desktop-")
+    return name.endswith(".zip") and (desktop if kind == "desktop" else not desktop)
+
+
+def parse_releases(raw: list, kind: str = "plugin") -> list[dict]:
     out = []
     for r in raw:
         if r.get("draft"):
             continue
-        zips = [a for a in r.get("assets", []) if a.get("name", "").endswith(".zip")]
+        zips = [a for a in r.get("assets", []) if _is_kind(a.get("name", ""), kind)]
         if not zips:
             continue
         url = zips[0].get("browser_download_url", "")
@@ -83,11 +96,11 @@ def parse_releases(raw: list) -> list[dict]:
     return out
 
 
-def releases() -> list[dict]:
-    return parse_releases(json.loads(_get(API, 5 * 1024 * 1024)))
+def releases(kind: str = "plugin") -> list[dict]:
+    return parse_releases(json.loads(_get(API, 5 * 1024 * 1024)), kind)
 
 
-def _check_zip(z: zipfile.ZipFile) -> None:
+def _check_zip(z: zipfile.ZipFile, kind: str = "plugin") -> None:
     root = PLUGIN_NAME + "/"
     for name in z.namelist():
         if not name.startswith(root) or ".." in name.split("/") or name.startswith("/"):
@@ -98,7 +111,7 @@ def _check_zip(z: zipfile.ZipFile) -> None:
         raise OSError(f"zip has no valid plugin.json ({e})")
     if meta.get("name") != PLUGIN_NAME:
         raise OSError(f"zip is for '{meta.get('name')}', not {PLUGIN_NAME}")
-    for need in ("main.py", "dist/index.js"):
+    for need in NEEDS[kind]:
         if root + need not in z.namelist():
             raise OSError(f"zip is missing {need}")
 
@@ -112,7 +125,7 @@ def _chown_tree(path: str, uid: int, gid: int) -> None:
                 pass
 
 
-def install_zip(data: bytes, plugin_dir: str) -> None:
+def install_zip(data: bytes, plugin_dir: str, kind: str = "plugin") -> None:
     """Swap the plugin folder for the zip's contents (old folder kept until it worked)."""
     plugin_dir = os.path.realpath(plugin_dir)
     parent, base = os.path.split(plugin_dir)
@@ -121,7 +134,7 @@ def install_zip(data: bytes, plugin_dir: str) -> None:
         with open(zpath, "wb") as f:
             f.write(data)
         with zipfile.ZipFile(zpath) as z:
-            _check_zip(z)
+            _check_zip(z, kind)
             z.extractall(tmp)
         new = os.path.join(tmp, PLUGIN_NAME)
         st = os.stat(plugin_dir)
@@ -136,11 +149,11 @@ def install_zip(data: bytes, plugin_dir: str) -> None:
     # the temporary folder (with the previous version) is gone now
 
 
-def install(url: str, plugin_dir: str) -> None:
-    if not url.startswith(DOWNLOAD_PREFIX) or not url.endswith(".zip"):
+def install(url: str, plugin_dir: str, kind: str = "plugin") -> None:
+    if not url.startswith(DOWNLOAD_PREFIX) or not _is_kind(url.rsplit("/", 1)[-1], kind):
         raise OSError("only this plugin's GitHub release zips can be installed")
-    log.info("updater: installing %s into %s", url, plugin_dir)
-    install_zip(_get(url, MAX_ZIP), plugin_dir)
+    log.info("updater: installing %s (%s) into %s", url, kind, plugin_dir)
+    install_zip(_get(url, MAX_ZIP), plugin_dir, kind)
 
 
 def restart_loader() -> None:

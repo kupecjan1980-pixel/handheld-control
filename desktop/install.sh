@@ -41,7 +41,7 @@ echo "Copying to $DEST…"
 systemctl stop hhc-desktop.service 2>/dev/null || true
 rm -rf "$DEST.new"
 mkdir -p "$DEST.new/desktop"
-cp -r "$REPO/main.py" "$REPO/package.json" "$REPO/py_modules" "$REPO/fonts" "$DEST.new/"
+cp -r "$REPO/plugin.json" "$REPO/main.py" "$REPO/package.json" "$REPO/py_modules" "$REPO/fonts" "$DEST.new/"
 cp -r "$DIR/server.py" "$DIR/decky.py" "$DIR/dist" "$DEST.new/desktop/"
 find "$DEST.new" -name __pycache__ -prune -exec rm -rf {} +
 chown -R root:root "$DEST.new"
@@ -66,6 +66,8 @@ Requires=hhc-desktop.socket
 [Service]
 ExecStart=/usr/bin/python3 $DEST/desktop/server.py --port 8765 --home $USER_HOME --uid $USER_UID --token-file /run/hhc-desktop/token
 RuntimeDirectory=hhc-desktop
+# Keep the token across restarts (after an update the window reloads with it).
+RuntimeDirectoryPreserve=yes
 Restart=no
 UNIT
 systemctl daemon-reload

@@ -54,4 +54,23 @@ if real:
     updater.install_zip(open(f"{sys.argv[1]}/out/{real[-1]}", "rb").read(), pd)
     assert os.path.exists(f"{pd}/py_modules/hhctl/updater.py") or os.path.exists(f"{pd}/main.py")
 assert [updater.version_key(v) for v in ("v0.10.10", "0.9")] == [(0, 10, 10), (0, 9)]
+# desktop zips: listed and installed separately from the plugin zips
+raw2 = [{"tag_name": "v0.11.0", "assets": [
+    {"name": "handheld-control-0.11.0.zip", "browser_download_url": P + "v0.11.0/handheld-control-0.11.0.zip"},
+    {"name": "handheld-control-desktop-0.11.0.zip", "browser_download_url": P + "v0.11.0/handheld-control-desktop-0.11.0.zip"}]}]
+assert updater.parse_releases(raw2)[0]["url"].endswith("/handheld-control-0.11.0.zip")
+assert updater.parse_releases(raw2, "desktop")[0]["url"].endswith("/handheld-control-desktop-0.11.0.zip")
+assert updater.parse_releases(raw, "desktop") == [], "old releases have no desktop zip"
+desk = {**good, R + "desktop/server.py": "s", R + "desktop/dist/bundle.js": "b"}
+os.makedirs(pd, exist_ok=True)
+try:
+    updater.install_zip(make_zip(good), pd, "desktop"); raise AssertionError("plugin zip as desktop")
+except OSError:
+    pass
+updater.install_zip(make_zip(desk), pd, "desktop"); assert open(f"{pd}/desktop/server.py").read() == "s"
+try:
+    updater.install(P + "v0.11.0/handheld-control-0.11.0.zip", pd, "desktop"); raise AssertionError("wrong kind URL")
+except OSError:
+    pass
+print("desktop kind ok")
 shutil.rmtree(tmp); print("all updater tests passed")
