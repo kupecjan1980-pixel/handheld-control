@@ -26,6 +26,8 @@ DEFAULTS = {
     "cpu": {
         "boost": None, "prefcore": None, "ccx_off": None, "cap": False, "cap_mhz": None,
         "smt": None, "hwp_boost": None, "epp_boost": None, "scx": None, "scx_mode": "gaming",
+        # Core types (Ryzen AI 300, hybrid Intel): None, "all", "fast", "small".
+        "cores": None,
     },
     # GPU clock: "auto" leaves the driver alone; min/max/manual lock it.
     "gpu": {"mode": "auto", "mhz": None},
@@ -118,6 +120,7 @@ class Controller:
         self.prefcore = cpu.Prefcore()
         self.ccx = cpu.Ccx(os.path.join(os.path.dirname(settings_path), "ccx-groups.json"))
         self.freqcap = cpu.FreqCap()
+        self.cores = cpu.CoreTypes(self.ccx.groups)
         self.smt = cpu.Smt()
         self.hwp_boost = cpu.HwpBoost()
         self.epp_boost = cpu.EppBoost()
@@ -437,6 +440,8 @@ class Controller:
         for key, ctl in self._toggles():
             if s.get(key) is not None and ctl.available()[0]:
                 self._guard("cpu", lambda: ctl.set(bool(s[key])))
+        if s.get("cores") is not None and self.cores.available()[0]:
+            self._guard("cpu", lambda: self.cores.apply(s["cores"]))
         if s.get("scx") is not None and self.scx.available()[0]:
             self._guard("scx", lambda: self.scx.apply(s["scx"], s.get("scx_mode") or "gaming"))
         # After boost and CCX: toggling either can reset the policies' limits.
@@ -975,6 +980,8 @@ class Controller:
 
     def restore(self, unload: bool = False) -> None:
         """Hand control back to firmware (unload, exit, EC switch)."""
+        if unload and self.settings["cpu"].get("cores") not in (None, "all") and self.cores.available()[0]:
+            self._guard("cpu", lambda: self.cores.apply("all"))
         if unload and self.settings["cpu"].get("smt") is False and self.smt.on() is False:
             self._guard("cpu", lambda: self.smt.set(True))
         if unload and self.settings["cpu"].get("ccx_off") and self.ccx.on():
@@ -1052,6 +1059,16 @@ class Controller:
         return {
             "available": ok, "unavailable": why, "min": lo, "max": hi,
             "limits": self.freqcap.limits_mhz() if ok else [], "avg": self.freqcap.avg_mhz() if ok else None,
+        }
+
+    def _cores_state(self) -> dict:
+        ok, why = self.cores.available()
+        intel = self.dev.cpu == "intel"
+        return {
+            "available": ok, "unavailable": why,
+            "fast": len(self.cores.fast), "small": len(self.cores.small),
+            "fast_name": "P-cores" if intel else "Zen 5", "small_name": "E-cores" if intel else "Zen 5c",
+            "current": self.cores.current() if ok else None,
         }
 
     def _scx_state(self) -> dict:
@@ -1133,7 +1150,7 @@ class Controller:
                 for name, ctl in (*self._toggles(), ("ccx", self.ccx), ("smt", self.smt))
                 for ok, why in [ctl.available()]
             }
-            | {"scx": self._scx_state()}
+            | {"scx": self._scx_state(), "cores": self._cores_state()}
             | {"ccx_keep": self.ccx.keep_count(), "ccx_total": self.ccx.total()}
             | {"cap": self._cap_state()},
             "gpu": gpu_state | {"clock": self._gpu_clock_state(), "pipes": self.gfx_pipes},

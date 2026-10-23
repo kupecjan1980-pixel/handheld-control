@@ -31,6 +31,7 @@ type Settings = {
     epp_boost: boolean | null;
     scx: string | null;
     scx_mode: string;
+    cores: "all" | "fast" | "small" | null;
   };
   gpu: { mode: GpuMode; mhz: number | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
@@ -167,6 +168,15 @@ type State = {
     "boost" | "prefcore" | "ccx" | "smt" | "hwp_boost" | "epp_boost",
     { available: boolean; unavailable: string | null; on: boolean | null }
   > & {
+    cores: {
+      available: boolean;
+      unavailable: string | null;
+      fast: number;
+      small: number;
+      fast_name: string;
+      small_name: string;
+      current: string | null;
+    };
     scx: {
       available: boolean;
       unavailable: string | null;
@@ -1202,6 +1212,21 @@ function Content() {
                   description="Busy cores get EPP Performance for a moment, the rest keep your EPP. Steadier frame times than EPP Performance for less power."
                   checked={draft.cpu.epp_boost ?? state.cpu.epp_boost.on ?? false}
                   onChange={(v) => change("cpu", { epp_boost: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            {state.cpu.cores.available && (
+              <PanelSectionRow>
+                <DropdownItem
+                  label="Cores for apps and games"
+                  description="System services keep every core. Resets on reboot until the plugin applies it again."
+                  rgOptions={[
+                    { data: "all", label: "All cores" },
+                    { data: "fast", label: `${state.cpu.cores.fast_name} only (${state.cpu.cores.fast} threads)` },
+                    { data: "small", label: `${state.cpu.cores.small_name} only (${state.cpu.cores.small} threads)` },
+                  ]}
+                  selectedOption={draft.cpu.cores ?? (state.cpu.cores.current === "custom" ? null : state.cpu.cores.current) ?? "all"}
+                  onChange={(o) => change("cpu", { cores: o.data }, 0)}
                 />
               </PanelSectionRow>
             )}

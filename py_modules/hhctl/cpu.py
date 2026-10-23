@@ -14,6 +14,8 @@ scheduler to core capacities instead, so there is nothing to toggle.
 import glob
 import json
 import os
+import shutil
+import subprocess
 
 from . import proc, sysfs
 
@@ -251,6 +253,84 @@ class Ccx:
 
     def total(self) -> int:
         return sum(len(g) for g in self.groups)
+
+
+def format_cpulist(cpus: list[int]) -> str:
+    """[0..7, 16..23] -> '0-7,16-23'"""
+    out, cpus = [], sorted(set(cpus))
+    i = 0
+    while i < len(cpus):
+        j = i
+        while j + 1 < len(cpus) and cpus[j + 1] == cpus[j] + 1:
+            j += 1
+        out.append(f"{cpus[i]}-{cpus[j]}" if j > i else str(cpus[i]))
+        i = j + 1
+    return ",".join(out)
+
+
+class CoreTypes:
+    """Run apps on the fast cores only, the efficient cores only, or all.
+
+    For CPUs with two core types: Ryzen AI 300 (Zen 5 + Zen 5c, one L3 each)
+    and hybrid Intel (P-cores + E/LP E-cores). Instead of taking cores
+    offline (CPU 0, a fast core, can't go), user.slice, where the desktop,
+    Steam and games run, gets a CPU set (systemd AllowedCPUs, runtime only:
+    gone after a reboot). System services keep every core.
+    """
+
+    SLICE = "user.slice"
+
+    def __init__(self, groups: list[list[int]]):
+        self.fast, self.small = self._split(groups)
+
+    @staticmethod
+    def _split(groups: list[list[int]]) -> tuple[list[int], list[int]]:
+        core = parse_cpulist(sysfs.read("/sys/devices/cpu_core/cpus") or "")
+        if core:  # hybrid Intel: the P-core PMU lists the P-cores
+            every = [int(os.path.basename(p)[3:]) for p in glob.glob(f"{CPU_ROOT}/cpu[0-9]*")]
+            return sorted(core), sorted(c for c in every if c not in core)
+        # AMD: L3 groups whose top clock is well below the fastest group's.
+        # (Strix Halo's two CCDs are the same cores: same clock, no split.)
+        top = {}
+        for g in groups:
+            freqs = [sysfs.read_int(f"{CPU_ROOT}/cpu{c}/cpufreq/cpuinfo_max_freq") or 0 for c in g]
+            top[tuple(g)] = max(freqs or [0])
+        best = max(top.values() or [0])
+        if not best or not all(top.values()):
+            return [], []  # a whole group is offline ("First CCX only"): can't compare
+        fast = sorted(c for g, f in top.items() if f >= 0.85 * best for c in g)
+        small = sorted(c for g, f in top.items() if f < 0.85 * best for c in g)
+        return (fast, small) if small else ([], [])
+
+    def available(self) -> tuple[bool, str | None]:
+        if not self.small:
+            return False, "all cores are the same type (or some are offline)"
+        if not shutil.which("systemctl", path=proc.env()["PATH"]):
+            return False, "needs systemd"
+        return True, None
+
+    def current(self) -> str | None:
+        try:
+            r = proc.run(["systemctl", "show", self.SLICE, "-p", "AllowedCPUs", "--value"], text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        cpus = parse_cpulist(r.stdout.strip()) if r.returncode == 0 else None
+        if cpus is None:
+            return None
+        if not cpus:
+            return "all"
+        return {tuple(self.fast): "fast", tuple(self.small): "small"}.get(tuple(sorted(cpus)), "custom")
+
+    def apply(self, mode: str) -> None:
+        if self.current() == mode:
+            return
+        cpus = {"fast": self.fast, "small": self.small}.get(mode, [])
+        r = proc.run(
+            ["systemctl", "set-property", "--runtime", self.SLICE, f"AllowedCPUs={format_cpulist(cpus)}"],
+            text=True, timeout=15,
+        )
+        if r.returncode != 0:
+            raise OSError(r.stderr.strip() or "systemctl set-property failed")
 
 
 class Util:
