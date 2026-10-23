@@ -1316,7 +1316,13 @@ function Content() {
                   label="Cores for apps and games"
                   description="System services keep every core. Resets on reboot until the plugin applies it again."
                   rgOptions={[
-                    { data: "all", label: "All cores" },
+                    {
+                      data: "all",
+                      label: `All cores (${coreCount(
+                        state.cpu.cores.fast_cores + state.cpu.cores.small_cores,
+                        state.cpu.cores.fast + state.cpu.cores.small,
+                      )})`,
+                    },
                     { data: "fast", label: `${state.cpu.cores.fast_name} only (${coreCount(state.cpu.cores.fast_cores, state.cpu.cores.fast)})` },
                     { data: "small", label: `${state.cpu.cores.small_name} only (${coreCount(state.cpu.cores.small_cores, state.cpu.cores.small)})` },
                   ]}
