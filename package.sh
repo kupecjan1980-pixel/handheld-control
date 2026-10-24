@@ -23,7 +23,7 @@ D="out/desktop/$NAME"
 mkdir -p "$D/desktop"
 cp plugin.json package.json main.py LICENSE "$D/"
 cp -r py_modules fonts "$D/"
-cp -r desktop/server.py desktop/decky.py desktop/dist "$D/desktop/"
+cp -r desktop/server.py desktop/decky.py desktop/dist desktop/install.sh desktop/hhc-desktop "$D/desktop/"
 find "$D" -name __pycache__ -prune -exec rm -rf {} +
 (cd out/desktop && zip -qr "../handheld-control-desktop-$VERSION.zip" "$NAME")
 rm -rf out/desktop

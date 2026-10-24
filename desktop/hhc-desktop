@@ -9,7 +9,20 @@ DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 PORT=${HHC_PORT:-8765}
 URL="http://127.0.0.1:$PORT"
 TOKEN_FILE=/run/hhc-desktop/token
-APP=(chromium --class=hhc-desktop --user-data-dir="$HOME/.cache/hhc-desktop/chromium" --window-size=420,900)
+# A Chromium-based browser for the --app window, with its own profile so it
+# runs as its own process (the script waits for the window to close). Flatpak
+# browsers (Bazzite) keep the profile in their own data folder.
+FLAGS=(--class=hhc-desktop --window-size=420,900)
+APP=()
+for b in chromium chromium-browser google-chrome-stable google-chrome brave-browser brave; do
+    command -v "$b" >/dev/null && { APP=("$b" --user-data-dir="$HOME/.cache/hhc-desktop/chromium" "${FLAGS[@]}"); break; }
+done
+if [ ${#APP[@]} = 0 ] && command -v flatpak >/dev/null; then
+    for id in org.chromium.Chromium com.google.Chrome com.brave.Browser io.github.ungoogled_software.ungoogled_chromium; do
+        flatpak info "$id" >/dev/null 2>&1 && {
+            APP=(flatpak run "$id" --user-data-dir="$HOME/.var/app/$id/hhc-desktop" "${FLAGS[@]}"); break; }
+    done
+fi
 say() { notify-send -a "Handheld Control" "Handheld Control" "$1" 2>/dev/null || echo "$1" >&2; }
 
 if [ "${1:-}" = "--user" ]; then
@@ -24,7 +37,7 @@ if [ "${1:-}" = "--user" ]; then
     for _ in $(seq 80); do curl -s -m 1 "$URL/ping" >/dev/null && break; sleep 0.25; done
 else
     if ! systemctl is-enabled --quiet hhc-desktop.socket 2>/dev/null; then
-        say "Not set up yet: run  sudo ~/handheld-control/desktop/install.sh  once."
+        say "Not set up yet: install it with  curl -fsSL https://raw.githubusercontent.com/kupecjan1980-pixel/handheld-control/master/desktop/get.sh | sudo bash"
         exit 1
     fi
     # The first connection starts the service; it writes the token before answering.
@@ -33,6 +46,11 @@ else
     TOKEN=$(cat "$TOKEN_FILE")
 fi
 
+if [ ${#APP[@]} = 0 ]; then
+    say "No Chromium-based browser found. Install one, e.g.  flatpak install flathub org.chromium.Chromium"
+    [ -n "${SERVER:-}" ] && kill "$SERVER" 2>/dev/null
+    exit 1
+fi
 "${APP[@]}" --app="$URL/?token=$TOKEN" >/dev/null 2>&1 || true
 curl -s -m 10 -X POST -H "X-HHC-Token: $TOKEN" "$URL/quit" >/dev/null || true
 [ -n "${SERVER:-}" ] && wait "$SERVER" || true

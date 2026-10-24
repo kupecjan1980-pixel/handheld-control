@@ -4,7 +4,9 @@
 #   owned by root, so nothing running as you can change what runs as root;
 # - installs hhc-desktop.socket / .service: systemd starts the backend as root
 #   when the app opens (no password, no terminal) and it exits when it closes;
-# - adds "HHC Desktop" to your app launcher.
+# - adds "HHC Desktop" to your app launcher (/usr/local/bin/hhc-desktop).
+# Runs from a checkout of this repository (builds the panel first) or from an
+# unpacked desktop release zip (already built; see desktop/get.sh).
 # Remove everything with: sudo desktop/install.sh --remove
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Run with sudo: sudo $0"; exit 1; }
@@ -15,20 +17,24 @@ DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 REPO=$(dirname "$DIR")
 DEST=/opt/handheld-control-desktop
 UNITS=/etc/systemd/system
+LAUNCHER=/usr/local/bin/hhc-desktop
 APPS="$USER_HOME/.local/share/applications"
 
 if [ "${1:-}" = "--remove" ]; then
     systemctl disable --now hhc-desktop.socket hhc-desktop.service 2>/dev/null || true
-    rm -f "$UNITS/hhc-desktop.socket" "$UNITS/hhc-desktop.service" "$APPS/handheld-control.desktop"
+    rm -f "$UNITS/hhc-desktop.socket" "$UNITS/hhc-desktop.service" "$APPS/handheld-control.desktop" "$LAUNCHER"
     rm -rf "$DEST"
     systemctl daemon-reload
     echo "Removed."
     exit 0
 fi
 
-# Build the panel as the user, unless it's already up to date. sudo's PATH
-# lacks the user's node (e.g. mise shims), so add the usual places.
-if [ ! -f "$DIR/dist/bundle.js" ] || [ -n "$(find "$REPO/src" "$DIR/shims" "$DIR/entry.tsx" "$DIR/index.html" -newer "$DIR/dist/bundle.js" 2>/dev/null)" ]; then
+# Build the panel as the user, unless it's already up to date (a release zip
+# has it built and no sources). sudo's PATH lacks the user's node (e.g. mise
+# shims), so add the usual places.
+if [ ! -d "$REPO/src" ]; then
+    [ -f "$DIR/dist/bundle.js" ] || { echo "No built panel and no sources to build it from."; exit 1; }
+elif [ ! -f "$DIR/dist/bundle.js" ] || [ -n "$(find "$REPO/src" "$DIR/shims" "$DIR/entry.tsx" "$DIR/index.html" -newer "$DIR/dist/bundle.js" 2>/dev/null)" ]; then
     echo "Building the panel (as $USER_NAME)…"
     USER_PATH="$USER_HOME/.local/share/mise/shims:$USER_HOME/.local/bin:$USER_HOME/.volta/bin:/usr/local/bin:/usr/bin:/bin"
     sudo -u "$USER_NAME" env PATH="$USER_PATH" HOME="$USER_HOME" bash -c \
@@ -73,13 +79,16 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now hhc-desktop.socket
 
+# The launcher lives outside $DEST so updating (or going back) can't remove it.
+install -m 755 "$DIR/hhc-desktop" "$LAUNCHER"
+
 mkdir -p "$APPS"
 cat > "$APPS/handheld-control.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=HHC Desktop
 Comment=Handheld Control on this PC: TDP, CPU and GPU clocks, fan, RGB, themes
-Exec=$DIR/hhc-desktop
+Exec=$LAUNCHER
 Terminal=false
 Icon=utilities-system-monitor
 Categories=System;Settings;HardwareSettings;

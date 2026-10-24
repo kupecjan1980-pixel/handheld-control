@@ -34,7 +34,14 @@ the touchpads. It only reads, nothing is grabbed or remapped, and saves
 Deck controller emulation, or Xbox Elite with the touchpads as a mouse) will
 be built from these reports.
 
-**HHC Desktop** (desktop PCs): run `sudo desktop/install.sh` once, then open
+**HHC Desktop** (desktop PCs): install it once from the newest release (no
+checkout or build needed):
+
+```
+curl -fsSL https://raw.githubusercontent.com/kupecjan1980-pixel/handheld-control/master/desktop/get.sh | sudo bash
+```
+
+or run `sudo desktop/install.sh` from a checkout. Then open
 **HHC Desktop** from the app launcher. It's the plugin's panel in its own
 Chromium window, with everything it can change on the PC, and no terminal or
 password. It updates itself from each release's desktop zip (Check for
@@ -43,8 +50,8 @@ plugin's real backend runs as a root system service, copied to
 `/opt/handheld-control-desktop` (root-owned). systemd starts it when the window
 connects and it stops when the window closes, putting everything back as
 unloading the plugin does. `desktop/hhc-desktop --user` runs from the
-repository as you, read-only. `sudo desktop/install.sh --remove` undoes the
-setup. The panel is built from `src/index.tsx` with browser stand-ins for
+repository as you, read-only. `sudo desktop/install.sh --remove` (or `get.sh` piped to
+`sudo bash -s -- --remove`) undoes the setup. The panel is built from `src/index.tsx` with browser stand-ins for
 Decky's UI (`desktop/shims`). It listens on 127.0.0.1 only, and every request
 needs a random token made at start.
 
