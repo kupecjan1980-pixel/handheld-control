@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 # Real path: files are checked against it (on Bazzite /opt links to /var/opt).
 DIST = os.path.realpath(os.path.join(HERE, "dist"))
+BOOT = secrets.token_hex(8)
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css"}
 
 
@@ -97,6 +98,8 @@ def main() -> None:
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            # Changes when the backend restarts (after an update): the window reloads.
+            self.send_header("X-HHC-Boot", BOOT)
             self.end_headers()
             self.wfile.write(body)
 

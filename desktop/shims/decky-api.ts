@@ -18,11 +18,17 @@ export const callable =
       reloadWhenBack();
       throw e;
     }
+    // systemd holds the port while the backend restarts after an update, so
+    // calls wait for the new version instead of failing: notice it by its boot id.
+    const boot = r.headers.get("X-HHC-Boot");
+    if (boot && bootSeen && boot !== bootSeen) location.reload();
+    bootSeen ??= boot;
     const data = await r.json();
     if (!r.ok) throw new Error(String(data));
     return data as Ret;
   };
 
+let bootSeen: string | null = null;
 let reloading = false;
 const reloadWhenBack = () => {
   if (reloading) return;
