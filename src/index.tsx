@@ -600,13 +600,22 @@ const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
     .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible):hover:not(:disabled)`)
     .join(", ");
   // HHC Desktop's dropdowns are <select>s: their open list needs solid colors,
-  // so mix the shade over a dark gray like the panel's.
+  // so mix the shade over a dark gray like the panel's. They keep the color
+  // while focused (the outline shows focus there), and where Chromium can
+  // style the list (base-select) the highlighted option is the full shade
+  // instead of the system blue.
   const a = text ? 0.9 : 0.55;
   const solid = [r, g, b].map((c) => Math.round(c * a + 24 * (1 - a))).join(", ");
+  const fg = text ?? "#fff";
   return `
-    ${btn} { background: rgba(${r}, ${g}, ${b}, ${a}) !important;${text ? ` color: ${text} !important;` : ""} }
-    ${hover} { background: rgba(${r}, ${g}, ${b}, ${text ? 1 : 0.8}) !important; }
-    .hhctl-root select option { background: rgb(${solid}); color: ${text ?? "#fff"}; }
+    ${btn}, .hhctl-root select { background: rgba(${r}, ${g}, ${b}, ${a}) !important;${text ? ` color: ${text} !important;` : ""} }
+    ${hover}, .hhctl-root select:hover { background: rgba(${r}, ${g}, ${b}, ${text ? 1 : 0.8}) !important; }
+    .hhctl-root select option { background: rgb(${solid}); color: ${fg}; }
+    @supports (appearance: base-select) {
+      .hhctl-root select, .hhctl-root select::picker(select) { appearance: base-select; }
+      .hhctl-root select::picker(select) { background: rgb(${solid}); color: ${fg}; border: 0; border-radius: 3px; }
+      .hhctl-root select option:is(:hover, :focus, :checked) { background: rgb(${r}, ${g}, ${b}); color: ${fg}; outline: none; }
+    }
   `;
 };
 
