@@ -2082,59 +2082,6 @@ function Content() {
           </PanelSection>
 
           <PanelSection>
-            {(() => {
-              const upd = state.update;
-              const installed = state.version ?? "0";
-              const sel = upd.releases.find((r) => r.tag === pickTag) ?? upd.releases[0];
-              const cmp = sel ? versionCmp(sel.version, installed) : 0;
-              return (
-                <>
-                  <PanelSectionRow>
-                    <ButtonItem
-                      layout="below"
-                      disabled={upd.busy}
-                      description={[`Installed: v${installed}`, upd.message, upd.error].filter(Boolean).join(" · ")}
-                      onClick={async () => setState(await checkUpdates())}
-                    >
-                      {upd.releases.length ? "Check again" : "Check for updates"}
-                    </ButtonItem>
-                  </PanelSectionRow>
-                  {sel && (
-                    <>
-                      <PanelSectionRow>
-                        <DropdownItem
-                          label="Version"
-                          description={[sel.date, firstLine(sel.notes)].filter(Boolean).join(" · ")}
-                          rgOptions={upd.releases.map((r, i) => ({
-                            data: r.tag,
-                            label: `v${r.version}${r.version === installed ? " (installed)" : i === 0 ? " (newest)" : ""}`,
-                          }))}
-                          selectedOption={sel.tag}
-                          onChange={(o) => setPickTag(o.data)}
-                        />
-                      </PanelSectionRow>
-                      <PanelSectionRow>
-                        <ButtonItem
-                          layout="below"
-                          disabled={upd.busy}
-                          description={[
-                            "Decky restarts to load it; your settings stay.",
-                            versionCmp(sel.version, FIRST_WITH_UPDATER) < 0
-                              ? `v${sel.version} has no updater: to come back, install from the release URL.`
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                          onClick={async () => setState(await installUpdate(sel.tag))}
-                        >
-                          {cmp > 0 ? `Update to v${sel.version}` : cmp < 0 ? `Go back to v${sel.version}` : `Reinstall v${sel.version}`}
-                        </ButtonItem>
-                      </PanelSectionRow>
-                    </>
-                  )}
-                </>
-              );
-            })()}
             <PanelSectionRow>
               <DropdownItem
                 label="Theme color"
@@ -2208,6 +2155,59 @@ function Content() {
                 />
               </PanelSectionRow>
             )}
+            {(() => {
+              const upd = state.update;
+              const installed = state.version ?? "0";
+              const sel = upd.releases.find((r) => r.tag === pickTag) ?? upd.releases[0];
+              const cmp = sel ? versionCmp(sel.version, installed) : 0;
+              return (
+                <>
+                  <PanelSectionRow>
+                    <ButtonItem
+                      layout="below"
+                      disabled={upd.busy}
+                      description={[`Installed: v${installed}`, upd.message, upd.error].filter(Boolean).join(" · ")}
+                      onClick={async () => setState(await checkUpdates())}
+                    >
+                      {upd.releases.length ? "Check again" : "Check for updates"}
+                    </ButtonItem>
+                  </PanelSectionRow>
+                  {sel && (
+                    <>
+                      <PanelSectionRow>
+                        <DropdownItem
+                          label="Version"
+                          description={[sel.date, firstLine(sel.notes)].filter(Boolean).join(" · ")}
+                          rgOptions={upd.releases.map((r, i) => ({
+                            data: r.tag,
+                            label: `v${r.version}${r.version === installed ? " (installed)" : i === 0 ? " (newest)" : ""}`,
+                          }))}
+                          selectedOption={sel.tag}
+                          onChange={(o) => setPickTag(o.data)}
+                        />
+                      </PanelSectionRow>
+                      <PanelSectionRow>
+                        <ButtonItem
+                          layout="below"
+                          disabled={upd.busy}
+                          description={[
+                            "Decky restarts to load it; your settings stay.",
+                            versionCmp(sel.version, FIRST_WITH_UPDATER) < 0
+                              ? `v${sel.version} has no updater: to come back, install from the release URL.`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          onClick={async () => setState(await installUpdate(sel.tag))}
+                        >
+                          {cmp > 0 ? `Update to v${sel.version}` : cmp < 0 ? `Go back to v${sel.version}` : `Reinstall v${sel.version}`}
+                        </ButtonItem>
+                      </PanelSectionRow>
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </PanelSection>
         </div>
       </div>
