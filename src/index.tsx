@@ -599,9 +599,14 @@ const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
   const hover = ["DialogButton", "DropDownControlButton"]
     .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible):hover:not(:disabled)`)
     .join(", ");
+  // HHC Desktop's dropdowns are <select>s: their open list needs solid colors,
+  // so mix the shade over a dark gray like the panel's.
+  const a = text ? 0.9 : 0.55;
+  const solid = [r, g, b].map((c) => Math.round(c * a + 24 * (1 - a))).join(", ");
   return `
-    ${btn} { background: rgba(${r}, ${g}, ${b}, ${text ? 0.9 : 0.55}) !important;${text ? ` color: ${text} !important;` : ""} }
+    ${btn} { background: rgba(${r}, ${g}, ${b}, ${a}) !important;${text ? ` color: ${text} !important;` : ""} }
     ${hover} { background: rgba(${r}, ${g}, ${b}, ${text ? 1 : 0.8}) !important; }
+    .hhctl-root select option { background: rgb(${solid}); color: ${text ?? "#fff"}; }
   `;
 };
 
