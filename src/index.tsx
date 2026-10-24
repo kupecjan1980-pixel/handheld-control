@@ -1544,8 +1544,10 @@ function Content() {
             ) : (
               <>
                 <PanelSectionRow>
-                  <Field label={<span className="hhctl-headlabel">FAN</span>}>
-                    <span className="hhctl-inline">
+                  {/* Full-width row like BATT: in a Field the % ran off the edge. */}
+                  <div className="hhctl-statusrow">
+                    <span className="hhctl-headlabel">FAN</span>
+                    <span>
                       {[
                         fan.temp != null ? `${Math.round(fan.temp)} °C` : null,
                         fan.rpm != null ? `${fan.rpm} RPM` : null,
@@ -1555,7 +1557,7 @@ function Content() {
                         .filter(Boolean)
                         .join(" · ")}
                     </span>
-                  </Field>
+                  </div>
                 </PanelSectionRow>
                 <PanelSectionRow>
                   <DropdownItem
