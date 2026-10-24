@@ -31,7 +31,8 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-DIST = os.path.join(HERE, "dist")
+# Real path: files are checked against it (on Bazzite /opt links to /var/opt).
+DIST = os.path.realpath(os.path.join(HERE, "dist"))
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css"}
 
 
