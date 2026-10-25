@@ -85,4 +85,16 @@ open(f"{usb}/power/wakeup_count", "w").write("10\n")
 ctl._after_wake(); ctl.tick_wake()
 assert ctl.padwake.ids == [("045e", "028e")]
 assert controller.PAD_IDS["ayaneo_next2"] == [("1c4f", "0002")], "NEXT 2: buttons only"
+# naming the wake source from /sys/class/wakeup
+wk = f"{tmp}/wakeup"
+for i, (name, wc, ec) in enumerate([("1-4", 0, 2), ("PNP0C0C:00", 0, 0), ("0000:c4:00.3", 0, 5)]):
+    os.makedirs(f"{wk}/wakeup{i}")
+    for k, v in (("name", name), ("wakeup_count", wc), ("event_count", ec)):
+        open(f"{wk}/wakeup{i}/{k}", "w").write(f"{v}\n")
+sleep.WAKEUP_CLASS = wk
+before = sleep.wake_counts()
+open(f"{wk}/wakeup0/event_count", "w").write("3\n")
+assert [x.split()[0] for x in sleep.woken_by(before, sleep.wake_counts())] == ["1-4"]
+open(f"{wk}/wakeup1/wakeup_count", "w").write("1\n")
+assert sleep.woken_by(before, sleep.wake_counts()) == ["PNP0C0C:00"], "wakeup_count wins over event_count"
 print("all sleep tests passed")

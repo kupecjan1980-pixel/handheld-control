@@ -137,6 +137,7 @@ type State = {
     pad_wake: boolean;
     note: string | null;
     pad_wake_text: string | null;
+    last_wake: string | null;
   };
   inputplumber?: {
     devices: number;
@@ -2260,6 +2261,7 @@ function Content() {
                     state.sleep.pad_wake_text ??
                       "Any button or a stick move wakes it from sleep (if the controller can). Careful in a bag: a stick bump wakes it too.",
                     state.sleep.note,
+                    state.sleep.last_wake,
                   ]
                     .filter(Boolean)
                     .join(" · ")}

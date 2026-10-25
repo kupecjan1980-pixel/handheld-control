@@ -165,6 +165,8 @@ class Controller:
         self.slept_at: float | None = None  # boot time when it went to sleep
         self.woke: float | None = None  # set by the wake signal; tick() acts on it
         self.sleep_note: str | None = None
+        self.wake_before: dict = {}
+        self.last_wake: str | None = None  # "slept 3 s, woken by …", shown in the panel
         self.padwake = sleep.PadWake([i for i in PAD_IDS.get(self.buttons.key, [])
                                       if f"{i[0]}:{i[1]}" not in self.settings["sleep"].get("pad_wake_skip", [])])
         self.ip_check_at: float | None = None  # when to check our InputPlumber controller came up
@@ -497,6 +499,10 @@ class Controller:
             self.padwake.snapshot()
         if self.settings["sleep"].get("rgb_off") and self.rgb and self.settings["rgb"]["enabled"]:
             self.rgb.apply("off", 0, 0, 0, None)
+            # The controller answers the command; let that land before the
+            # suspend, so a late answer can't count as a wake-up.
+            time.sleep(0.5)
+        self.wake_before = sleep.wake_counts()
 
     def _after_wake(self) -> None:
         self.woke = sleep.boottime()
@@ -509,6 +515,13 @@ class Controller:
         woke, self.woke = self.woke, None
         slept = woke - self.slept_at if self.slept_at else None
         self.apply_rgb()
+        sources = sleep.woken_by(self.wake_before, sleep.wake_counts())
+        irq = sleep.wake_irq()
+        parts = [f"slept {slept:.0f} s" if slept is not None else "woke"]
+        if sources or irq:
+            parts.append("woken by " + ", ".join(sources + ([irq] if irq else [])))
+        self.last_wake = f"Last sleep ({time.strftime('%H:%M')}): " + ", ".join(parts)
+        log.info("sleep: %s", self.last_wake)
         if not self.pad_wake_on():
             return
         by = self.padwake.woke_by()
@@ -531,7 +544,7 @@ class Controller:
 
     def apply_sleep(self) -> None:
         s = self.settings["sleep"]
-        if s.get("rgb_off") and self.rgb:
+        if (s.get("rgb_off") and self.rgb) or self.pad_wake_on():
             self.sleeper.start()
         else:
             self.sleeper.stop()
@@ -1496,6 +1509,7 @@ class Controller:
                 "pad_wake_available": bool(self.padwake.ids),
                 "pad_wake": self.pad_wake_on(),
                 "note": self.sleep_note,
+                "last_wake": self.last_wake,
                 "pad_wake_text": PAD_WAKE_TEXT.get(self.buttons.key),
             },
             "ec": {

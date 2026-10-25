@@ -209,3 +209,51 @@ class PadWake:
             except OSError:
                 pass
             self.orig.pop(w, None)
+
+
+# --- what woke it ------------------------------------------------------------------
+
+WAKEUP_CLASS = "/sys/class/wakeup"
+
+
+def wake_counts() -> dict[str, tuple[int, int]]:
+    """Every wakeup source: name -> (wakeup_count, event_count)."""
+    out = {}
+    try:
+        names = os.listdir(WAKEUP_CLASS)
+    except OSError:
+        return out
+    for n in names:
+        d = f"{WAKEUP_CLASS}/{n}"
+        name = sysfs.read(f"{d}/name")
+        if name:
+            out[name] = (sysfs.read_int(f"{d}/wakeup_count") or 0, sysfs.read_int(f"{d}/event_count") or 0)
+    return out
+
+
+def _label(name: str) -> str:
+    """'1-4' -> '1-4 (AYANEO COMPOSITE DEVICE 1c4f:0002)' for USB devices."""
+    usb = f"/sys/bus/usb/devices/{name}"
+    vid, pid = sysfs.read(f"{usb}/idVendor"), sysfs.read(f"{usb}/idProduct")
+    if vid and pid:
+        prod = sysfs.read(f"{usb}/product") or "USB device"
+        return f"{name} ({prod} {vid}:{pid})"
+    return name
+
+
+def wake_irq() -> str | None:
+    irq = sysfs.read("/sys/power/pm_wakeup_irq")
+    if not irq:
+        return None
+    for line in (sysfs.read("/proc/interrupts") or "").splitlines():
+        head, _, rest = line.partition(":")
+        if head.strip() == irq:
+            return f"IRQ {irq} ({rest.split()[-1]})" if rest.split() else f"IRQ {irq}"
+    return f"IRQ {irq}"
+
+
+def woken_by(before: dict[str, tuple[int, int]], after: dict[str, tuple[int, int]]) -> list[str]:
+    """Wakeup sources that fired across the sleep: wakeup_count first (they
+    woke it or stopped the suspend), else event_count."""
+    up = lambda i: [n for n, c in after.items() if n in before and c[i] > before[n][i]]
+    return [_label(n) for n in (up(0) or up(1))]
