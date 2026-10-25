@@ -36,7 +36,7 @@ for _ in range(50):
         break
     time.sleep(0.05)
 time.sleep(0.2)
-assert got == ["open_plugin", "keyboard"], got
+assert got == ["open_plugin", "qam"], got
 # hold AYN: QAM fires while still held, and the release adds nothing
 os.write(wfd, ev(193, 1) + ev(193, 2)); time.sleep(buttons.HOLD + 0.25)
 assert got[-1] == "qam" and len(got) == 3, got
@@ -64,7 +64,7 @@ combo = lambda key, held=0.0: (ev(29, 1) + ev(125, 1) + ev(key, 1), ev(key, 0) +
 for down, up, held in (combo(24), combo(187, 0.1), combo(187, buttons.HOLD + 0.25)):
     os.write(wfd, down); time.sleep(held); os.write(wfd, up); time.sleep(0.15)
 time.sleep(0.2)
-assert got == ["keyboard", "open_plugin", "qam"], got
+assert got == ["qam", "open_plugin", "qam"], got
 os.write(wfd, ev(187, 1) + ev(187, 0)); time.sleep(0.2)
 assert len(got) == 3, "F17 without Win does nothing"
 b.stop(); os.close(wfd); b._thread.join(3)

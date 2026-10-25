@@ -44,13 +44,13 @@ HOLD = 0.5  # seconds held before a key's hold action fires (while still held)
 # device key -> (vendor, product, {key: action or (tap, hold)}, {key with Meta held: same});
 # vendor None: product is the input device's name.
 MAPS = {
-    "ayaneo_next2": ("1c4f", "0002", {KEY_F23: ("open_plugin", "qam")}, {KEY_D: "keyboard"}),
-    "oxp3": ("1a86", "fe00", {}, {KEY_F17: ("open_plugin", "qam"), KEY_O: "keyboard"}),
+    "ayaneo_next2": ("1c4f", "0002", {KEY_F23: ("open_plugin", "qam")}, {KEY_D: "qam"}),
+    "oxp3": ("1a86", "fe00", {}, {KEY_F17: ("open_plugin", "qam"), KEY_O: "qam"}),
     "onexfly": (None, "InputPlumber Keyboard", {KEY_F23: "open_plugin", KEY_F24: "qam"}, {}),
 }
 HELP = {
-    "ayaneo_next2": "AYN: tap opens Handheld Control, hold opens Quick Access · the button next to it opens the Steam keyboard",
-    "oxp3": "Home button: tap opens Handheld Control, hold opens Quick Access · keyboard button opens the Steam keyboard",
+    "ayaneo_next2": "AYN: tap opens Handheld Control, hold opens Quick Access · the button next to it opens Quick Access",
+    "oxp3": "Home button: tap opens Handheld Control, hold opens Quick Access · keyboard button opens Quick Access",
     "onexfly": "Turbo opens Handheld Control · keyboard button opens Quick Access (through InputPlumber)",
 }
 

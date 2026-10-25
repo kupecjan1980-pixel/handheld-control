@@ -9,6 +9,7 @@ for t in tests/test_*.py; do
         [ -n "${HHD_SRC:-}" ] || { echo "$name: skipped (set HHD_SRC)"; continue; }
         python3 -I "$t" "$PWD" "$HHD_SRC" 2>/dev/null | tail -1
     else
-        python3 -I "$t" "$PWD" 2>/dev/null | tail -1
+        out=$(python3 -I "$t" "$PWD" 2>&1) && echo "$out" | tail -1 || { echo "$name: FAILED"; echo "$out" | tail -5; failed=1; }
     fi
 done
+exit "${failed:-0}"
