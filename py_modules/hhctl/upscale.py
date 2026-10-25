@@ -9,6 +9,11 @@ so games started after the next login get them.
            model, which costs some fps compared with FSR 3.1 (sharper picture).
   XeSS     PROTON_XESS_UPGRADE=1: the newest libxess.dll in games with XeSS.
            Best on Intel Arc; also runs on AMD.
+
+OptiScaler (Proton-CachyOS: PROTON_USE_OPTISCALER) swaps the upscaler a game
+asks for (DLSS, FSR, XeSS) for another one. It loads a DLL into the game,
+which anti-cheat can take for a cheat, so it's set per game in the launch
+options (the panel does that), never for every game here.
 """
 
 import glob
@@ -44,6 +49,15 @@ def proton_tools(home: str) -> list[str]:
     return sorted(found)
 
 
+def optiscaler_vars(gpu_driver: str | None, gc: int | None) -> str:
+    """Launch-option prefix: XeSS on Intel, else FSR 3.1 (FSR 4 on RDNA 3+)."""
+    up = "xess" if gpu_driver in ("xe", "i915") else "fsr31"
+    out = f'PROTON_USE_OPTISCALER=1 PROTON_OPTISCALER_CONFIG="Upscalers.Dx11Upscaler={up};Upscalers.Dx12Upscaler={up}"'
+    if up == "fsr31" and gc is not None and gc >= 11:
+        out += " PROTON_FSR4_UPGRADE=1"
+    return out
+
+
 class Upscale:
     def __init__(self, home: str, gpu_driver: str | None, gpu_dev: str | None):
         self.home = home
@@ -51,6 +65,8 @@ class Upscale:
         gc = gc_major(gpu_dev) if gpu_driver == "amdgpu" else None
         self.options = (["fsr4"] if gc is not None and gc >= 11 else []) + ["xess"]
         self.rdna3 = gc == 11
+        self.optiscaler = optiscaler_vars(gpu_driver, gc)
+        self.opti_upscaler = "XeSS" if gpu_driver in ("xe", "i915") else ("FSR 4" if gc is not None and gc >= 11 else "FSR 3.1")
 
     def current(self) -> dict[str, bool]:
         try:
@@ -83,4 +99,4 @@ class Upscale:
 
     def state(self) -> dict:
         return {"options": self.options, "on": self.current(), "rdna3": self.rdna3,
-                "tools": proton_tools(self.home)}
+                "tools": proton_tools(self.home), "optiscaler": self.optiscaler, "opti_upscaler": self.opti_upscaler}

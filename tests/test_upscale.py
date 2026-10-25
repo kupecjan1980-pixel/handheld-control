@@ -24,4 +24,8 @@ try:
     upscale.Upscale(home, "xe", None).set("fsr4", True); raise SystemExit("fsr4 must be refused on Intel")
 except ValueError:
     pass
+assert upscale.optiscaler_vars("xe", None) == 'PROTON_USE_OPTISCALER=1 PROTON_OPTISCALER_CONFIG="Upscalers.Dx11Upscaler=xess;Upscalers.Dx12Upscaler=xess"'
+assert upscale.optiscaler_vars("amdgpu", 11).endswith("Dx12Upscaler=fsr31\" PROTON_FSR4_UPGRADE=1")
+assert "FSR4" not in upscale.optiscaler_vars("amdgpu", 9)
+assert u.state()["opti_upscaler"] == "FSR 4"
 print("all upscale tests passed")

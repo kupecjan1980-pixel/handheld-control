@@ -150,7 +150,14 @@ type State = {
   };
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
   ai: { enabled: boolean; vars: Record<string, string> };
-  upscale: { options: string[]; on: Record<string, boolean>; rdna3: boolean; tools: string[] };
+  upscale: {
+    options: string[];
+    on: Record<string, boolean>;
+    rdna3: boolean;
+    tools: string[];
+    optiscaler: string;
+    opti_upscaler: string;
+  };
   vram: {
     available: boolean;
     unavailable: string | null;
@@ -476,6 +483,72 @@ function DriveRows() {
   );
 }
 
+// --- OptiScaler per game, through the game's Steam launch options ---------------
+
+function runningGame(): { appid: number; name: string } | null {
+  const app = (window as any).SteamUIStore?.MainRunningApp;
+  return app?.appid ? { appid: Number(app.appid), name: app.display_name ?? `App ${app.appid}` } : null;
+}
+
+function launchOptions(appid: number): Promise<string | null> {
+  const apps = (window as any).SteamClient?.Apps;
+  if (!apps?.RegisterForAppDetails) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let reg: { unregister: () => void } | null = null;
+    const done = (v: string | null) => {
+      clearTimeout(t);
+      reg?.unregister();
+      resolve(v);
+    };
+    const t = setTimeout(() => done(null), 3000);
+    reg = apps.RegisterForAppDetails(appid, (d: any) => done(d?.strLaunchOptions ?? ""));
+  });
+}
+
+const OPTI_VAR = /(^|\s)PROTON_USE_OPTISCALER=\S+/;
+
+function withOptiscaler(opts: string, vars: string, on: boolean): string {
+  let o = opts.replace(vars, "").replace(OPTI_VAR, " ").replace(/\s+/g, " ").trim();
+  if (o === "%command%") o = "";
+  if (!on) return o;
+  if (o.includes("%command%")) return `${vars} ${o}`;
+  return o ? `${vars} %command% ${o}` : `${vars} %command%`;
+}
+
+function OptiscalerRow({ u }: { u: State["upscale"] }) {
+  const [game, setGame] = useState(runningGame());
+  const [opts, setOpts] = useState<string | null>(null);
+  useEffect(() => {
+    const g = runningGame();
+    setGame(g);
+    if (g) launchOptions(g.appid).then(setOpts);
+  }, []);
+  if (!(window as any).SteamClient?.Apps?.SetAppLaunchOptions) return null; // HHC Desktop
+  const base = `Swaps the upscaler the game asks for (pick DLSS, FSR or XeSS in its settings) for ${u.opti_upscaler}. Needs Proton-CachyOS for the game. It loads into the game, so don't use it in online games with anti-cheat (ban risk). Applies when the game starts again.`;
+  if (!game || opts === null) {
+    return (
+      <PanelSectionRow>
+        <Field label="OptiScaler" description={`${base} Start the game, then turn it on here for that game.`} />
+      </PanelSectionRow>
+    );
+  }
+  const on = OPTI_VAR.test(opts);
+  return (
+    <PanelSectionRow>
+      <ToggleField
+        label={`OptiScaler for ${game.name}`}
+        description={base}
+        checked={on}
+        onChange={(v) => {
+          const next = withOptiscaler(opts, u.optiscaler, v);
+          (window as any).SteamClient.Apps.SetAppLaunchOptions(game.appid, next);
+          setOpts(next);
+        }}
+      />
+    </PanelSectionRow>
+  );
+}
+
 function UpscaleRows({ state, setState }: { state: State; setState: (s: State) => void }) {
   const u = state.upscale;
   if (!u) return null;
@@ -503,6 +576,7 @@ function UpscaleRows({ state, setState }: { state: State; setState: (s: State) =
           />
         </PanelSectionRow>
       ))}
+      <OptiscalerRow u={u} />
       <ErrorRow msg={state.errors.upscale} />
     </>
   );
@@ -2041,7 +2115,9 @@ function Content() {
                     <SliderField
                       label="Charge limit"
                       description={
-                        battery.limit_mode === "emulated" ? "Enforced by the plugin while it runs" : undefined
+                        battery.limit_mode === "emulated"
+                          ? "This device has no charge limit of its own: the plugin pauses charging at the limit, so it only holds while the plugin runs"
+                          : undefined
                       }
                       value={b.limit}
                       min={50}
