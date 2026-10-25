@@ -128,7 +128,13 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
-  inputplumber?: { devices: number; targets: string[] };
+  inputplumber?: {
+    devices: number;
+    targets: string[];
+    configurable: boolean;
+    status: "missing" | "stopped" | "running" | null;
+    install: string | null;
+  };
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
   vram: {
     available: boolean;
@@ -2193,14 +2199,28 @@ function Content() {
                 />
               </PanelSectionRow>
             )}
-            {!!state.inputplumber?.devices && (
+            {state.inputplumber?.configurable && state.inputplumber.status === "missing" && (
+              <PanelSectionRow>
+                <Field
+                  label="Xbox Elite controller"
+                  description={`Needs InputPlumber, which shows the controller as an Xbox Elite with the back buttons as paddles. Install it${
+                    state.inputplumber.install ? ` (${state.inputplumber.install})` : ""
+                  }; the plugin sets it up and turns it on.`}
+                />
+              </PanelSectionRow>
+            )}
+            {!!state.inputplumber && (state.inputplumber.devices > 0 || (state.inputplumber.configurable && state.inputplumber.status !== "missing")) && (
               <PanelSectionRow>
                 <DropdownItem
                   label="Controller type"
-                  description="What InputPlumber shows Steam and games"
+                  description={
+                    state.inputplumber.configurable
+                      ? "Through InputPlumber; the back buttons become paddles"
+                      : "What InputPlumber shows Steam and games"
+                  }
                   rgOptions={[
                     ...state.inputplumber.targets.map((t) => ({ data: t, label: IP_TARGETS[t] ?? t })),
-                    { data: "none", label: "InputPlumber's choice" },
+                    { data: "none", label: state.inputplumber.configurable ? "Plain (no InputPlumber)" : "InputPlumber's choice" },
                   ]}
                   selectedOption={draft.controller.ip_target ?? "none"}
                   onChange={(o) => change("controller", { ip_target: o.data === "none" ? null : o.data }, 0)}

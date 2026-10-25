@@ -108,4 +108,53 @@ for _ in range(50):
     time.sleep(0.05)
 assert got == ["open_plugin", "qam"], got
 b.stop(); os.close(wfd); b._thread.join(3)
+# --- our device configs (NEXT 2, OXP3) --------------------------------------
+sc = []
+state = {"unit": True, "active": False}
+def fake_systemctl(*args, timeout=30):
+    sc.append(args)
+    rc = 0
+    if args[0] == "cat":
+        rc = 0 if state["unit"] else 1
+    elif args[0] == "is-active":
+        rc = 0 if state["active"] else 3
+    elif args[0] == "enable":
+        state["active"] = True
+    return types.SimpleNamespace(returncode=rc, stdout=b"", stderr=b"")
+ip._systemctl = fake_systemctl
+c = ip.Configs("ayaneo_next2", f"{tmp}/devices.d", f"{tmp}/maps.d")
+assert c.supported() and not ip.Configs("onexfly").supported()
+c.ensure()
+dev = json.load(open(c.dev_path)); cmap = json.load(open(c.map_path))
+assert os.path.basename(c.dev_path) < "50-", "sorts before the stock configs"
+assert dev["target_devices"][0] == "xbox-elite" and dev["capability_map_id"] == cmap["id"]
+kb = dev["source_devices"][1]
+assert kb["passthrough"] is True and kb["group"] == "keyboard", "the buttons' keyboard is never grabbed"
+pad = {m["source_events"][0]["keyboard"]: m["target_event"]["gamepad"]["button"] for m in cmap["mapping"]}
+assert pad == {"KeyF19": "LeftPaddle1", "KeyF17": "LeftPaddle2", "KeyF20": "RightPaddle1", "KeyF18": "RightPaddle2"}
+assert ("enable", "--now", "inputplumber.service") in sc, sc
+n = len(sc); c._status = None
+c.ensure()
+assert not any(a[0] in ("restart", "enable") for a in sc[n:]), "unchanged config: no restart"
+open(c.dev_path, "w").write("old")
+c._status = None; c.ensure()
+assert sc[-1] == ("restart", "inputplumber.service")
+c.remove()
+assert not os.path.exists(c.dev_path) and not os.path.exists(c.map_path) and sc[-1][0] == "restart"
+n = len(sc); c.remove()
+assert len(sc) == n or sc[-1][0] != "restart", "nothing to remove: no restart"
+o = ip.Configs("oxp3", f"{tmp}/devices.d", f"{tmp}/maps.d")
+o.ensure()
+od = json.load(open(o.dev_path))
+assert not os.path.exists(o.map_path)
+kbd = [x for x in od["source_devices"] if x["group"] == "keyboard"][0]
+assert kbd["passthrough"] and kbd["events"] == {"exclude": ["*"]}
+hid = [x for x in od["source_devices"] if "hidraw" in x][0]
+assert "Gamepad:Button:Keyboard" in hid["events"]["exclude"]
+o.remove()
+state["unit"] = False
+m = ip.Configs("oxp3", f"{tmp}/d2", f"{tmp}/m2")
+assert m.status() == "missing"
+m.ensure()
+assert not os.path.exists(m.dev_path), "nothing written without InputPlumber"
 print("all inputplumber tests passed")

@@ -143,6 +143,7 @@ class Controller:
         self.emit = lambda action: None  # set by main.py: sends a button action to the panel
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
+        self.ipconf = inputplumber.Configs(self.buttons.key)
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
         self.gs_applied_pid: int | None = None
@@ -402,7 +403,19 @@ class Controller:
             self.buttons.start()
         else:
             self.buttons.stop()
+        self.apply_ip_config()
         self.sync_inputplumber()
+
+    def apply_ip_config(self) -> None:
+        """NEXT 2 / OXP3: our InputPlumber config while a controller type is picked."""
+        if not self.ipconf.supported():
+            return
+        if self.settings["controller"].get("ip_target"):
+            self._guard("controller", self.ipconf.ensure)
+        else:
+            self._guard("controller", self.ipconf.remove)
+        self.ip.devices = []  # look for its composite device again now
+        self.ip._looked = -600.0
 
     def sync_inputplumber(self) -> None:
         c = self.settings["controller"]
@@ -1088,6 +1101,10 @@ class Controller:
         b = self.settings["battery"]
         self._guard("battery", lambda: self.bat.tick(int(b["limit"]), b["bypass"]))
 
+    def uninstall(self) -> None:
+        """Plugin removed: take our InputPlumber config away too."""
+        self._guard("controller", self.ipconf.remove)
+
     def restore(self, unload: bool = False) -> None:
         """Hand control back to firmware (unload, exit, EC switch)."""
         if unload and self.settings["cpu"].get("cores") not in (None, "all") and self.cores.available()[0]:
@@ -1294,7 +1311,13 @@ class Controller:
                 "listening": self.buttons.node,
                 "help": self.buttons.help,
             },
-            "inputplumber": {"devices": len(self.ip.devices), "targets": inputplumber.TARGETS},
+            "inputplumber": {
+                "devices": len(self.ip.devices),
+                "targets": inputplumber.TARGETS,
+                "configurable": self.ipconf.supported(),
+                "status": self.ipconf.status() if self.ipconf.supported() else None,
+                "install": "sudo pacman -S inputplumber" if os.path.exists("/usr/bin/pacman") and not os.path.exists("/run/ostree-booted") else None,
+            },
             "thermal": {
                 "available": bool(self.thermal),
                 "range": list(self.thermal.range) if self.thermal else None,

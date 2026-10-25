@@ -71,6 +71,16 @@ gamepad's Start, so games keep it. The plugin only
 reads those keys, so nothing is taken from Steam or games. The back buttons
 and the touchpads need a virtual controller; that comes later.
 
+**Controller → Controller type** on the NEXT 2 and the ONEXPLAYER 3 (needs
+InputPlumber; Bazzite ships it, on CachyOS `sudo pacman -S inputplumber`):
+the plugin puts its own InputPlumber device config in
+`/etc/inputplumber/devices.d/40-hhc-<device>.yaml` (sorted before the stock
+configs), turns InputPlumber on, and the controller shows up as an Xbox Elite
+(or the type picked) with the back buttons as paddles (NEXT 2: F19 L4, F17
+L5, F20 R4, F18 R5; OXP3: M1 / M2). The buttons' keyboard stays ungrabbed
+(passthrough), so the extra buttons work as before. "Plain (no InputPlumber)"
+removes the config again; so does uninstalling the plugin.
+
 **CPU → Temperature limit**: the CPU boosts as hard as the TDP allows
 until it reaches the set temperature, then holds it there; the CPU does this
 itself. AMD: the SMU's Tctl limit (direct, or ryzenadj `--tctl-temp`),

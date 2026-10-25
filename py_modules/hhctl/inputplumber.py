@@ -10,10 +10,18 @@ instead of its Steam controller). busctl talks to it, like scx_loader.
 The profile it had and the controllers it emulated are remembered and put
 back when the feature is turned off or the plugin unloads. InputPlumber makes
 the device anew after resume (back to its defaults), so tick() re-applies.
+
+The NEXT 2 (no InputPlumber config) and the ONEXPLAYER 3 (whose stock config
+grabs the keyboard the button listener reads) get device configs of our own
+in /etc/inputplumber/devices.d, named to sort before the stock ones so they
+claim the devices first: the gamepad as an Xbox Elite, the back buttons as
+paddles, and the buttons' keyboard left alone (passthrough, never grabbed),
+so AYN / Win+D / the OXP home and keyboard buttons work as before.
 """
 
 import json
 import logging
+import os
 import re
 import subprocess
 import time
@@ -33,7 +41,7 @@ DEFAULT_PROFILE = "/usr/share/inputplumber/profiles/default.yaml"
 KEYS = {"QuickAccess": "KeyF23", "Keyboard": "KeyF24"}
 # InputPlumber device config names whose buttons are KEYS. OneXFly: Turbo is
 # QuickAccess, the keyboard button Keyboard (capability map oxp7).
-DEVICES = {"ONEXPLAYER ONEXFLY"}
+DEVICES = {"ONEXPLAYER ONEXFLY", "AYANEO NEXT 2 (HHC)", "ONEXPLAYER 3 (HHC)"}
 
 GAMEPADS = {"deck", "deck-uhid", "ds5", "ds5-edge", "gamepad", "hori-steam", "xb360", "xbox-elite", "xbox-series"}
 TARGETS = ["xbox-elite", "xbox-series", "xb360", "deck-uhid"]
@@ -178,3 +186,148 @@ class InputPlumber:
             self._restore_profile(path)
         for path in list(self.prev_targets):
             self._restore_targets(path)
+
+
+# --- device configs of our own (NEXT 2, ONEXPLAYER 3) ------------------------
+
+ETC_DEVICES = "/etc/inputplumber/devices.d"
+ETC_MAPS = "/etc/inputplumber/capability_maps.d"
+
+
+def _paddle(key: str, button: str) -> dict:
+    return {"name": button, "source_events": [{"keyboard": key}], "target_event": {"gamepad": {"button": button}}}
+
+
+# buttons.py device key -> (device config, capability map or None)
+CONFIGS = {
+    # NEXT 2 (report 2026-10-22): xpad gamepad; the back buttons are F17-F20 on
+    # the AYANEO keyboard (user-confirmed: F19 L4, F17 L5, F20 R4, F18 R5).
+    "ayaneo_next2": (
+        {
+            "version": 1, "kind": "CompositeDevice", "name": "AYANEO NEXT 2 (HHC)",
+            "matches": [{"dmi_data": {"board_name": "AB09"}}],
+            "source_devices": [
+                {"group": "gamepad", "evdev": {"name": "Microsoft X-Box 360 pad", "vendor_id": "045e",
+                                               "product_id": "028e", "handler": "event*"}},
+                {"group": "keyboard", "passthrough": True,
+                 "evdev": {"vendor_id": "1c4f", "product_id": "0002", "handler": "event*"},
+                 "events": {"exclude": ["*"], "include": ["Keyboard:KeyF17", "Keyboard:KeyF18",
+                                                          "Keyboard:KeyF19", "Keyboard:KeyF20"]}},
+            ],
+            "options": {"auto_manage": True},
+            "target_devices": ["xbox-elite", "mouse", "keyboard"],
+            "capability_map_id": "hhc_next2",
+        },
+        {
+            "version": 1, "kind": "CapabilityMap", "name": "AYANEO NEXT 2 (HHC)", "id": "hhc_next2",
+            "mapping": [_paddle("KeyF19", "LeftPaddle1"), _paddle("KeyF17", "LeftPaddle2"),
+                        _paddle("KeyF20", "RightPaddle1"), _paddle("KeyF18", "RightPaddle2")],
+            "filtered_events": [],
+        },
+    ),
+    # ONEXPLAYER 3: InputPlumber's own config without its keyboard source; the
+    # vendor HID only reads (M1/M2 -> paddles), its Keyboard/Guide are left out
+    # because the button listener already handles those buttons.
+    "oxp3": (
+        {
+            "version": 1, "kind": "CompositeDevice", "name": "ONEXPLAYER 3 (HHC)",
+            "matches": [{"dmi_data": {"product_name": "ONEXPLAYER 3", "sys_vendor": "ONE-NETBOOK"}}],
+            "source_devices": [
+                {"group": "gamepad", "evdev": {"name": "Microsoft X-Box 360 pad", "phys_path": "usb-0000:00:14.0-7/input0",
+                                               "handler": "event*"}},
+                # Claimed so the stock config can't take (and grab) it; never grabbed, nothing read.
+                {"group": "keyboard", "passthrough": True,
+                 "evdev": {"name": "HID 1a86:fe00", "phys_path": "usb-0000:00:14.0-5/input0", "handler": "event*"},
+                 "events": {"exclude": ["*"]}},
+                {"group": "gamepad", "hidraw": {"vendor_id": 0x1A86, "product_id": 0xFE00, "interface_num": 2},
+                 "events": {"exclude": ["Gamepad:Button:Keyboard", "Gamepad:Button:Guide"]}},
+                {"group": "imu", "iio": {"name": "bmi260", "mount_matrix": {"x": [0, 1, 0], "y": [1, 0, 0], "z": [0, 0, 1]}}},
+            ],
+            "options": {"auto_manage": True},
+            "target_devices": ["xbox-elite", "mouse", "keyboard"],
+        },
+        None,
+    ),
+}
+
+
+def _systemctl(*args: str, timeout: float = 30) -> subprocess.CompletedProcess:
+    return proc.run(["systemctl", *args], timeout=timeout)
+
+
+class Configs:
+    """Writes / removes our device configs and (re)starts InputPlumber."""
+
+    def __init__(self, key: str, etc_devices: str = ETC_DEVICES, etc_maps: str = ETC_MAPS):
+        self.key = key
+        self.conf = CONFIGS.get(key)
+        self.dev_path = f"{etc_devices}/40-hhc-{key}.yaml"
+        self.map_path = f"{etc_maps}/hhc-{key}.yaml"
+        self._status: tuple[str, float] | None = None
+
+    def supported(self) -> bool:
+        return self.conf is not None
+
+    def status(self) -> str:
+        """'missing' (not installed), 'stopped' or 'running'; cached 10 s."""
+        if self._status and time.monotonic() - self._status[1] < 10:
+            return self._status[0]
+        try:
+            if _systemctl("cat", "inputplumber.service", timeout=10).returncode != 0:
+                st = "missing"
+            else:
+                st = "running" if _systemctl("is-active", "--quiet", "inputplumber.service", timeout=10).returncode == 0 else "stopped"
+        except (OSError, subprocess.SubprocessError):
+            st = "missing"
+        self._status = (st, time.monotonic())
+        return st
+
+    def _files(self) -> dict[str, str | None]:
+        dev, cmap = self.conf
+        return {self.dev_path: json.dumps(dev, indent=1) + "\n",
+                self.map_path: json.dumps(cmap, indent=1) + "\n" if cmap else None}
+
+    def installed(self) -> bool:
+        return os.path.exists(self.dev_path)
+
+    def ensure(self) -> None:
+        """Our config in place and InputPlumber running with it."""
+        if not self.conf or self.status() == "missing":
+            return
+        changed = False
+        for path, text in self._files().items():
+            if text is None:
+                continue
+            try:
+                with open(path) as f:
+                    if f.read() == text:
+                        continue
+            except OSError:
+                pass
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(text)
+            changed = True
+        if self.status() != "running":
+            log.info("inputplumber: starting the service")
+            r = _systemctl("enable", "--now", "inputplumber.service")
+            if r.returncode != 0:
+                raise OSError((r.stderr or b"").decode(errors="replace").strip() or "couldn't start InputPlumber")
+            self._status = None
+        elif changed:
+            log.info("inputplumber: config %s written, restarting the service", self.dev_path)
+            _systemctl("restart", "inputplumber.service")
+
+    def remove(self) -> None:
+        if not self.conf:
+            return
+        gone = False
+        for path in (self.dev_path, self.map_path):
+            try:
+                os.remove(path)
+                gone = True
+            except FileNotFoundError:
+                pass
+        if gone and self.status() == "running":
+            log.info("inputplumber: our config removed, restarting the service")
+            _systemctl("restart", "inputplumber.service")

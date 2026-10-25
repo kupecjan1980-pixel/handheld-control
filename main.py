@@ -55,7 +55,8 @@ class Plugin:
             await self._run(self.ctl.restore, True)
 
     async def _uninstall(self):
-        pass
+        if self.ctl:
+            await self._run(self.ctl.uninstall)
 
     # --- frontend API -----------------------------------------------------
 
