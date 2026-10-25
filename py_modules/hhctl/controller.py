@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, background, backlight, buttons, fonts, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, background, backlight, buttons, fonts, gestures, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -43,7 +43,8 @@ DEFAULTS = {
     # Extra buttons open Steam things (AYN -> this plugin, Win+D -> keyboard).
     # ip_target: controller InputPlumber emulates (None leaves its choice).
     # ip_failed: our InputPlumber config made no controller; off until picked again.
-    "controller": {"buttons": True, "ip_target": "xbox-elite", "ip_failed": None},
+    "controller": {"buttons": True, "ip_target": "xbox-elite", "ip_failed": None,
+                   "swipe_keyboard": False, "swipe_edge": None},
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
@@ -163,6 +164,9 @@ class Controller:
         self.uma = gpu.UmaCarveout(self.gpu.dev, self.gpu.driver)
         self.emit = lambda action: None  # set by main.py: sends a button action to the panel
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
+        self.swipe = gestures.EdgeSwipe(lambda action: self.emit(action),
+                                        lambda: self.settings["controller"].get("swipe_edge"), self._swipe_learned)
+        self.swipe_avail = self.swipe.available()
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
         self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake)
@@ -442,11 +446,22 @@ class Controller:
         except OSError:
             return None
 
+    def _swipe_learned(self, edge: str) -> None:
+        self.settings["controller"]["swipe_edge"] = edge
+        self.save()
+
     def apply_controller(self) -> None:
-        if self.settings["controller"]["buttons"]:
+        c = self.settings["controller"]
+        if c["buttons"]:
             self.buttons.start()
         else:
             self.buttons.stop()
+        if c.get("swipe_keyboard"):
+            self.swipe.calibrating = not c.get("swipe_edge")  # first swipe teaches the bottom edge
+            self.swipe.start()
+        else:
+            self.swipe.calibrating = False
+            self.swipe.stop()
         self.apply_ip_config()
         self.sync_inputplumber()
 
@@ -1326,6 +1341,7 @@ class Controller:
             self._guard("cpu", lambda: self.ccx.set(False))
         if unload:
             self.buttons.stop()
+            self.swipe.stop()
             self._guard("controller", self.ip.restore)
             self.sleeper.stop()
             self._guard("sleep", self.padwake.restore)
@@ -1520,6 +1536,11 @@ class Controller:
             "sdr_brightness": self._sdr_brightness_state(),
             "input_capture": dict(self.icap),
             "update": {**self.upd, "releases": [{**r, "notes": r["notes"][:600]} for r in self.upd["releases"]]},
+            "swipe": {
+                "available": self.swipe_avail or self.swipe.node is not None,
+                "listening": self.swipe.node,
+                "learning": self.swipe.calibrating,
+            },
             "buttons": {
                 "available": self.buttons.available()[0],
                 "unavailable": self.buttons.available()[1],

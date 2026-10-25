@@ -47,7 +47,7 @@ type Settings = {
   };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
-  controller: { buttons: boolean; ip_target: string | null };
+  controller: { buttons: boolean; ip_target: string | null; swipe_keyboard?: boolean; swipe_edge?: string | null };
   sleep: { rgb_off: boolean; pad_wake: boolean | null };
   ui: {
     theme: string;
@@ -131,6 +131,7 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
+  swipe?: { available: boolean; listening: string | null; learning: boolean };
   sleep: {
     rgb_off_available: boolean;
     pad_wake_available: boolean;
@@ -2588,6 +2589,31 @@ function Content() {
                   onChange={(v) => change("controller", { buttons: v }, 0)}
                 />
               </PanelSectionRow>
+            )}
+            {state.swipe?.available && (
+              <>
+                <PanelSectionRow>
+                  <ToggleField
+                    label="Swipe up for the keyboard"
+                    description={
+                      !draft.controller.swipe_keyboard
+                        ? "Swipe up from the bottom edge of the screen to open the Steam keyboard"
+                        : state.swipe.learning
+                          ? "Setting up: swipe up once from the bottom edge of the screen"
+                          : "Swipe up from the bottom edge of the screen opens the Steam keyboard"
+                    }
+                    checked={!!draft.controller.swipe_keyboard}
+                    onChange={(v) => change("controller", { swipe_keyboard: v }, 0)}
+                  />
+                </PanelSectionRow>
+                {draft.controller.swipe_keyboard && !state.swipe.learning && (
+                  <PanelSectionRow>
+                    <ButtonItem layout="below" onClick={() => change("controller", { swipe_edge: null }, 0)}>
+                      Set up the bottom edge again
+                    </ButtonItem>
+                  </PanelSectionRow>
+                )}
+              </>
             )}
             {state.sleep.pad_wake_available && (
               <PanelSectionRow>

@@ -37,18 +37,18 @@ for _ in range(50):
     time.sleep(0.05)
 time.sleep(0.2)
 assert got == ["open_plugin", "qam"], got
-# hold AYN: QAM fires while still held, and the release adds nothing
+# held AYN: fires once on the press, nothing on repeat or release
 os.write(wfd, ev(193, 1) + ev(193, 2)); time.sleep(buttons.HOLD + 0.25)
-assert got[-1] == "qam" and len(got) == 3, got
+assert got[-1] == "open_plugin" and len(got) == 3, got
 os.write(wfd, ev(193, 2) + ev(193, 0)); time.sleep(0.2)
 assert len(got) == 3, got
 os.write(wfd, ev(193, 1)); time.sleep(0.1); os.write(wfd, ev(193, 0)); time.sleep(0.2)
-assert got[-1] == "open_plugin" and len(got) == 4, "short press is still a tap"
+assert got[-1] == "open_plugin" and len(got) == 4, got
 assert b.node == node
 b.stop(); os.close(wfd); b._thread.join(3); assert not b._thread.is_alive()
-print("find keyboard, AYN tap / hold, Win+D, presses only, stop ok")
+print("find keyboard, AYN, Win+D, presses only, stop ok")
 
-# --- ONEXPLAYER 3: Ctrl+Win+O keyboard, Ctrl+Win+F17 home (tap / hold) ---
+# --- ONEXPLAYER 3: Ctrl+Win+O keyboard button, Ctrl+Win+F17 home ---
 oxp_caps = "1000000000007 ff800000000007ff febeffdfffefffff fefffffffffffffe"  # event5 in the OXP3 report
 iface1 = "733eff 0 0 483ffff17aff32d bfd4444600000000 ffff0001 130ff38b17c000 677bfad941dfed 9ed68000004400 10000002"
 assert buttons.has_key(oxp_caps, buttons.KEY_F17) and not buttons.has_key(iface1, buttons.KEY_F17)
@@ -64,9 +64,9 @@ combo = lambda key, held=0.0: (ev(29, 1) + ev(125, 1) + ev(key, 1), ev(key, 0) +
 for down, up, held in (combo(24), combo(187, 0.1), combo(187, buttons.HOLD + 0.25)):
     os.write(wfd, down); time.sleep(held); os.write(wfd, up); time.sleep(0.15)
 time.sleep(0.2)
-assert got == ["qam", "open_plugin", "qam"], got
+assert got == ["qam", "open_plugin", "open_plugin"], got
 os.write(wfd, ev(187, 1) + ev(187, 0)); time.sleep(0.2)
 assert len(got) == 3, "F17 without Win does nothing"
 b.stop(); os.close(wfd); b._thread.join(3)
-print("oxp3: Ctrl+Win+O keyboard, Ctrl+Win+F17 tap / hold ok")
+print("oxp3: Ctrl+Win+O Quick Access, Ctrl+Win+F17 Handheld Control ok")
 shutil.rmtree(tmp); print("all buttons tests passed")
