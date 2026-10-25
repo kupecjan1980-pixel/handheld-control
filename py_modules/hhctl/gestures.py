@@ -138,7 +138,8 @@ class EdgeSwipe:
         self.set_edge = set_edge  # called with the edge of the first swipe while learning
         self.calibrating = False
         self._last = 0.0  # when the last swipe was taken
-        self.last_touch: str | None = None  # "event7: x 50% → 49%, y 97% → 70%, 0.3 s"
+        self.last_touch: str | None = None
+        self.last_swipe: str | None = None  # "12:01:05 from x1: keyboard"  # "event7: x 50% → 49%, y 97% → 70%, 0.3 s"
         self.node: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -161,11 +162,16 @@ class EdgeSwipe:
         if now - self._last < 1.0:
             return  # the same swipe from a second (virtual) touchscreen
         self._last = now
+        stamp = time.strftime("%H:%M:%S")
         if self.calibrating:
             self.calibrating = False
             log.info("swipe: bottom edge is %s", edge)
             self.set_edge(edge)
-        elif edge == self.get_edge():
+            self.last_swipe = f"{stamp} from {edge}: set as the bottom edge"
+        elif edge != self.get_edge():
+            self.last_swipe = f"{stamp} from {edge}: not the bottom edge"
+        else:
+            self.last_swipe = f"{stamp} from {edge}: keyboard"
             log.info("swipe: keyboard")
             try:
                 self.emit("keyboard")

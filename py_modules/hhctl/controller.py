@@ -1542,6 +1542,7 @@ class Controller:
                 "learning": self.swipe.calibrating,
                 "last_touch": self.swipe.last_touch,
                 "edge": self.settings["controller"].get("swipe_edge"),
+                "last_swipe": self.swipe.last_swipe,
             },
             "buttons": {
                 "available": self.buttons.available()[0],
