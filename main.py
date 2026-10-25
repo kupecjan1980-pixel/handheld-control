@@ -120,8 +120,11 @@ class Plugin:
     async def set_ec(self, values: dict):
         return await self._run(self.ctl.update, "ec", values)
 
-    async def set_gpu_mem(self, pct: int):
-        return await self._run(self.ctl.set_gpu_mem, pct)
+    async def set_gpu_mem(self, gb: int):
+        return await self._run(self.ctl.set_gpu_mem, gb)
+
+    async def save_ip_report(self):
+        return await self._run(self.ctl.save_ip_report)
 
     async def set_vram(self, index: int):
         return await self._run(self.ctl.set_vram, index)

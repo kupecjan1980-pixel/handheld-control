@@ -124,7 +124,7 @@ def fake_systemctl(*args, timeout=30):
 ip._systemctl = fake_systemctl
 c = ip.Configs("ayaneo_next2", f"{tmp}/devices.d", f"{tmp}/maps.d")
 assert c.supported() and not ip.Configs("onexfly").supported()
-c.ensure()
+assert c.ensure() is True, "started: the caller checks the controller came up"
 dev = json.load(open(c.dev_path)); cmap = json.load(open(c.map_path))
 assert os.path.basename(c.dev_path) < "50-", "sorts before the stock configs"
 assert dev["target_devices"][0] == "xbox-elite" and dev["capability_map_id"] == cmap["id"]
@@ -134,7 +134,7 @@ pad = {m["source_events"][0]["keyboard"]: m["target_event"]["gamepad"]["button"]
 assert pad == {"KeyF19": "LeftPaddle1", "KeyF17": "LeftPaddle2", "KeyF20": "RightPaddle1", "KeyF18": "RightPaddle2"}
 assert ("enable", "--now", "inputplumber.service") in sc, sc
 n = len(sc); c._status = None
-c.ensure()
+assert c.ensure() is False
 assert not any(a[0] in ("restart", "enable") for a in sc[n:]), "unchanged config: no restart"
 open(c.dev_path, "w").write("old")
 c._status = None; c.ensure()
@@ -157,4 +157,31 @@ m = ip.Configs("oxp3", f"{tmp}/d2", f"{tmp}/m2")
 assert m.status() == "missing"
 m.ensure()
 assert not os.path.exists(m.dev_path), "nothing written without InputPlumber"
+# --- fail-safe health check: our composite, its sources, a gamepad target
+def bus_for(name, sources, targets):
+    def run(args, timeout=10):
+        out = ""
+        if args[:2] == ["--list", "tree"]:
+            out = C0 + "\n"
+        elif args[0] == "get-property":
+            path, prop = args[2], args[4]
+            if path.startswith("/t/"):
+                out = json.dumps({"data": targets[int(path.split("/")[-1])]})
+            elif prop == "Name":
+                out = json.dumps({"data": name})
+            elif prop == "SourceDevicePaths":
+                out = json.dumps({"data": sources})
+            elif prop == "TargetDevices":
+                out = json.dumps({"data": [f"/t/0/{i}" for i in range(len(targets))]})
+        return types.SimpleNamespace(returncode=0, stdout=out.encode(), stderr=b"")
+    return run
+h = ip.Configs("ayaneo_next2", f"{tmp}/d3", f"{tmp}/m3")
+ip._run = bus_for("AYANEO NEXT 2 (HHC)", ["/s/0"], ["xbox-elite", "keyboard"])
+assert h.health() is None
+ip._run = bus_for("AYANEO NEXT 2 (HHC)", ["/s/0"], ["keyboard", "mouse"])
+assert "no virtual controller" in h.health()
+ip._run = bus_for("AYANEO NEXT 2 (HHC)", [], ["xbox-elite"])
+assert "none of the controller" in h.health()
+ip._run = bus_for("Something else", ["/s/0"], ["xbox-elite"])
+assert "didn't take" in h.health()
 print("all inputplumber tests passed")

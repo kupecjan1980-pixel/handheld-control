@@ -89,15 +89,15 @@ sets = []
 boot = types.SimpleNamespace(name="Limine", set=lambda add, rm: sets.append((add, rm)))
 lim = gpu.GpuMemLimit(boot)
 lim.PARAM = f"{tmp}/pages_limit"; open(lim.PARAM, "w").write(f"{31457280 // 8}\n")
-assert lim.available() and lim.current_pct() == 50
-lim.set(75)
-n = 31457280 // 4 * 75 // 100
-assert sets[-1] == ([f"ttm.pages_limit={n}", f"ttm.page_pool_size={n}"], set())
-assert lim.configured_pct(["quiet", f"ttm.pages_limit={n}"]) == 75 and lim.configured_pct(["quiet"]) == 50
-lim.set(50)
+assert lim.available() and lim.current_gb() == 15.0 and lim.default_gb() == 15.0
+assert lim.choices() == [4, 8, 12, 16, 20, 24], lim.choices()  # 30 GB RAM: up to 7/8
+lim.set(24)
+assert sets[-1] == ([f"ttm.pages_limit={24 * 262144}", f"ttm.page_pool_size={24 * 262144}"], set())
+assert lim.configured_gb(["quiet", f"ttm.pages_limit={24 * 262144}"]) == 24 and lim.configured_gb(["quiet"]) == 0
+lim.set(0)
 assert sets[-1] == ([], {"ttm.pages_limit", "ttm.page_pool_size"})
 try:
-    lim.set(99); raise SystemExit("odd percentage accepted")
+    lim.set(28); raise SystemExit("more than 7/8 of the RAM accepted")
 except OSError:
     pass
 assert not gpu.GpuMemLimit(None).available()

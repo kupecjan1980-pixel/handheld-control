@@ -290,10 +290,54 @@ class Configs:
     def installed(self) -> bool:
         return os.path.exists(self.dev_path)
 
-    def ensure(self) -> None:
-        """Our config in place and InputPlumber running with it."""
+    def name(self) -> str | None:
+        return self.conf[0]["name"] if self.conf else None
+
+    def health(self) -> str | None:
+        """None when InputPlumber made our controller, else what's wrong."""
+        try:
+            r = _run(["--list", "tree", SVC], timeout=5)
+        except (OSError, subprocess.SubprocessError) as e:
+            return f"InputPlumber didn't answer: {e}"
+        paths = dict.fromkeys(re.findall(r"/org/shadowblip/InputPlumber/CompositeDevice\d+", r.stdout.decode(errors="replace")))
+        mine = [p for p in paths if _get(p, COMPOSITE, "Name") == self.name()]
+        if not mine:
+            return "InputPlumber didn't take the controller with our config"
+        if not _get(mine[0], COMPOSITE, "SourceDevicePaths"):
+            return "InputPlumber found none of the controller's devices"
+        targets = _get(mine[0], COMPOSITE, "TargetDevices") or []
+        if not any((_get(t, TARGET, "DeviceType") or "") in GAMEPADS for t in targets):
+            return "InputPlumber made no virtual controller"
+        return None
+
+    def report(self) -> list[tuple[str, list[str]]]:
+        """What to look at when it didn't work (for the user to send)."""
+        def out(cmd: list[str]) -> list[str]:
+            try:
+                r = proc.run(cmd, timeout=15)
+                return (r.stdout + r.stderr).decode(errors="replace").splitlines()
+            except (OSError, subprocess.SubprocessError) as e:
+                return [f"{cmd[0]}: {e}"]
+        sections = [
+            ("inputplumber version", out(["inputplumber", "--version"])),
+            ("service", out(["systemctl", "status", "--no-pager", "-n", "0", "inputplumber.service"])),
+            ("journal (this boot)", out(["journalctl", "-u", "inputplumber.service", "-b", "--no-pager", "-n", "250"])),
+            ("D-Bus objects", out(["busctl", "--system", "--list", "tree", SVC])),
+            ("input devices", out(["cat", "/proc/bus/input/devices"])),
+        ]
+        for path in (self.dev_path, self.map_path):
+            try:
+                with open(path) as f:
+                    sections.append((path, f.read().splitlines()))
+            except OSError:
+                pass
+        return sections
+
+    def ensure(self) -> bool:
+        """Our config in place and InputPlumber running with it; True if it
+        was (re)started, so the caller checks the controller came up."""
         if not self.conf or self.status() == "missing":
-            return
+            return False
         changed = False
         for path, text in self._files().items():
             if text is None:
@@ -314,9 +358,11 @@ class Configs:
             if r.returncode != 0:
                 raise OSError((r.stderr or b"").decode(errors="replace").strip() or "couldn't start InputPlumber")
             self._status = None
-        elif changed:
+            return True
+        if changed:
             log.info("inputplumber: config %s written, restarting the service", self.dev_path)
             _systemctl("restart", "inputplumber.service")
+        return changed
 
     def remove(self) -> None:
         if not self.conf:

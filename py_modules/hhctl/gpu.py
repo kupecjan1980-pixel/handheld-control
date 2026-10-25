@@ -590,14 +590,15 @@ class GpuMemLimit:
     """How much system RAM the GPU may use (TTM's page limit), set at boot.
 
     Integrated GPUs (amdgpu GTT, Intel xe/i915) take system RAM as they need
-    it, up to TTM's limit: half the RAM by default. ttm.pages_limit raises it
+    it, up to TTM's limit: half the RAM by default. ttm.pages_limit sets it
     (Windows calls this "Shared GPU memory"); page_pool_size goes along so the
-    pool can grow as far. Counted in 4 KiB pages.
+    pool can grow as far. Counted in 4 KiB pages; offered in 4 GB steps like
+    Intel's Windows driver, up to 7/8 of the RAM. 0 = the kernel's default.
     """
 
     PARAM = "/sys/module/ttm/parameters/pages_limit"
     KEYS = ("ttm.pages_limit", "ttm.page_pool_size")
-    CHOICES = (50, 75, 87)  # % of RAM; 50 = the kernel's default
+    GB = 2**30 // 4096  # pages per GB
 
     def __init__(self, bootloader):
         self.boot = bootloader
@@ -612,27 +613,34 @@ class GpuMemLimit:
                 return int(line.split()[1]) // 4
         return 0
 
-    def current_pct(self) -> int | None:
-        pages, ram = sysfs.read_int(self.PARAM), self.ram_pages()
-        return round(100 * pages / ram) if pages and ram else None
+    def choices(self) -> list[int]:
+        top = self.ram_pages() * 7 // 8 // self.GB
+        return list(range(4, top + 1, 4))
 
-    def params(self, pct: int) -> list[str]:
-        n = self.ram_pages() * pct // 100
-        return [f"{k}={n}" for k in self.KEYS]
+    def default_gb(self) -> float:
+        return round(self.ram_pages() / 2 / self.GB, 1)
 
-    def configured_pct(self, tokens: list[str]) -> int:
+    def current_gb(self) -> float | None:
+        pages = sysfs.read_int(self.PARAM)
+        return round(pages / self.GB, 1) if pages else None
+
+    def params(self, gb: int) -> list[str]:
+        return [f"{k}={gb * self.GB}" for k in self.KEYS]
+
+    def configured_gb(self, tokens: list[str]) -> int:
+        """GB set on the kernel command line; 0 when it's the default."""
         for t in tokens:
             if t.startswith(self.KEYS[0] + "="):
                 try:
-                    return round(100 * int(t.split("=", 1)[1]) / self.ram_pages())
-                except (ValueError, ZeroDivisionError):
+                    return round(int(t.split("=", 1)[1]) / self.GB)
+                except ValueError:
                     pass
-        return 50
+        return 0
 
-    def set(self, pct: int) -> None:
-        if pct not in self.CHOICES:
-            raise OSError(f"no GPU memory choice {pct}%")
-        if pct == 50:
+    def set(self, gb: int) -> None:
+        if gb == 0:
             self.boot.set([], set(self.KEYS))
-        else:
-            self.boot.set(self.params(pct), set())
+            return
+        if gb not in self.choices():
+            raise OSError(f"no GPU memory choice {gb} GB")
+        self.boot.set(self.params(gb), set())

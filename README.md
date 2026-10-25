@@ -79,7 +79,11 @@ configs), turns InputPlumber on, and the controller shows up as an Xbox Elite
 (or the type picked) with the back buttons as paddles (NEXT 2: F19 L4, F17
 L5, F20 R4, F18 R5; OXP3: M1 / M2). The buttons' keyboard stays ungrabbed
 (passthrough), so the extra buttons work as before. "Plain (no InputPlumber)"
-removes the config again; so does uninstalling the plugin.
+removes the config again; so does uninstalling the plugin. Fail-safe: if
+InputPlumber hasn't made a controller from the config within a minute, the
+config is taken away again (plain controller back), the reason is shown and a
+report is saved to `~/handheld-control-inputplumber-game.txt` (also on demand:
+**Save InputPlumber report**).
 
 **CPU → Temperature limit**: the CPU boosts as hard as the TDP allows
 until it reaches the set temperature, then holds it there; the CPU does this
@@ -98,7 +102,8 @@ VRAM; the row says so.
 
 **GPU → GPU memory limit** (every device with a supported bootloader): how
 much system RAM the GPU may use, TTM's `ttm.pages_limit` (+ `page_pool_size`):
-half the RAM (kernel default), 75 % or 87 %. The Linux side of Windows'
+the kernel default (half the RAM) or 4 GB steps up to 7/8 of the RAM, as in
+Intel's Windows driver. The Linux side of Windows'
 Shared GPU Memory Override; applies after a restart.
 
 On the OneXFly F1 family under InputPlumber (Bazzite 44 and later, no HHD),

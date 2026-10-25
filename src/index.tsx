@@ -133,6 +133,8 @@ type State = {
     targets: string[];
     configurable: boolean;
     status: "missing" | "stopped" | "running" | null;
+    failed: string | null;
+    installed: boolean;
     install: string | null;
   };
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
@@ -151,6 +153,7 @@ type State = {
     available: boolean;
     bootloader?: string;
     choices?: number[];
+    default?: number;
     current?: number | null;
     configured?: number | null;
     busy?: boolean;
@@ -287,6 +290,7 @@ const getVersion = callable<[], string | null>("get_version");
 const setBrightness = callable<[number], State>("set_brightness");
 const setVram = callable<[number], State>("set_vram");
 const setGpuMem = callable<[number], State>("set_gpu_mem");
+const saveIpReport = callable<[], State>("save_ip_report");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
@@ -332,14 +336,14 @@ function VramRows({ state, setState }: { state: State; setState: (s: State) => v
             description={
               m.busy
                 ? `Updating ${m.bootloader} boot entries…`
-                : `System RAM the GPU may use${intel ? "" : " on top of its VRAM"} · now ${m.current ?? "?"}% · changes after a restart`
+                : `System RAM the GPU may use${intel ? " (Windows: Shared GPU Memory Override)" : " on top of its VRAM"} · now ${m.current ?? "?"} GB · changes after a restart`
             }
             disabled={m.busy}
-            rgOptions={(m.choices ?? []).map((c) => ({
-              data: c,
-              label: c === 50 ? "Half the RAM (default)" : `${c}% of RAM`,
-            }))}
-            selectedOption={m.configured ?? 50}
+            rgOptions={[
+              { data: 0, label: `Default (half the RAM, ${m.default} GB)` },
+              ...(m.choices ?? []).map((c) => ({ data: c, label: `${c} GB` })),
+            ]}
+            selectedOption={m.configured ?? 0}
             onChange={async (o) => setState(await setGpuMem(o.data))}
           />
         </PanelSectionRow>
@@ -2214,17 +2218,26 @@ function Content() {
                 <DropdownItem
                   label="Controller type"
                   description={
-                    state.inputplumber.configurable
-                      ? "Through InputPlumber; the back buttons become paddles"
-                      : "What InputPlumber shows Steam and games"
+                    state.inputplumber.failed
+                      ? `Didn't work last time (${state.inputplumber.failed}); the plain controller is in use. Pick a type to try again.`
+                      : state.inputplumber.configurable
+                        ? "Through InputPlumber; the back buttons become paddles"
+                        : "What InputPlumber shows Steam and games"
                   }
                   rgOptions={[
                     ...state.inputplumber.targets.map((t) => ({ data: t, label: IP_TARGETS[t] ?? t })),
                     { data: "none", label: state.inputplumber.configurable ? "Plain (no InputPlumber)" : "InputPlumber's choice" },
                   ]}
-                  selectedOption={draft.controller.ip_target ?? "none"}
+                  selectedOption={state.inputplumber.failed ? "none" : draft.controller.ip_target ?? "none"}
                   onChange={(o) => change("controller", { ip_target: o.data === "none" ? null : o.data }, 0)}
                 />
+              </PanelSectionRow>
+            )}
+            {state.inputplumber?.configurable && state.inputplumber.status !== "missing" && (
+              <PanelSectionRow>
+                <ButtonItem layout="below" onClick={async () => setState(await saveIpReport())}>
+                  Save InputPlumber report
+                </ButtonItem>
               </PanelSectionRow>
             )}
             <ErrorRow msg={state.errors.controller} />

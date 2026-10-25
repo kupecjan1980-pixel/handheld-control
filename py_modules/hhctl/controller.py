@@ -42,7 +42,8 @@ DEFAULTS = {
     # bg_pos: which part of the picture shows (CSS background-position %) and zoom (%).
     # Extra buttons open Steam things (AYN -> this plugin, Win+D -> keyboard).
     # ip_target: controller InputPlumber emulates (None leaves its choice).
-    "controller": {"buttons": True, "ip_target": "xbox-elite"},
+    # ip_failed: our InputPlumber config made no controller; off until picked again.
+    "controller": {"buttons": True, "ip_target": "xbox-elite", "ip_failed": None},
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
@@ -144,6 +145,7 @@ class Controller:
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
+        self.ip_check_at: float | None = None  # when to check our InputPlumber controller came up
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
         self.gs_applied_pid: int | None = None
@@ -206,6 +208,9 @@ class Controller:
         os.replace(tmp, self.settings_path)
 
     def update(self, section: str, values: dict) -> dict:
+        if section == "controller" and "ip_target" in values:
+            values = {**values, "ip_failed": None}  # picked again: try again
+            self.errors.pop("controller", None)
         if section == "gpu":
             # A power profile and a clock lock exclude each other: the newer wins.
             if values.get("profile"):
@@ -410,12 +415,42 @@ class Controller:
         """NEXT 2 / OXP3: our InputPlumber config while a controller type is picked."""
         if not self.ipconf.supported():
             return
-        if self.settings["controller"].get("ip_target"):
-            self._guard("controller", self.ipconf.ensure)
+        c = self.settings["controller"]
+        if c.get("ip_target") and not c.get("ip_failed"):
+            started = []
+            self._guard("controller", lambda: started.append(self.ipconf.ensure()))
+            if self.ipconf.installed():
+                # Also after boot: InputPlumber may come up after us.
+                self.ip_check_at = time.monotonic() + (20 if any(started) else 45)
         else:
+            self.ip_check_at = None
             self._guard("controller", self.ipconf.remove)
         self.ip.devices = []  # look for its composite device again now
         self.ip._looked = -600.0
+
+    def check_ip_controller(self) -> None:
+        """Fail-safe: no controller through our config -> take it away again."""
+        if self.ip_check_at is None or time.monotonic() < self.ip_check_at:
+            return
+        self.ip_check_at = None
+        problem = self.ipconf.health()
+        if not problem:
+            log.info("inputplumber: controller up with %s", self.ipconf.dev_path)
+            return
+        log.error("inputplumber: %s; removing our config", problem)
+        path = diag.write_report(self.user_home, self.ipconf.report(), "game", kind="inputplumber")
+        self._guard("controller", self.ipconf.remove)
+        self.settings["controller"]["ip_failed"] = problem
+        self.save()
+        self.errors["controller"] = (
+            f"{problem}, so the plain controller is back."
+            + (f" Report: {path}" if path else "")
+        )
+
+    def save_ip_report(self) -> dict:
+        path = diag.write_report(self.user_home, self.ipconf.report(), "game", kind="inputplumber")
+        self.errors["controller"] = f"InputPlumber report saved: {path}" if path else "Couldn't write the report"
+        return self.state()
 
     def sync_inputplumber(self) -> None:
         c = self.settings["controller"]
@@ -584,14 +619,14 @@ class Controller:
 
     # --- display ----------------------------------------------------------
 
-    def set_gpu_mem(self, pct: int) -> dict:
+    def set_gpu_mem(self, gb: int) -> dict:
         if not self.gpumem.available() or self.gpumem_busy:
             return self.state()
         self.gpumem_busy = True
 
         def run():
             try:
-                self.gpumem.set(int(pct))
+                self.gpumem.set(int(gb))
                 self.errors.pop("gpumem", None)
             except Exception as e:
                 log.exception("GPU memory limit update failed")
@@ -610,14 +645,15 @@ class Controller:
             return {"available": False}
         if self.gpumem_conf is None and not self.gpumem_busy:
             try:
-                self.gpumem_conf = self.gpumem.configured_pct(self.gpumem.boot.configured())
+                self.gpumem_conf = self.gpumem.configured_gb(self.gpumem.boot.configured())
             except Exception as e:
                 self.errors["gpumem"] = str(e)
         return {
             "available": True,
             "bootloader": self.gpumem.boot.name,
-            "choices": list(self.gpumem.CHOICES),
-            "current": self.gpumem.current_pct(),
+            "choices": self.gpumem.choices(),
+            "default": self.gpumem.default_gb(),
+            "current": self.gpumem.current_gb(),
             "configured": self.gpumem_conf,
             "busy": self.gpumem_busy,
         }
@@ -1091,6 +1127,7 @@ class Controller:
                 log.info("EPP changed behind our back, re-applying %s", e["value"])
                 self.apply_epp()
             self.apply_cpu()
+            self.check_ip_controller()
             self.sync_inputplumber()
             self.hold_profile()
             g = self.settings["gpu"]
@@ -1316,6 +1353,8 @@ class Controller:
                 "targets": inputplumber.TARGETS,
                 "configurable": self.ipconf.supported(),
                 "status": self.ipconf.status() if self.ipconf.supported() else None,
+                "failed": self.settings["controller"].get("ip_failed"),
+                "installed": self.ipconf.installed(),
                 "install": "sudo pacman -S inputplumber" if os.path.exists("/usr/bin/pacman") and not os.path.exists("/run/ostree-booted") else None,
             },
             "thermal": {
