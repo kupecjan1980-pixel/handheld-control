@@ -80,7 +80,16 @@ stock limit (95 °C Raven to Cezanne, 100 °C later). Intel: the TCC offset
 
 **GPU → Dedicated VRAM** (AMD, kernel 7.0+, BIOS support needed): the
 amdgpu `uma/carveout` choices; the new size applies after a restart. Without
-BIOS support the row says to set it in the BIOS.
+BIOS support the row shows where the BIOS keeps it (AMD CBS → NBIO Common
+Options → GFX Configuration → UMA Frame buffer Size; ASRock also Chipset
+Configuration → Share Memory) and a size suggested from the RAM (8 GB → 1,
+16 → 4, 32 → 8, 64 → 16, more → 32 GB). Intel graphics have no dedicated
+VRAM; the row says so.
+
+**GPU → GPU memory limit** (every device with a supported bootloader): how
+much system RAM the GPU may use, TTM's `ttm.pages_limit` (+ `page_pool_size`):
+half the RAM (kernel default), 75 % or 87 %. The Linux side of Windows'
+Shared GPU Memory Override; applies after a restart.
 
 On the OneXFly F1 family under InputPlumber (Bazzite 44 and later, no HHD),
 Turbo opens Handheld Control and the keyboard button opens the Quick Access

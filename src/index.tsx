@@ -136,6 +136,18 @@ type State = {
     options: { index: number; label: string }[];
     current: number | null;
     boot: number | null;
+    now_mb: number | null;
+    ram_gb: number;
+    suggested_gb: number;
+    bios_path: string;
+  };
+  gpu_mem: {
+    available: boolean;
+    bootloader?: string;
+    choices?: number[];
+    current?: number | null;
+    configured?: number | null;
+    busy?: boolean;
   };
   update: {
     busy: boolean;
@@ -268,6 +280,68 @@ const getState = callable<[], State>("get_state");
 const getVersion = callable<[], string | null>("get_version");
 const setBrightness = callable<[number], State>("set_brightness");
 const setVram = callable<[number], State>("set_vram");
+const setGpuMem = callable<[number], State>("set_gpu_mem");
+
+const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
+
+// Dedicated VRAM (amdgpu carveout, else where to set it) and how much RAM the GPU may borrow.
+function VramRows({ state, setState }: { state: State; setState: (s: State) => void }) {
+  const v = state.vram;
+  const m = state.gpu_mem;
+  const intel = v.unavailable === "AMD graphics only";
+  const suggest = `Suggested for ${v.ram_gb} GB RAM: ${v.suggested_gb} GB`;
+  return (
+    <>
+      {v.available ? (
+        <PanelSectionRow>
+          <DropdownItem
+            label="Dedicated VRAM"
+            description={
+              v.current !== v.boot
+                ? `Changes after a restart (now ${vramSize(v.now_mb)}) · ${suggest}`
+                : `Now ${vramSize(v.now_mb)} · ${suggest} · changes after a restart`
+            }
+            rgOptions={v.options.map((o) => ({ data: o.index, label: o.label }))}
+            selectedOption={v.current}
+            onChange={async (o) => setState(await setVram(o.data))}
+          />
+        </PanelSectionRow>
+      ) : (
+        <PanelSectionRow>
+          <Field
+            label="Dedicated VRAM"
+            description={
+              intel
+                ? "Intel graphics have no dedicated VRAM: the GPU takes system RAM as it needs it, up to the GPU memory limit below. That limit is what Windows' Shared GPU Memory Override sets."
+                : `Now ${vramSize(v.now_mb)}. This BIOS doesn't let Linux change it; in the BIOS: ${v.bios_path}. ${suggest}.`
+            }
+          />
+        </PanelSectionRow>
+      )}
+      <ErrorRow msg={state.errors.vram} />
+      {m.available && (
+        <PanelSectionRow>
+          <DropdownItem
+            label="GPU memory limit"
+            description={
+              m.busy
+                ? `Updating ${m.bootloader} boot entries…`
+                : `System RAM the GPU may use${intel ? "" : " on top of its VRAM"} · now ${m.current ?? "?"}% · changes after a restart`
+            }
+            disabled={m.busy}
+            rgOptions={(m.choices ?? []).map((c) => ({
+              data: c,
+              label: c === 50 ? "Half the RAM (default)" : `${c}% of RAM`,
+            }))}
+            selectedOption={m.configured ?? 50}
+            onChange={async (o) => setState(await setGpuMem(o.data))}
+          />
+        </PanelSectionRow>
+      )}
+      <ErrorRow msg={state.errors.gpumem} />
+    </>
+  );
+}
 const setDisplay = callable<[string, boolean], State>("set_display");
 const setGamescopeHdr = callable<[string], State>("set_gamescope_hdr");
 const confirmSdrBrightness = callable<[boolean], State>("confirm_sdr_brightness");
@@ -1597,29 +1671,7 @@ function Content() {
                   />
                 </PanelSectionRow>
               )}
-              {state.vram.available ? (
-                <PanelSectionRow>
-                  <DropdownItem
-                    label="Dedicated VRAM"
-                    description={
-                      state.vram.current !== state.vram.boot
-                        ? "Changes after a restart"
-                        : "Memory set aside for the GPU; the rest stays system RAM. Changes after a restart."
-                    }
-                    rgOptions={state.vram.options.map((o) => ({ data: o.index, label: o.label }))}
-                    selectedOption={state.vram.current}
-                    onChange={async (o) => setState(await setVram(o.data))}
-                  />
-                </PanelSectionRow>
-              ) : (
-                state.vram.unavailable &&
-                state.vram.unavailable !== "AMD graphics only" && (
-                  <PanelSectionRow>
-                    <Field label="Dedicated VRAM" description={state.vram.unavailable} />
-                  </PanelSectionRow>
-                )
-              )}
-              <ErrorRow msg={state.errors.vram} />
+              <VramRows state={state} setState={setState} />
               <ErrorRow msg={state.errors.gpu} />
             </PanelSection>
           )}

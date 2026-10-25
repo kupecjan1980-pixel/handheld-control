@@ -530,8 +530,14 @@ class UmaCarveout:
         if not self.dir:
             return False, "AMD graphics only"
         if not os.path.exists(f"{self.dir}/carveout"):
-            return False, "This BIOS doesn't let Linux change it (kernel 7.0+ needed too); set it in the BIOS"
+            return False, "bios"
         return True, None
+
+    def vram_mb(self) -> int | None:
+        if not self.dir:
+            return None
+        b = sysfs.read_int(f"{os.path.dirname(self.dir)}/mem_info_vram_total")
+        return b // 2**20 if b else None
 
     def options(self) -> list[dict]:
         out = []
@@ -549,3 +555,84 @@ class UmaCarveout:
         if index not in {o["index"] for o in self.options()}:
             raise OSError(f"no VRAM option {index}")
         sysfs.write(f"{self.dir}/carveout", str(index))
+
+
+def installed_ram_gb(vram_mb: int | None = None) -> int:
+    """RAM as sold (MemTotal + the VRAM carved out of it, rounded up to 4 GB)."""
+    total = 0
+    for line in (sysfs.read("/proc/meminfo") or "").splitlines():
+        if line.startswith("MemTotal:"):
+            total = int(line.split()[1]) // 1024
+    gb = (total + (vram_mb or 0)) / 1024
+    return max(4, int(-(-gb // 4) * 4))
+
+
+def suggested_vram_gb(ram_gb: int) -> int:
+    """Enough for games that check the VRAM size, leaving most RAM to the system."""
+    for upto, vram in ((8, 1), (16, 4), (32, 8), (64, 16)):
+        if ram_gb <= upto:
+            return vram
+    return 32
+
+
+# Where AMD BIOSes keep the UMA size (names vary a little by vendor).
+BIOS_PATHS = {
+    "asrock": "Advanced → AMD CBS → NBIO Common Options → GFX Configuration (or Advanced → Chipset Configuration → Share Memory): set UMA Mode to UMA_SPECIFIED, then UMA Frame buffer Size",
+    "": "Advanced → AMD CBS → NBIO Common Options → GFX Configuration: set UMA Mode to UMA_SPECIFIED (if it's there), then UMA Frame buffer Size",
+}
+
+
+def bios_path(board_vendor: str) -> str:
+    return BIOS_PATHS["asrock" if "asrock" in board_vendor.lower() else ""]
+
+
+class GpuMemLimit:
+    """How much system RAM the GPU may use (TTM's page limit), set at boot.
+
+    Integrated GPUs (amdgpu GTT, Intel xe/i915) take system RAM as they need
+    it, up to TTM's limit: half the RAM by default. ttm.pages_limit raises it
+    (Windows calls this "Shared GPU memory"); page_pool_size goes along so the
+    pool can grow as far. Counted in 4 KiB pages.
+    """
+
+    PARAM = "/sys/module/ttm/parameters/pages_limit"
+    KEYS = ("ttm.pages_limit", "ttm.page_pool_size")
+    CHOICES = (50, 75, 87)  # % of RAM; 50 = the kernel's default
+
+    def __init__(self, bootloader):
+        self.boot = bootloader
+
+    def available(self) -> bool:
+        return bool(self.boot) and os.path.exists(self.PARAM)
+
+    @staticmethod
+    def ram_pages() -> int:
+        for line in (sysfs.read("/proc/meminfo") or "").splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) // 4
+        return 0
+
+    def current_pct(self) -> int | None:
+        pages, ram = sysfs.read_int(self.PARAM), self.ram_pages()
+        return round(100 * pages / ram) if pages and ram else None
+
+    def params(self, pct: int) -> list[str]:
+        n = self.ram_pages() * pct // 100
+        return [f"{k}={n}" for k in self.KEYS]
+
+    def configured_pct(self, tokens: list[str]) -> int:
+        for t in tokens:
+            if t.startswith(self.KEYS[0] + "="):
+                try:
+                    return round(100 * int(t.split("=", 1)[1]) / self.ram_pages())
+                except (ValueError, ZeroDivisionError):
+                    pass
+        return 50
+
+    def set(self, pct: int) -> None:
+        if pct not in self.CHOICES:
+            raise OSError(f"no GPU memory choice {pct}%")
+        if pct == 50:
+            self.boot.set([], set(self.KEYS))
+        else:
+            self.boot.set(self.params(pct), set())

@@ -77,4 +77,29 @@ except OSError:
     pass
 assert not gpu.UmaCarveout(f"{tmp}/none", "amdgpu").available()[0]
 assert gpu.UmaCarveout(dev, "xe").available() == (False, "AMD graphics only")
+# --- suggestion, BIOS path, GPU memory limit (ttm.pages_limit)
+assert [gpu.suggested_vram_gb(g) for g in (8, 16, 32, 64, 128)] == [1, 4, 8, 16, 32]
+assert "Share Memory" in gpu.bios_path("ASRock") and "Share Memory" not in gpu.bios_path("Default string")
+from hhctl import sysfs
+real_read = sysfs.read
+sysfs.read = lambda path, default=None: "MemTotal:       31457280 kB\n" if path == "/proc/meminfo" else real_read(path, default)
+assert gpu.installed_ram_gb(2048) == 32 and gpu.installed_ram_gb() == 32
+assert gpu.GpuMemLimit.ram_pages() == 31457280 // 4
+sets = []
+boot = types.SimpleNamespace(name="Limine", set=lambda add, rm: sets.append((add, rm)))
+lim = gpu.GpuMemLimit(boot)
+lim.PARAM = f"{tmp}/pages_limit"; open(lim.PARAM, "w").write(f"{31457280 // 8}\n")
+assert lim.available() and lim.current_pct() == 50
+lim.set(75)
+n = 31457280 // 4 * 75 // 100
+assert sets[-1] == ([f"ttm.pages_limit={n}", f"ttm.page_pool_size={n}"], set())
+assert lim.configured_pct(["quiet", f"ttm.pages_limit={n}"]) == 75 and lim.configured_pct(["quiet"]) == 50
+lim.set(50)
+assert sets[-1] == ([], {"ttm.pages_limit", "ttm.page_pool_size"})
+try:
+    lim.set(99); raise SystemExit("odd percentage accepted")
+except OSError:
+    pass
+assert not gpu.GpuMemLimit(None).available()
+sysfs.read = real_read
 print("all thermal and vram tests passed")

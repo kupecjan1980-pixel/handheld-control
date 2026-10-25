@@ -160,6 +160,9 @@ class Controller:
         self.display_busy = False
         self.display_msg: str | None = None
         self.kargs_configured: set[str] | None = None  # cached; refreshed after edits
+        self.gpumem = gpu.GpuMemLimit(self.kargs or kargs.detect())
+        self.gpumem_busy = False
+        self.gpumem_conf: int | None = None  # % in the boot config; cached
         self._scan()
         self.errors: dict[str, str] = {}
         self.fan_pct: int | None = None
@@ -567,6 +570,44 @@ class Controller:
         self._guard("rgb", lambda: self.rgb.apply(s["mode"], hue, sat, s["bright"], s["effect"]))
 
     # --- display ----------------------------------------------------------
+
+    def set_gpu_mem(self, pct: int) -> dict:
+        if not self.gpumem.available() or self.gpumem_busy:
+            return self.state()
+        self.gpumem_busy = True
+
+        def run():
+            try:
+                self.gpumem.set(int(pct))
+                self.errors.pop("gpumem", None)
+            except Exception as e:
+                log.exception("GPU memory limit update failed")
+                self.errors["gpumem"] = str(e)
+            finally:
+                self.gpumem_conf = None
+                self.kargs_configured = None
+                self.gpumem_busy = False
+
+        # Bootloader updates can take a minute (rpm-ostree longer).
+        threading.Thread(target=run, daemon=True).start()
+        return self.state()
+
+    def _gpumem_state(self) -> dict:
+        if not self.gpumem.available():
+            return {"available": False}
+        if self.gpumem_conf is None and not self.gpumem_busy:
+            try:
+                self.gpumem_conf = self.gpumem.configured_pct(self.gpumem.boot.configured())
+            except Exception as e:
+                self.errors["gpumem"] = str(e)
+        return {
+            "available": True,
+            "bootloader": self.gpumem.boot.name,
+            "choices": list(self.gpumem.CHOICES),
+            "current": self.gpumem.current_pct(),
+            "configured": self.gpumem_conf,
+            "busy": self.gpumem_busy,
+        }
 
     def set_vram(self, index: int) -> dict:
         if self.uma.available()[0]:
@@ -1265,7 +1306,12 @@ class Controller:
                 "options": self.uma.options() if self.uma.available()[0] else [],
                 "current": self.uma.current(),
                 "boot": self.uma.boot,
+                "now_mb": self.uma.vram_mb(),
+                "ram_gb": gpu.installed_ram_gb(self.uma.vram_mb()),
+                "suggested_gb": gpu.suggested_vram_gb(gpu.installed_ram_gb(self.uma.vram_mb())),
+                "bios_path": gpu.bios_path(self.dev.vendor or ""),
             },
+            "gpu_mem": self._gpumem_state(),
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),
