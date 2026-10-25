@@ -73,6 +73,9 @@ class Upscale:
         self.path = os.path.join(home, FILE)
         gc = gc_major(gpu_dev) if gpu_driver == "amdgpu" else None
         self.options = (["fsr4"] if gc is not None and gc >= 11 else []) + ["xess"]
+        self.fsr4_why = (None if "fsr4" in self.options
+                         else f"needs AMD RDNA 3 or newer (this GPU is GFX {gc})" if gc is not None
+                         else "needs AMD RDNA 3 or newer graphics")
         self.rdna3 = gc == 11
         self.optiscaler = optiscaler_vars(gpu_driver, gc)
         self.optiscaler_fg = optiscaler_vars(gpu_driver, gc, framegen=True)
@@ -108,6 +111,6 @@ class Upscale:
         os.chown(self.path, st.st_uid, st.st_gid)
 
     def state(self) -> dict:
-        return {"options": self.options, "on": self.current(), "rdna3": self.rdna3,
+        return {"options": self.options, "on": self.current(), "rdna3": self.rdna3, "fsr4_why": self.fsr4_why,
                 "tools": proton_tools(self.home), "optiscaler": self.optiscaler, "optiscaler_fg": self.optiscaler_fg,
                 "opti_upscaler": self.opti_upscaler}

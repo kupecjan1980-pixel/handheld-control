@@ -13,6 +13,7 @@ assert u.options == ["fsr4", "xess"] and u.rdna3
 assert upscale.Upscale(home, "xe", None).options == ["xess"]
 open(f"{gpu}/ip_discovery/die/0/GC/0/major", "w").write("9\n")
 assert upscale.Upscale(home, "amdgpu", gpu).options == ["xess"], "Vega: no FSR 4"
+assert "GFX 9" in upscale.Upscale(home, "amdgpu", gpu).state()["fsr4_why"]
 assert u.state()["tools"] == ["proton-cachyos-11.0-x86_64"]
 u.set("fsr4", True)
 txt = open(u.path).read()

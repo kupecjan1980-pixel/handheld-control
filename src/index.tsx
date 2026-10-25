@@ -162,6 +162,7 @@ type State = {
     options: string[];
     on: Record<string, boolean>;
     rdna3: boolean;
+    fsr4_why: string | null;
     tools: string[];
     optiscaler: string;
     optiscaler_fg: string;
@@ -577,7 +578,25 @@ function OptiscalerRow({ u, l }: { u: State["upscale"]; l?: State["lsfg"] }) {
     setGame(g);
     if (g) launchOptions(g.appid).then(setOpts);
   }, []);
-  if (!(window as any).SteamClient?.Apps?.SetAppLaunchOptions) return null; // HHC Desktop
+  if (!(window as any).SteamClient?.Apps?.SetAppLaunchOptions) {
+    // HHC Desktop: no Steam to set them in, so the launch options to paste by hand.
+    const rows: [string, string | undefined][] = [
+      ["OptiScaler", u.optiscaler],
+      ["FSR frame generation (OptiScaler, DirectX 12)", u.optiscaler_fg],
+      ["Lossless Scaling 2×", l?.vars["2"]],
+    ];
+    return (
+      <PanelSectionRow>
+        <Field
+          label="OptiScaler and frame generation"
+          description={`In Game Mode the plugin sets these per game. Here, paste one into the game's Steam Properties › Launch options (OptiScaler needs Proton-CachyOS; Lossless Scaling needs lsfg-vk installed below): ${rows
+            .filter(([, v]) => v)
+            .map(([k, v]) => `${k}: ${v} %command%`)
+            .join(" · ")}`}
+        />
+      </PanelSectionRow>
+    );
+  }
   const base = `Swaps the upscaler the game asks for (pick DLSS, FSR or XeSS in its settings) for ${u.opti_upscaler}. Needs Proton-CachyOS for the game. It loads into the game, so don't use it in online games with anti-cheat (ban risk). Applies when the game starts again.`;
   if (!game || opts === null) {
     return (
@@ -657,6 +676,14 @@ function UpscaleRows({ state, setState }: { state: State; setState: (s: State) =
   };
   return (
     <>
+      {u.fsr4_why && (
+        <PanelSectionRow>
+          <Field
+            label="FSR"
+            description={`FSR 4 ${u.fsr4_why}. FSR 1, 2 and 3 work here: pick them in each game's own settings (FSR 3 frame generation too, where the game has it).`}
+          />
+        </PanelSectionRow>
+      )}
       {u.options.map((o) => (
         <PanelSectionRow key={o}>
           <ToggleField
