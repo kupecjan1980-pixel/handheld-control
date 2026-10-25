@@ -97,4 +97,19 @@ open(f"{wk}/wakeup0/event_count", "w").write("3\n")
 assert [x.split()[0] for x in sleep.woken_by(before, sleep.wake_counts())] == ["1-4"]
 open(f"{wk}/wakeup1/wakeup_count", "w").write("1\n")
 assert sleep.woken_by(before, sleep.wake_counts()) == ["PNP0C0C:00"], "wakeup_count wins over event_count"
+# woken at once through the USB controller we allowed (not the device): pad wake off
+ctl.padwake.restore()
+os.makedirs(f"{wk}/wakeup3")
+for k, v in (("name", "usb1"), ("wakeup_count", 0), ("event_count", 0)):
+    open(f"{wk}/wakeup3/{k}", "w").write(f"{v}\n")
+ctl.padwake = sleep.PadWake([("045e", "028e")]); ctl.padwake.enable()
+ctl.settings["sleep"]["pad_wake"] = True
+ctl._before_sleep()
+open(f"{wk}/wakeup3/wakeup_count", "w").write("1\n")
+ctl._after_wake(); ctl.tick_wake()
+assert ctl.settings["sleep"]["pad_wake"] is False and not ctl.pad_wake_on()
+assert open(f"{usb}/power/wakeup").read().strip() == "disabled", "wakeup taken back"
+assert "usb1" in ctl.state()["sleep"]["note"] and "usb1" in ctl.last_wake
+ctl.update("sleep", {"pad_wake": True})
+assert ctl.state()["sleep"]["note"] is None
 print("all sleep tests passed")

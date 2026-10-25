@@ -244,6 +244,8 @@ class Controller:
         if section == "controller" and "ip_target" in values:
             values = {**values, "ip_failed": None}  # picked again: try again
             self.errors.pop("controller", None)
+        if section == "sleep" and "pad_wake" in values:
+            self.sleep_note = None  # switched by hand: the old note no longer applies
         if section == "gpu":
             # A power profile and a clock lock exclude each other: the newer wins.
             if values.get("profile"):
@@ -529,6 +531,20 @@ class Controller:
         by = self.padwake.woke_by()
         if by:
             log.info("sleep: woken after %.0f s by %s", slept or -1, ", ".join(by))
+        # Woken at once by a hub or the USB controller we allowed to wake it,
+        # not by the device: with wakeup on, a root hub also wakes on a port
+        # (dis)connecting, e.g. a controller that drops off USB while asleep
+        # (NEXT 2: usb3 + its xHCI, 4 s after sleeping, 2026-10-25). Off for good.
+        chain = {os.path.basename(os.path.dirname(os.path.dirname(w))) for w in self.padwake.files()}
+        hubs = [s for s in sources if s.split()[0] in chain]
+        if not by and hubs and slept is not None and slept < self.QUICK_WAKE:
+            self.padwake.restore()
+            self.settings["sleep"]["pad_wake"] = False
+            self.save()
+            self.sleep_note = (f"The USB controller ({hubs[0].split()[0]}) woke it right away ({slept:.0f} s after "
+                               "sleeping), so waking with the controller is off. The power button still wakes it.")
+            log.info("sleep: pad wake off, %s", self.sleep_note)
+            return
         if by and slept is not None and slept < self.QUICK_WAKE:
             noisy = [tuple(x.split(":")) for x in by]
             self.padwake.restore()
