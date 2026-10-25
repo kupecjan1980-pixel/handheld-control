@@ -2603,22 +2603,9 @@ function Content() {
                   <ToggleField
                     label="Swipe up for the keyboard"
                     description={
-                      !draft.controller.swipe_keyboard
-                        ? "Swipe up from the bottom edge of the screen to open the Steam keyboard"
-                        : [
-                            state.swipe.learning
-                              ? "Setting up: swipe up once from the bottom edge of the screen"
-                              : "Swipe up from the bottom edge of the screen opens the Steam keyboard",
-                            state.swipe.listening ? `reading ${state.swipe.listening}` : "touchscreen not open yet",
-                            state.swipe.last_touch
-                              ? `last touch ${state.swipe.last_touch}`
-                              : "no touch seen yet (touch the screen, then look here)",
-                            state.swipe.edge ? `bottom edge = ${state.swipe.edge}` : null,
-                            state.swipe.last_swipe ? `last swipe ${state.swipe.last_swipe}` : null,
-                            keyboardTried ? `keyboard ${keyboardTried}` : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")
+                      draft.controller.swipe_keyboard && state.swipe.learning
+                        ? "Setting up: swipe up once from the bottom edge of the screen"
+                        : "Swipe up from the bottom edge of the screen to open the Steam keyboard"
                     }
                     checked={!!draft.controller.swipe_keyboard}
                     onChange={(v) => change("controller", { swipe_keyboard: v }, 0)}
@@ -2952,9 +2939,6 @@ const onButton = (action: string) => {
   }
 };
 
-// How the last keyboard request went, shown under the swipe switch.
-let keyboardTried: string | null = null;
-
 // Steam's keyboard: Quick Access closed first (the keyboard doesn't show over
 // it), then Steam's keyboard manager if it has one, else steam://open/keyboard.
 function openKeyboard() {
@@ -2962,12 +2946,11 @@ function openKeyboard() {
   setTimeout(() => {
     const win = (window as any).SteamUIStore?.WindowStore?.GamepadUIMainWindowInstance;
     const vkm = win?.VirtualKeyboardManager ?? win?.m_VirtualKeyboardManager;
-    const time = new Date().toLocaleTimeString();
     for (const fn of ["SetVirtualKeyboardVisible", "ShowVirtualKeyboard", "SetVirtualKeyboardShown"]) {
       try {
         if (typeof vkm?.[fn] === "function") {
           vkm[fn](true);
-          keyboardTried = `${time} via ${fn}`;
+          console.info("hhctl: keyboard via", fn);
           return;
         }
       } catch (e) {
@@ -2976,9 +2959,8 @@ function openKeyboard() {
     }
     try {
       (window.SteamClient as any).URL.ExecuteSteamURL("steam://open/keyboard");
-      keyboardTried = `${time} via steam://open/keyboard${vkm ? ` (manager has: ${Object.keys(Object.getPrototypeOf(vkm) ?? {}).filter((k) => /keyboard/i.test(k)).slice(0, 6).join(", ")})` : " (no keyboard manager)"}`;
     } catch (e) {
-      keyboardTried = `${time} failed: ${e}`;
+      console.warn("hhctl: keyboard", e);
     }
   }, 250);
 }
