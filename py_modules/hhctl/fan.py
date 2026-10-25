@@ -119,16 +119,30 @@ class EcFanCtl:
         self.name = f"EC via {transport}"
 
     def probe(self) -> None:
-        """Refuse to drive the fan if the registers don't look as mapped."""
-        ec.check(self.cfg.mode_reg, self.cfg.mode_values())
-        ec.check(self.cfg.pwm_reg, self.cfg.pwm_values())
+        """Refuse to drive the fan if the registers don't look as mapped.
+        The duty register is only ours in manual mode: in auto the firmware
+        keeps its own value there (0x66 on a NEXT 2, 2026-10-25)."""
+        if ec.check(self.cfg.mode_reg, self.cfg.mode_values()) == self.cfg.manual:
+            ec.check(self.cfg.pwm_reg, self.cfg.pwm_values())
 
     def set_auto(self) -> None:
         ec.write(self.cfg.mode_reg, self.cfg.auto, self.cfg.mode_values())
 
     def set_percent(self, pct: int) -> None:
+        manual = ec.check(self.cfg.mode_reg, self.cfg.mode_values()) == self.cfg.manual
         ec.write(self.cfg.mode_reg, self.cfg.manual, self.cfg.mode_values())
-        ec.write(self.cfg.pwm_reg, round(pct * self.cfg.pwm_max / 100), self.cfg.pwm_values())
+        # Coming from auto, whatever the firmware left there is fine to overwrite.
+        ec.write(self.cfg.pwm_reg, round(pct * self.cfg.pwm_max / 100),
+                 self.cfg.pwm_values() if manual else range(256))
+
+    def to_firmware(self) -> None:
+        """Hand the fan back after a failed check, if the mode register is still
+        one of ours (else nothing is written)."""
+        try:
+            if ec.read(self.cfg.mode_reg) == self.cfg.manual:
+                ec.write(self.cfg.mode_reg, self.cfg.auto, self.cfg.mode_values())
+        except OSError:
+            pass
 
     def rpm(self) -> int | None:
         try:
@@ -170,5 +184,6 @@ def find_backend(dev: Device, allow_ec: bool):
     try:
         ctl.probe()
     except OSError as e:
-        return None, str(e)
+        ctl.to_firmware()
+        return None, str(e) + "; the firmware runs the fan"
     return ctl, None

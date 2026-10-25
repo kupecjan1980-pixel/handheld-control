@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, buttons, fonts, updater, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
+from . import ai, background, backlight, buttons, fonts, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -156,6 +156,7 @@ class Controller:
         self.scx = scx.Scx()
         self.cpu_util = cpu.Util()
         self.limit_reasons = cpu.LimitReasons()
+        self.ai = ai.AiEnv(self._home(), self.gpu.driver)
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
         self.uma = gpu.UmaCarveout(self.gpu.dev, self.gpu.driver)
@@ -734,6 +735,10 @@ class Controller:
 
     # --- display ----------------------------------------------------------
 
+    def set_ai(self, on: bool) -> dict:
+        self._guard("ai", lambda: self.ai.set(bool(on)))
+        return self.state()
+
     def set_gpu_mem(self, gb: int) -> dict:
         if not self.gpumem.available() or self.gpumem_busy:
             return self.state()
@@ -777,6 +782,26 @@ class Controller:
         if self.uma.available()[0]:
             self._guard("vram", lambda: self.uma.set(int(index)))
         return self.state()
+
+    # --- extra drives (own calls: lsblk isn't run every tick) ----------------
+
+    def drives(self, action: str | None = None, path: str | None = None) -> dict:
+        out: dict = {"error": None, "done": None}
+        try:
+            if action == "mount":
+                out["done"] = storage.mount(path, self._home())
+            elif action == "unmount":
+                storage.unmount(path)
+            elif action == "format":
+                out["done"] = storage.format_ext4(path, self._home())
+        except (OSError, ValueError) as e:
+            log.error("storage: %s %s: %s", action, path, e)
+            out["error"] = str(e)
+        try:
+            out["drives"] = storage.drives()
+        except (OSError, ValueError) as e:
+            out["drives"], out["error"] = [], out["error"] or str(e)
+        return out
 
     def set_brightness(self, pct: int) -> dict:
         if self.backlight:
@@ -1505,6 +1530,7 @@ class Controller:
                 "installed": self.ipconf.installed(),
                 "install": "sudo pacman -S inputplumber" if os.path.exists("/usr/bin/pacman") and not os.path.exists("/run/ostree-booted") else None,
             },
+            "ai": {"enabled": self.ai.enabled(), "vars": self.ai.vars},
             "thermal": {
                 "available": bool(self.thermal),
                 "range": list(self.thermal.range) if self.thermal else None,

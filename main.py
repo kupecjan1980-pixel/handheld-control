@@ -129,6 +129,15 @@ class Plugin:
     async def save_ip_report(self):
         return await self._run(self.ctl.save_ip_report)
 
+    async def set_ai(self, on: bool):
+        return await self._run(self.ctl.set_ai, on)
+
+    async def get_drives(self):
+        return await self._run(self.ctl.drives)
+
+    async def drive_action(self, action: str, path: str):
+        return await self._run(self.ctl.drives, action, path)
+
     async def set_vram(self, index: int):
         return await self._run(self.ctl.set_vram, index)
 

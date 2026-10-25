@@ -149,6 +149,7 @@ type State = {
     install: string | null;
   };
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
+  ai: { enabled: boolean; vars: Record<string, string> };
   vram: {
     available: boolean;
     unavailable: string | null;
@@ -302,10 +303,135 @@ const setBrightness = callable<[number], State>("set_brightness");
 const setVram = callable<[number], State>("set_vram");
 const setGpuMem = callable<[number], State>("set_gpu_mem");
 const saveIpReport = callable<[], State>("save_ip_report");
+const setAi = callable<[boolean], State>("set_ai");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
 // Dedicated VRAM (amdgpu carveout, else where to set it) and how much RAM the GPU may borrow.
+type Drive = {
+  path: string;
+  model: string;
+  size: number;
+  fstype: string | null;
+  label: string | null;
+  mountpoint: string | null;
+  permanent: boolean;
+  ours: boolean;
+  can_mount: boolean;
+  empty: boolean;
+  note: string | null;
+};
+type Drives = { drives: Drive[]; error: string | null; done: { mountpoint: string; library: string } | null };
+const getDrives = callable<[], Drives>("get_drives");
+const driveAction = callable<[string, string], Drives>("drive_action");
+
+const driveSize = (b: number) => (b >= 1e12 ? `${(b / 1e12).toFixed(1)} TB` : `${Math.round(b / 1e9)} GB`);
+
+// Steam's own call when it's there (Game Mode); else the path to add by hand.
+async function addToSteam(library: string): Promise<string> {
+  const sc = (window as any).SteamClient;
+  try {
+    if (sc?.InstallFolder?.AddInstallFolder) {
+      await sc.InstallFolder.AddInstallFolder(library);
+      return `Added to Steam: ${library}`;
+    }
+  } catch (e) {
+    console.warn("hhctl: AddInstallFolder", e);
+  }
+  return `In Steam, open Settings › Storage › Add drive and pick ${library}`;
+}
+
+function DriveRows() {
+  const [d, setD] = useState<Drives | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [erase, setErase] = useState<string | null>(null); // asked to format this one: confirm
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    getDrives().then(setD).catch(() => setD(null));
+  }, []);
+  if (!d || (d.drives.length === 0 && !d.error)) return null;
+  const act = async (action: string, path: string) => {
+    setBusy(path);
+    setErase(null);
+    setMsg(null);
+    try {
+      const r = await driveAction(action, path);
+      setD(r);
+      if (r.done) setMsg(`${r.done.mountpoint} mounts at every start. ${await addToSteam(r.done.library)}`);
+      else if (!r.error && action === "unmount") setMsg("Unmounted; it no longer mounts at start (the data is still there)");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <PanelSection title="Drives">
+      {d.drives.map((v) => {
+        const name = `${v.label ?? v.model} · ${driveSize(v.size)}${v.fstype ? ` · ${v.fstype}` : ""}`;
+        const where = v.mountpoint ? (v.permanent ? `Mounted at ${v.mountpoint}, also at every start` : `Mounted at ${v.mountpoint} for now`) : "Not mounted";
+        const off = busy !== null;
+        return (
+          <Fragment key={v.path}>
+            <PanelSectionRow>
+              <Field label={name} description={[v.empty ? null : where, v.note, `${v.model} ${v.path}`].filter(Boolean).join(" · ")} />
+            </PanelSectionRow>
+            {v.can_mount && !(v.permanent && !v.ours) && !(v.ours && v.mountpoint) && (
+              <PanelSectionRow>
+                <ButtonItem layout="below" disabled={off} onClick={() => act("mount", v.path)}>
+                  {busy === v.path ? "Working…" : "Mount at every start (no password)"}
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            {v.ours && v.mountpoint && (
+              <PanelSectionRow>
+                <ButtonItem layout="below" disabled={off} onClick={async () => setMsg(await addToSteam(`${v.mountpoint}/SteamLibrary`))}>
+                  Add to Steam as a library
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            {v.ours && (
+              <PanelSectionRow>
+                <ButtonItem layout="below" disabled={off} onClick={() => act("unmount", v.path)}>
+                  Unmount, don't mount at start
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            {!(v.permanent && !v.ours) && v.fstype !== "ext4" && erase !== v.path && (
+              <PanelSectionRow>
+                <ButtonItem layout="below" disabled={off} onClick={() => setErase(v.path)}>
+                  Format as ext4 for Steam (erases it)
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            {erase === v.path && (
+              <>
+                <PanelSectionRow>
+                  <Field label="Erase everything on it?" description={`${name} (${v.path}) is wiped and formatted as ext4, then mounted at every start for Steam. This can't be undone.`} />
+                </PanelSectionRow>
+                <PanelSectionRow>
+                  <ButtonItem layout="below" disabled={off} onClick={() => act("format", v.path)}>
+                    {busy === v.path ? "Formatting…" : "Yes, erase and format"}
+                  </ButtonItem>
+                </PanelSectionRow>
+                <PanelSectionRow>
+                  <ButtonItem layout="below" disabled={off} onClick={() => setErase(null)}>
+                    Cancel
+                  </ButtonItem>
+                </PanelSectionRow>
+              </>
+            )}
+          </Fragment>
+        );
+      })}
+      {msg && (
+        <PanelSectionRow>
+          <Field description={msg} />
+        </PanelSectionRow>
+      )}
+      <ErrorRow msg={d.error ?? undefined} />
+    </PanelSection>
+  );
+}
+
 function VramRows({ state, setState }: { state: State; setState: (s: State) => void }) {
   const v = state.vram;
   const m = state.gpu_mem;
@@ -1584,6 +1710,25 @@ function Content() {
                 <ErrorRow msg={state.errors.thermal} />
               </>
             )}
+            {state.ai && (
+              <>
+                <PanelSectionRow>
+                  <ToggleField
+                    label="Tune for AI apps (oneDNN)"
+                    description={`For PyTorch, OpenVINO, ONNX Runtime and llama.cpp; games don't use oneDNN, so they're unaffected. Sets ${Object.entries(
+                      state.ai.vars,
+                    )
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(", ")}${
+                      state.ai.vars.ONEDNN_DEFAULT_FPMATH_MODE ? " (bf16 math: faster, slightly less precise)" : ""
+                    }. Apps started after the next login pick it up.`}
+                    checked={state.ai.enabled}
+                    onChange={async (v) => setState(await setAi(v))}
+                  />
+                </PanelSectionRow>
+                <ErrorRow msg={state.errors.ai} />
+              </>
+            )}
             {state.cpu.scx.available && (
               <>
                 <PanelSectionRow>
@@ -2216,6 +2361,8 @@ function Content() {
               <ErrorRow msg={state.errors.display} />
             </PanelSection>
           )}
+
+          <DriveRows />
 
           {state.ec.supported && (
             <PanelSection title="Advanced">

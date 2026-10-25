@@ -28,6 +28,7 @@ const dlg = gamepadDialogClasses;
 export const Navigation = {
   OpenQuickAccessMenu: (_tab?: unknown) => {},
   CloseSideMenus: () => {},
+  Navigate: (_route: string) => {},
 };
 
 export const getGamepadNavigationTrees = (): any[] => [];
