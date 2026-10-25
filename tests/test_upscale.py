@@ -28,4 +28,7 @@ assert upscale.optiscaler_vars("xe", None) == 'PROTON_USE_OPTISCALER=1 PROTON_OP
 assert upscale.optiscaler_vars("amdgpu", 11).endswith("Dx12Upscaler=fsr31\" PROTON_FSR4_UPGRADE=1")
 assert "FSR4" not in upscale.optiscaler_vars("amdgpu", 9)
 assert u.state()["opti_upscaler"] == "FSR 4"
+fg = upscale.optiscaler_vars("amdgpu", 11, framegen=True)
+assert "FrameGen.Enabled=true;FrameGen.FGInput=upscaler;FrameGen.FGOutput=fsrfg\"" in fg and fg.endswith("PROTON_FSR4_UPGRADE=1 PROTON_FFX4_UPGRADE=1"), fg
+assert "FrameGen" not in u.state()["optiscaler"] and "FrameGen" in u.state()["optiscaler_fg"]
 print("all upscale tests passed")

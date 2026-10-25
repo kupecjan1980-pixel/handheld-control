@@ -164,6 +164,7 @@ type State = {
     rdna3: boolean;
     tools: string[];
     optiscaler: string;
+    optiscaler_fg: string;
     opti_upscaler: string;
   };
   vram: {
@@ -514,11 +515,22 @@ function launchOptions(appid: number): Promise<string | null> {
 }
 
 const OPTI_VAR = /(^|\s)PROTON_USE_OPTISCALER=\S+/;
+const FG_ON = /FrameGen\.Enabled=true/;
 
-function withOptiscaler(opts: string, vars: string, on: boolean): string {
-  let o = opts.replace(vars, "").replace(OPTI_VAR, " ").replace(/\s+/g, " ").trim();
+// The game's launch options with our OptiScaler part replaced by `vars`
+// (null: taken out). Anything else the user put there stays.
+function withOptiscaler(opts: string, vars: string | null): string {
+  let o = opts;
+  if (OPTI_VAR.test(o)) {
+    o = o
+      .replace(/(^|\s)PROTON_USE_OPTISCALER=\S+/g, " ")
+      .replace(/(^|\s)PROTON_OPTISCALER_CONFIG=("[^"]*"|\S+)/g, " ")
+      .replace(/(^|\s)PROTON_FFX4_UPGRADE=1(?=\s|$)/g, " ")
+      .replace(/(^|\s)PROTON_FSR4_UPGRADE=1(?=\s|$)/g, " ");
+  }
+  o = o.replace(/\s+/g, " ").trim();
   if (o === "%command%") o = "";
-  if (!on) return o;
+  if (!vars) return o;
   if (o.includes("%command%")) return `${vars} ${o}`;
   return o ? `${vars} %command% ${o}` : `${vars} %command%`;
 }
@@ -536,24 +548,36 @@ function OptiscalerRow({ u }: { u: State["upscale"] }) {
   if (!game || opts === null) {
     return (
       <PanelSectionRow>
-        <Field label="OptiScaler" description={`${base} Start the game, then turn it on here for that game.`} />
+        <Field label="OptiScaler and frame generation" description={`${base} Start the game, then turn it on here for that game.`} />
       </PanelSectionRow>
     );
   }
   const on = OPTI_VAR.test(opts);
+  const fg = on && FG_ON.test(opts);
+  const set = (vars: string | null) => {
+    const next = withOptiscaler(opts, vars);
+    (window as any).SteamClient.Apps.SetAppLaunchOptions(game.appid, next);
+    setOpts(next);
+  };
   return (
-    <PanelSectionRow>
-      <ToggleField
-        label={`OptiScaler for ${game.name}`}
-        description={base}
-        checked={on}
-        onChange={(v) => {
-          const next = withOptiscaler(opts, u.optiscaler, v);
-          (window as any).SteamClient.Apps.SetAppLaunchOptions(game.appid, next);
-          setOpts(next);
-        }}
-      />
-    </PanelSectionRow>
+    <>
+      <PanelSectionRow>
+        <ToggleField
+          label={`OptiScaler for ${game.name}`}
+          description={base}
+          checked={on}
+          onChange={(v) => set(v ? (fg ? u.optiscaler_fg : u.optiscaler) : null)}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label={`Frame generation for ${game.name}`}
+          description="Adds FSR frame generation through OptiScaler (turns it on too): about twice the frames shown. DirectX 12 games only, and an upscaler must be on in the game. Best from about 40 fps; below that it feels laggy. The HUD can smear a little. Applies when the game starts again."
+          checked={fg}
+          onChange={(v) => set(v ? u.optiscaler_fg : on ? u.optiscaler : null)}
+        />
+      </PanelSectionRow>
+    </>
   );
 }
 
