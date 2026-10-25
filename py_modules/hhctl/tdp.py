@@ -268,6 +268,8 @@ SMU_FAMILIES = [
     # Strix Point (Ryzen AI 9 365/370/HX 375) and Krackan Point moved MP1's
     # message and response registers; the ids stay (APUSettings1_Strix).
     SmuFamily("Strix Point / Krackan Point", 0x1A, (0x20, 0x24, 0x60), 0x3B10978, *_ZEN2_3, msg=0x3B10928),
+    # Strix Halo (NEXT 2): same mailbox as Strix Point in ryzenadj (FAM_STRIXHALO).
+    SmuFamily("Strix Halo", 0x1A, (0x70,), 0x3B10978, *_ZEN2_3, msg=0x3B10928),
 ]
 
 

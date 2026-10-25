@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, buttons, fonts, updater, inputcap, inputplumber, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
+from . import background, backlight, buttons, fonts, updater, inputcap, inputplumber, thermal, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -28,6 +28,8 @@ DEFAULTS = {
         "smt": None, "hwp_boost": None, "epp_boost": None, "scx": None, "scx_mode": "gaming",
         # Core types (Ryzen AI 300, hybrid Intel): None, "all", "fast", "small".
         "cores": None,
+        # CPU temperature limit in °C (None: firmware's own), held by the CPU.
+        "temp_limit": None,
     },
     # GPU clock: "auto" leaves the driver alone; min/max/manual lock it.
     # profile: amdgpu power profile, only with mode "auto" (exclusive with a lock).
@@ -111,6 +113,7 @@ class Controller:
         self.cpu_model = cpu_model()
         self.settings = self._load()
         self.tdp = tdp.find_backend(self.dev)
+        self.thermal = self._thermal_backend()
         # Intel only: firmware-attributes already selects "custom", ryzenadj needs nothing.
         self.profile = tdp.PlatformProfile() if isinstance(self.tdp, tdp.Rapl) else None
         self.rgb = rgb.find_backend(self.dev)
@@ -136,6 +139,7 @@ class Controller:
         self.limit_reasons = cpu.LimitReasons()
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
+        self.uma = gpu.UmaCarveout(self.gpu.dev, self.gpu.driver)
         self.emit = lambda action: None  # set by main.py: sends a button action to the panel
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
@@ -407,6 +411,7 @@ class Controller:
         self.apply_tdp()
         self.apply_epp()
         self.apply_cpu()
+        self.apply_temp_limit(force=True)  # firmware resets it on resume
         self.apply_gpu()
         self.apply_fan()
         self.apply_battery()
@@ -476,6 +481,31 @@ class Controller:
                 self._guard("cpu", lambda: self.freqcap.apply(int(s["cap_mhz"])))
             else:
                 self._guard("cpu", self.freqcap.restore)
+        self.apply_temp_limit()
+
+    def _thermal_backend(self):
+        if self.dev.cpu == "intel":
+            return thermal.find("intel")
+        cpuinfo = sysfs.read("/proc/cpuinfo") or ""
+        family = tdp.AmdSmu.detect(cpuinfo)
+        smu = self.tdp if isinstance(self.tdp, tdp.AmdSmu) else None
+        ra = self.tdp.binary if isinstance(self.tdp, tdp.RyzenAdj) else None
+        if not smu and not ra:
+            ra = getattr(tdp.RyzenAdj.find(), "binary", None)
+        if not smu and not ra and family:
+            smu = tdp.AmdSmu.find(cpuinfo)
+        return thermal.find("amd", family.name if family else "", smu, ra)
+
+    def apply_temp_limit(self, force: bool = False) -> None:
+        if not self.thermal:
+            return
+        c = self.settings["cpu"].get("temp_limit")
+        if c is None:
+            self._guard("thermal", self.thermal.restore)
+            return
+        lo, hi = self.thermal.range
+        c = max(lo, min(hi, int(c)))
+        self._guard("thermal", lambda: self.thermal.apply(c, force))
 
     def _toggles(self) -> tuple:
         return (("boost", self.boost), ("prefcore", self.prefcore), ("hwp_boost", self.hwp_boost), ("epp_boost", self.epp_boost))
@@ -537,6 +567,11 @@ class Controller:
         self._guard("rgb", lambda: self.rgb.apply(s["mode"], hue, sat, s["bright"], s["effect"]))
 
     # --- display ----------------------------------------------------------
+
+    def set_vram(self, index: int) -> dict:
+        if self.uma.available()[0]:
+            self._guard("vram", lambda: self.uma.set(int(index)))
+        return self.state()
 
     def set_brightness(self, pct: int) -> dict:
         if self.backlight:
@@ -1023,6 +1058,8 @@ class Controller:
         if unload:
             self.buttons.stop()
             self._guard("controller", self.ip.restore)
+            if self.thermal:
+                self._guard("thermal", self.thermal.restore)
             # Clock limits go back to the driver; they're re-applied on load.
             self._guard("cpu", self.freqcap.restore)
             self._guard("gpu", self.gpuclk.restore)
@@ -1217,6 +1254,18 @@ class Controller:
                 "help": self.buttons.help,
             },
             "inputplumber": {"devices": len(self.ip.devices), "targets": inputplumber.TARGETS},
+            "thermal": {
+                "available": bool(self.thermal),
+                "range": list(self.thermal.range) if self.thermal else None,
+                "backend": getattr(self.thermal, "name", None),
+            },
+            "vram": {
+                "available": self.uma.available()[0],
+                "unavailable": self.uma.available()[1],
+                "options": self.uma.options() if self.uma.available()[0] else [],
+                "current": self.uma.current(),
+                "boot": self.uma.boot,
+            },
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),

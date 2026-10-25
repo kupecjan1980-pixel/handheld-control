@@ -71,6 +71,17 @@ gamepad's Start, so games keep it. The plugin only
 reads those keys, so nothing is taken from Steam or games. The back buttons
 and the touchpads need a virtual controller; that comes later.
 
+**CPU → Temperature limit**: the CPU boosts as hard as the TDP allows
+until it reaches the set temperature, then holds it there; the CPU does this
+itself. AMD: the SMU's Tctl limit (direct, or ryzenadj `--tctl-temp`),
+re-sent every minute and after resume; turning it off sends the family's
+stock limit (95 °C Raven to Cezanne, 100 °C later). Intel: the TCC offset
+(proc_thermal sysfs, else MSR 0x1A2), original put back when off.
+
+**GPU → Dedicated VRAM** (AMD, kernel 7.0+, BIOS support needed): the
+amdgpu `uma/carveout` choices; the new size applies after a restart. Without
+BIOS support the row says to set it in the BIOS.
+
 On the OneXFly F1 family under InputPlumber (Bazzite 44 and later, no HHD),
 Turbo opens Handheld Control and the keyboard button opens the Quick Access
 Menu. InputPlumber grabs those buttons, so the plugin loads a device profile
@@ -358,6 +369,7 @@ py_modules/hhctl/
   updater.py            install any GitHub release from the panel
 desktop/              HHC Desktop: the plugin's panel as a desktop app (server.py, shims/)
   buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
+  thermal.py            CPU temperature limit (AMD Tctl, Intel TCC offset)
   inputplumber.py       InputPlumber profile + emulated controller (OneXFly, Bazzite 44)
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)

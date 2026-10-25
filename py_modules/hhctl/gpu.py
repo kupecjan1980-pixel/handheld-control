@@ -511,3 +511,41 @@ class GpuClock:
             if sysfs.read(self.level) != self.orig:
                 sysfs.write(self.level, self.orig)
         self.changed = False
+
+
+class UmaCarveout:
+    """Dedicated VRAM (UMA frame buffer) of AMD APUs, set for the next boot.
+
+    Kernel 7.0+ amdgpu exposes the BIOS's choices when the BIOS supports
+    changing them (ATCS function 0xA): uma/carveout_options lists
+    "<index>: <label> (<size>)" and uma/carveout takes an index. Without
+    those files the size can only be changed in the BIOS.
+    """
+
+    def __init__(self, dev: str | None, driver: str | None):
+        self.dir = f"{dev}/uma" if dev and driver == "amdgpu" else None
+        self.boot = self.current()  # what this boot runs with
+
+    def available(self) -> tuple[bool, str | None]:
+        if not self.dir:
+            return False, "AMD graphics only"
+        if not os.path.exists(f"{self.dir}/carveout"):
+            return False, "This BIOS doesn't let Linux change it (kernel 7.0+ needed too); set it in the BIOS"
+        return True, None
+
+    def options(self) -> list[dict]:
+        out = []
+        for line in (sysfs.read(f"{self.dir}/carveout_options") or "").splitlines() if self.dir else []:
+            m = re.match(r"\s*(\d+):\s*(.*?)\s*\((.+)\)\s*$", line)
+            if m:
+                label = m.group(3) + (f" ({m.group(2)})" if m.group(2) else "")
+                out.append({"index": int(m.group(1)), "label": label})
+        return out
+
+    def current(self) -> int | None:
+        return sysfs.read_int(f"{self.dir}/carveout") if self.dir else None
+
+    def set(self, index: int) -> None:
+        if index not in {o["index"] for o in self.options()}:
+            raise OSError(f"no VRAM option {index}")
+        sysfs.write(f"{self.dir}/carveout", str(index))

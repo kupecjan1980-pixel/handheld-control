@@ -119,6 +119,9 @@ class Plugin:
     async def set_ec(self, values: dict):
         return await self._run(self.ctl.update, "ec", values)
 
+    async def set_vram(self, index: int):
+        return await self._run(self.ctl.set_vram, index)
+
     async def set_brightness(self, percent: int):
         return await self._run(self.ctl.set_brightness, percent)
 

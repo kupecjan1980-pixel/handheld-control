@@ -32,6 +32,7 @@ type Settings = {
     scx: string | null;
     scx_mode: string;
     cores: "all" | "fast" | "small" | null;
+    temp_limit: number | null;
   };
   gpu: { mode: GpuMode; mhz: number | null; profile: string | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
@@ -128,6 +129,14 @@ type State = {
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
   inputplumber?: { devices: number; targets: string[] };
+  thermal: { available: boolean; range: [number, number] | null; backend: string | null };
+  vram: {
+    available: boolean;
+    unavailable: string | null;
+    options: { index: number; label: string }[];
+    current: number | null;
+    boot: number | null;
+  };
   update: {
     busy: boolean;
     error: string | null;
@@ -258,6 +267,7 @@ type Section = keyof Settings;
 const getState = callable<[], State>("get_state");
 const getVersion = callable<[], string | null>("get_version");
 const setBrightness = callable<[number], State>("set_brightness");
+const setVram = callable<[number], State>("set_vram");
 const setDisplay = callable<[string, boolean], State>("set_display");
 const setGamescopeHdr = callable<[string], State>("set_gamescope_hdr");
 const confirmSdrBrightness = callable<[boolean], State>("confirm_sdr_brightness");
@@ -1430,6 +1440,37 @@ function Content() {
                 )}
               </>
             )}
+            {state.thermal.available && state.thermal.range && (
+              <>
+                <PanelSectionRow>
+                  <ToggleField
+                    label="Temperature limit"
+                    description={`Boosts run full until the CPU reaches it, then it holds there${
+                      perf.cpu_temp_c != null ? ` · now ${perf.cpu_temp_c}°C` : ""
+                    } · via ${state.thermal.backend}`}
+                    checked={draft.cpu.temp_limit != null}
+                    onChange={(v) =>
+                      change("cpu", { temp_limit: v ? Math.min(85, state.thermal.range![1]) : null }, 0)
+                    }
+                  />
+                </PanelSectionRow>
+                {draft.cpu.temp_limit != null && (
+                  <PanelSectionRow>
+                    <SliderField
+                      label="Max CPU temperature"
+                      value={draft.cpu.temp_limit}
+                      min={state.thermal.range[0]}
+                      max={state.thermal.range[1]}
+                      step={1}
+                      showValue
+                      valueSuffix=" °C"
+                      onChange={(v) => change("cpu", { temp_limit: v })}
+                    />
+                  </PanelSectionRow>
+                )}
+                <ErrorRow msg={state.errors.thermal} />
+              </>
+            )}
             {state.cpu.scx.available && (
               <>
                 <PanelSectionRow>
@@ -1556,6 +1597,29 @@ function Content() {
                   />
                 </PanelSectionRow>
               )}
+              {state.vram.available ? (
+                <PanelSectionRow>
+                  <DropdownItem
+                    label="Dedicated VRAM"
+                    description={
+                      state.vram.current !== state.vram.boot
+                        ? "Changes after a restart"
+                        : "Memory set aside for the GPU; the rest stays system RAM. Changes after a restart."
+                    }
+                    rgOptions={state.vram.options.map((o) => ({ data: o.index, label: o.label }))}
+                    selectedOption={state.vram.current}
+                    onChange={async (o) => setState(await setVram(o.data))}
+                  />
+                </PanelSectionRow>
+              ) : (
+                state.vram.unavailable &&
+                state.vram.unavailable !== "AMD graphics only" && (
+                  <PanelSectionRow>
+                    <Field label="Dedicated VRAM" description={state.vram.unavailable} />
+                  </PanelSectionRow>
+                )
+              )}
+              <ErrorRow msg={state.errors.vram} />
               <ErrorRow msg={state.errors.gpu} />
             </PanelSection>
           )}
