@@ -111,8 +111,8 @@ def _next2(vendor: str, board: str) -> Device:
         # used after it matches port reads register for register.
         ec_mmio=0xFE800400,
         notes=[
-            "No EC charge-% register: the limit is enforced by toggling "
-            "charge inhibit while the plugin runs.",
+            "The NEXT 2 has no charge limit of its own: the plugin pauses "
+            "charging at the limit, so it only holds while the plugin runs.",
         ],
         board=board,
         vendor=vendor,

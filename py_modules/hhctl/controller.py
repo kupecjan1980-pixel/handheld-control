@@ -56,7 +56,9 @@ DEFAULTS = {
     "ec": {"enabled": False},
 }
 
-CONFLICTS = ("hhd", "powerstation", "inputplumber")
+# Daemons that may also set TDP, RGB or the fan. Not InputPlumber: it only does the
+# controller, and the plugin drives it itself.
+CONFLICTS = ("hhd", "powerstation")
 
 # USB ids of each handheld's controller (gamepad + the buttons' keyboard), for waking with it.
 # NEXT 2: the buttons only. Its gamepad's right trigger jitters all the time and

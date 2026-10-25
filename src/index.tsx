@@ -2405,7 +2405,7 @@ function Content() {
             {state.conflicts.length > 0 && (
               <PanelSectionRow>
                 <Field
-                  description={`${state.conflicts.join(", ")} is running. If it also controls TDP, RGB or the fan, it may override these settings.`}
+                  description={`${state.conflicts.join(" and ")} ${state.conflicts.length > 1 ? "are" : "is"} running. If it also controls TDP, RGB or the fan, it may override these settings.`}
                 />
               </PanelSectionRow>
             )}
