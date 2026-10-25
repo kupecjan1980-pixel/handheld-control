@@ -1017,6 +1017,7 @@ const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
     ${btn}, .hhctl-root select { background: rgba(${r}, ${g}, ${b}, ${a}) !important;${text ? ` color: ${text} !important;` : ""} }
     ${hover}, .hhctl-root select:hover { background: rgba(${r}, ${g}, ${b}, ${text ? 1 : 0.8}) !important; }
     .hhctl-root [class*="DropDownControlButton"]:disabled, .hhctl-root select:disabled { opacity: 0.5; cursor: default; }
+    .hhctl-root .hhctl-off { opacity: 0.5; pointer-events: none; }
     .hhctl-root select option { background: rgb(${solid}); color: ${fg}; }
     @supports (appearance: base-select) {
       .hhctl-root select, .hhctl-root select::picker(select) { appearance: base-select; }
@@ -1808,14 +1809,16 @@ function Content() {
                     }
                   />
                 </PanelSectionRow>
-                {draft.cpu.cap && (
-                  <PanelSectionRow>
+                <PanelSectionRow>
+                  <div className={draft.cpu.cap ? undefined : "hhctl-off"}>
                     <SliderField
                       label="Max CPU clock"
                       description={
-                        state.cpu.cap.limits.length > 1
-                          ? `Each core type stays within its own range · now ${state.cpu.cap.limits.map(ghz).join(" / ")}`
-                          : undefined
+                        !draft.cpu.cap
+                          ? "Turn on Limit CPU clock to set it"
+                          : state.cpu.cap.limits.length > 1
+                            ? `Each core type stays within its own range · now ${state.cpu.cap.limits.map(ghz).join(" / ")}`
+                            : undefined
                       }
                       value={draft.cpu.cap_mhz ?? state.cpu.cap.max}
                       min={state.cpu.cap.min}
@@ -1823,10 +1826,11 @@ function Content() {
                       step={100}
                       showValue
                       valueSuffix=" MHz"
+                      disabled={!draft.cpu.cap}
                       onChange={(v) => change("cpu", { cap_mhz: v })}
                     />
-                  </PanelSectionRow>
-                )}
+                  </div>
+                </PanelSectionRow>
               </>
             )}
             {state.thermal.available && state.thermal.range && (
@@ -1843,20 +1847,22 @@ function Content() {
                     }
                   />
                 </PanelSectionRow>
-                {draft.cpu.temp_limit != null && (
-                  <PanelSectionRow>
+                <PanelSectionRow>
+                  <div className={draft.cpu.temp_limit != null ? undefined : "hhctl-off"}>
                     <SliderField
                       label="Max CPU temperature"
-                      value={draft.cpu.temp_limit}
+                      description={draft.cpu.temp_limit != null ? undefined : "Turn on Temperature limit to set it"}
+                      value={draft.cpu.temp_limit ?? Math.min(85, state.thermal.range[1])}
                       min={state.thermal.range[0]}
                       max={state.thermal.range[1]}
                       step={1}
                       showValue
                       valueSuffix=" °C"
+                      disabled={draft.cpu.temp_limit == null}
                       onChange={(v) => change("cpu", { temp_limit: v })}
                     />
-                  </PanelSectionRow>
-                )}
+                  </div>
+                </PanelSectionRow>
                 <ErrorRow msg={state.errors.thermal} />
               </>
             )}
@@ -1927,17 +1933,20 @@ function Content() {
             <PanelSection>
               {gpu.clock.modes.includes("manual") && (
                 <PanelSectionRow>
-                  <SliderField
-                    label="GPU clock"
-                    description={g.mode === "manual" ? undefined : "Moving it locks the clock (Mode: Manual)"}
-                    value={g.mhz ?? gpu.clock.max}
-                    min={gpu.clock.min}
-                    max={gpu.clock.max}
-                    step={50}
-                    showValue
-                    valueSuffix=" MHz"
-                    onChange={(v) => change("gpu", { mode: "manual", mhz: v, profile: null })}
-                  />
+                  <div className={g.mode === "manual" ? undefined : "hhctl-off"}>
+                    <SliderField
+                      label="GPU clock"
+                      description={g.mode === "manual" ? undefined : "Pick Manual under GPU clock mode to set it"}
+                      value={g.mhz ?? gpu.clock.max}
+                      min={gpu.clock.min}
+                      max={gpu.clock.max}
+                      step={50}
+                      showValue
+                      valueSuffix=" MHz"
+                      disabled={g.mode !== "manual"}
+                      onChange={(v) => change("gpu", { mode: "manual", mhz: v, profile: null })}
+                    />
+                  </div>
                 </PanelSectionRow>
               )}
               <PanelSectionRow>
