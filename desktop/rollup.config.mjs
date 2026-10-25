@@ -24,6 +24,8 @@ export default {
       writeBundle: () => {
         mkdirSync(here("./dist"), { recursive: true });
         copyFileSync(here("./index.html"), here("./dist/index.html"));
+        copyFileSync(here("./hhc-desktop.svg"), here("./dist/hhc-desktop.svg"));
+        copyFileSync(here("./hhc-desktop.png"), here("./dist/hhc-desktop.png"));
       },
     },
   ],

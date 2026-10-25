@@ -34,7 +34,29 @@ ROOT = os.path.dirname(HERE)
 # Real path: files are checked against it (on Bazzite /opt links to /var/opt).
 DIST = os.path.realpath(os.path.join(HERE, "dist"))
 BOOT = secrets.token_hex(8)
-TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css"}
+TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css",
+         ".svg": "image/svg+xml", ".png": "image/png"}
+LAUNCHER = "/usr/local/bin/hhc-desktop"
+
+
+def refresh_menu_entry(home: str, uid: int) -> None:
+    """Icon + launcher entry in the user's home, written as that user (an
+    update only swaps this folder, so a new icon arrives this way)."""
+    if os.getuid() != 0 or uid == 0 or not os.path.exists(LAUNCHER):
+        return
+    import pwd
+    import subprocess
+
+    try:
+        gid = pwd.getpwuid(uid).pw_gid
+        subprocess.run(
+            [sys.executable, "-I", os.path.join(HERE, "menu_entry.py"), home,
+             os.path.join(DIST, "hhc-desktop.svg"), os.path.join(DIST, "hhc-desktop.png"), LAUNCHER],
+            user=uid, group=gid, extra_groups=[], env={"HOME": home, "PATH": "/usr/bin:/bin"},
+            cwd="/", timeout=30, check=False,
+        )
+    except (OSError, KeyError, subprocess.SubprocessError) as e:
+        logging.warning("menu entry not refreshed: %s", e)
 
 
 def main() -> None:
@@ -59,6 +81,7 @@ def main() -> None:
         args.token = args.token or secrets.token_hex(16)
 
     os.environ["HHC_USER_HOME"] = args.home
+    threading.Thread(target=refresh_menu_entry, args=(args.home, args.uid), daemon=True).start()
     sys.path[:0] = [HERE, ROOT, os.path.join(ROOT, "py_modules")]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     import decky  # the stand-in in this folder

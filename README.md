@@ -386,7 +386,7 @@ py_modules/hhctl/
   backlight.py          brightness
   background.py         custom panel background picture, picture browser
   updater.py            install any GitHub release from the panel
-desktop/              HHC Desktop: the plugin's panel as a desktop app (server.py, shims/)
+desktop/              HHC Desktop (icon hhc-desktop.svg: Handheld Daemon's icon, LGPL-2.1, with a C for the D): the plugin's panel as a desktop app (server.py, shims/)
   buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
   thermal.py            CPU temperature limit (AMD Tctl, Intel TCC offset)
   inputplumber.py       InputPlumber profile + emulated controller (OneXFly, Bazzite 44)
