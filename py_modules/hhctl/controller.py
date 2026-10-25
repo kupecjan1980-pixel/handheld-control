@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, background, backlight, buttons, fonts, gestures, lsfg, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, background, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -30,6 +30,8 @@ DEFAULTS = {
         "cores": None,
         # CPU temperature limit in °C (None: firmware's own), held by the CPU.
         "temp_limit": None,
+        # SteamOS's gaming memory settings (memtweak.py), runtime only.
+        "memtweak": False,
     },
     # GPU clock: "auto" leaves the driver alone; min/max/manual lock it.
     # profile: amdgpu power profile, only with mode "auto" (exclusive with a lock).
@@ -160,6 +162,7 @@ class Controller:
         self.ai = ai.AiEnv(self._home(), self.gpu.driver)
         self.upscale = upscale.Upscale(self._home(), self.gpu.driver, self.gpu.dev)
         self.lsfg = lsfg.Lsfg(self._home())
+        self.memtweak = memtweak.MemTweak()
         self.lsfg_busy = False
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
@@ -650,6 +653,7 @@ class Controller:
 
     def apply_cpu(self) -> None:
         s = self.settings["cpu"]
+        self._guard("memtweak", self.memtweak.apply if s.get("memtweak") else self.memtweak.restore)
         # Before the CCX: SMT on would bring back the other CCX's threads.
         if s.get("smt") is not None and self.smt.available()[0]:
             changed = []
@@ -1373,6 +1377,7 @@ class Controller:
             self.buttons.stop()
             self.swipe.stop()
             self.chord.stop()
+            self._guard("memtweak", self.memtweak.restore)
             self._guard("controller", self.ip.restore)
             self.sleeper.stop()
             self._guard("sleep", self.padwake.restore)
@@ -1592,6 +1597,7 @@ class Controller:
                 "install": "sudo pacman -S inputplumber" if os.path.exists("/usr/bin/pacman") and not os.path.exists("/run/ostree-booted") else None,
             },
             "ai": {"enabled": self.ai.enabled(), "vars": self.ai.vars},
+            "memtweak": {"available": self.memtweak.available(), "pending": self.memtweak.pending()},
             "upscale": self.upscale.state(),
             "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},
             "thermal": {

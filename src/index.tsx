@@ -33,6 +33,7 @@ type Settings = {
     scx_mode: string;
     cores: "all" | "fast" | "small" | null;
     temp_limit: number | null;
+    memtweak?: boolean;
   };
   gpu: { mode: GpuMode; mhz: number | null; profile: string | null };
   fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
@@ -165,6 +166,7 @@ type State = {
   };
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
   ai: { enabled: boolean; vars: Record<string, string> };
+  memtweak?: { available: Record<string, string>; pending: string[] };
   upscale: {
     options: string[];
     on: Record<string, boolean>;
@@ -2019,6 +2021,23 @@ function Content() {
                   </div>
                 </PanelSectionRow>
                 <ErrorRow msg={state.errors.thermal} />
+              </>
+            )}
+            {state.memtweak && Object.keys(state.memtweak.available).length > 0 && (
+              <>
+                <PanelSectionRow>
+                  <ToggleField
+                    label="Gaming memory settings (SteamOS)"
+                    description={`Fewer stutters, not more fps: no background memory compaction, fairer page locks, and no slow-down of games that do split locks. ${
+                      state.memtweak.pending.length === 0
+                        ? "Already set this way here."
+                        : `Not set here yet: ${state.memtweak.pending.join(", ")}.`
+                    } Only changes those values while on; off, unload or a restart puts the old ones back.`}
+                    checked={!!draft.cpu.memtweak}
+                    onChange={(v) => change("cpu", { memtweak: v }, 0)}
+                  />
+                </PanelSectionRow>
+                <ErrorRow msg={state.errors.memtweak} />
               </>
             )}
             {state.ai && (
