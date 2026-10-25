@@ -1384,19 +1384,32 @@ function Content() {
     ro.observe(sc);
     // On the first open Decky's previous page is still sliding out, so the
     // first measurement can come out short (half height); nothing resizes
-    // the scroller after it leaves, so measure again once it has.
-    const timers = [150, 400, 1000].map((ms) => setTimeout(fit, ms));
+    // the scroller after it leaves, so keep measuring until it has.
+    // Every frame for the first second: corrected the moment it leaves.
+    let raf = 0;
+    const until = performance.now() + 1000;
+    const tick = () => {
+      fit();
+      if (performance.now() < until) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
     return () => {
       ro.disconnect();
-      timers.forEach(clearTimeout);
+      cancelAnimationFrame(raf);
       fitRef.current = null;
     };
   }, [loaded]);
 
   useEffect(() => {
     if (!visible || !fitRef.current) return;
-    const timers = [0, 300].map((ms) => setTimeout(() => fitRef.current?.(), ms));
-    return () => timers.forEach(clearTimeout);
+    let raf = 0;
+    const until = performance.now() + 500;
+    const tick = () => {
+      fitRef.current?.();
+      if (performance.now() < until) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [visible]);
 
   useEffect(() => {
