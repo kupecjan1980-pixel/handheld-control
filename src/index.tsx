@@ -131,7 +131,13 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
-  swipe?: { available: boolean; listening: string | null; learning: boolean };
+  swipe?: {
+    available: boolean;
+    listening: string | null;
+    learning: boolean;
+    last_touch: string | null;
+    edge: string | null;
+  };
   sleep: {
     rgb_off_available: boolean;
     pad_wake_available: boolean;
@@ -2598,9 +2604,15 @@ function Content() {
                     description={
                       !draft.controller.swipe_keyboard
                         ? "Swipe up from the bottom edge of the screen to open the Steam keyboard"
-                        : state.swipe.learning
-                          ? "Setting up: swipe up once from the bottom edge of the screen"
-                          : "Swipe up from the bottom edge of the screen opens the Steam keyboard"
+                        : [
+                            state.swipe.learning
+                              ? "Setting up: swipe up once from the bottom edge of the screen"
+                              : "Swipe up from the bottom edge of the screen opens the Steam keyboard",
+                            state.swipe.listening ? `reading ${state.swipe.listening}` : "touchscreen not open yet",
+                            state.swipe.last_touch
+                              ? `last touch ${state.swipe.last_touch}`
+                              : "no touch seen yet (touch the screen, then look here)",
+                          ].join(" · ")
                     }
                     checked={!!draft.controller.swipe_keyboard}
                     onChange={(v) => change("controller", { swipe_keyboard: v }, 0)}

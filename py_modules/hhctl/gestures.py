@@ -28,7 +28,8 @@ ABS_MT_SLOT, ABS_MT_POSITION_X, ABS_MT_POSITION_Y, ABS_MT_TRACKING_ID = 0x2F, 0x
 INPUT_PROP_DIRECT = 1
 ABSINFO = struct.Struct("6i")  # value, minimum, maximum, fuzz, flat, resolution
 
-EDGE = 0.05  # a swipe starts within this share of the screen from an edge
+EDGE = 0.08  # a swipe starts within this share of the screen from an edge (panels often
+            # report nothing in the last few % at the border)
 DISTANCE = 0.12  # and goes this far in
 TIME = 0.8  # seconds
 
@@ -67,8 +68,10 @@ def _range(fd: int, code: int) -> tuple[int, int]:
 class Swipes:
     """Tracks one finger at a time; calls found(edge) for an edge swipe."""
 
-    def __init__(self, xr: tuple[int, int], yr: tuple[int, int], found):
+    def __init__(self, xr: tuple[int, int], yr: tuple[int, int], found, ended=None, name: str = ""):
         self.xr, self.yr, self.found = xr, yr, found
+        self.ended = ended  # ended(text): where the last touch went, shown in the panel
+        self.name = name
         self.slot = 0
         self.touches: dict[int, dict] = {}
 
@@ -82,12 +85,20 @@ class Swipes:
                 self.slot = value
             elif code == ABS_MT_TRACKING_ID:
                 if value < 0:
-                    self.touches.pop(self.slot, None)
+                    t = self.touches.pop(self.slot, None)
+                    if t and t.get("first") and self.ended:
+                        (fx, fy), (lx, ly) = t["first"], t["last"]
+                        self.ended(f"{self.name}: x {fx:.0%} → {lx:.0%}, y {fy:.0%} → {ly:.0%}, "
+                                   f"{now - t['t0']:.1f} s")
                 else:
                     self.touches[self.slot] = {"x": None, "y": None, "start": None, "t0": now, "done": False}
             elif code in (ABS_MT_POSITION_X, ABS_MT_POSITION_Y) and self.slot in self.touches:
                 self.touches[self.slot]["x" if code == ABS_MT_POSITION_X else "y"] = value
         elif etype == EV_SYN and code == SYN_REPORT:
+            for t in self.touches.values():
+                if t["x"] is not None and t["y"] is not None:
+                    t["last"] = self._norm(t)
+                    t.setdefault("first", t["last"])
             self._check(now)
 
     def _check(self, now: float) -> None:
@@ -127,6 +138,7 @@ class EdgeSwipe:
         self.set_edge = set_edge  # called with the edge of the first swipe while learning
         self.calibrating = False
         self._last = 0.0  # when the last swipe was taken
+        self.last_touch: str | None = None  # "event7: x 50% → 49%, y 97% → 70%, 0.3 s"
         self.node: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -160,6 +172,9 @@ class EdgeSwipe:
             except Exception:
                 log.exception("swipe: emit failed")
 
+    def _ended(self, text: str) -> None:
+        self.last_touch = text
+
     def _run(self) -> None:
         while not self._stop.is_set():
             fds: dict[int, Swipes] = {}
@@ -170,7 +185,8 @@ class EdgeSwipe:
                     log.warning("swipe: cannot open %s: %s", node, e)
                     continue
                 try:
-                    fds[fd] = Swipes(_range(fd, ABS_MT_POSITION_X), _range(fd, ABS_MT_POSITION_Y), self.found)
+                    fds[fd] = Swipes(_range(fd, ABS_MT_POSITION_X), _range(fd, ABS_MT_POSITION_Y), self.found,
+                                     self._ended, os.path.basename(node))
                 except OSError as e:
                     log.warning("swipe: cannot use %s: %s", node, e)
                     os.close(fd)

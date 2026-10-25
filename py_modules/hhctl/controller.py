@@ -1540,6 +1540,8 @@ class Controller:
                 "available": self.swipe_avail or self.swipe.node is not None,
                 "listening": self.swipe.node,
                 "learning": self.swipe.calibrating,
+                "last_touch": self.swipe.last_touch,
+                "edge": self.settings["controller"].get("swipe_edge"),
             },
             "buttons": {
                 "available": self.buttons.available()[0],

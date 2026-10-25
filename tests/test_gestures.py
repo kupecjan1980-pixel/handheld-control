@@ -4,8 +4,8 @@ import os, sys, tempfile
 sys.path.insert(0, sys.argv[1] + "/py_modules")
 from hhctl import gestures as g
 
-found = []
-sw = g.Swipes((0, 1000), (0, 2000), found.append)
+found, ended = [], []
+sw = g.Swipes((0, 1000), (0, 2000), found.append, ended.append, "event7")
 t = [0.0]
 
 def touch(points, slot=0, tid=1, dt=0.05):
@@ -18,6 +18,7 @@ def touch(points, slot=0, tid=1, dt=0.05):
 
 touch([(500, 1990), (505, 1900), (510, 1700)])  # in from the high-y edge
 assert found == ["y1"], found
+assert ended == ["event7: x 50% → 51%, y 100% → 85%, 0.2 s"], ended
 touch([(10, 1000), (100, 1010), (250, 1000)])  # in from the low-x edge (portrait panel)
 assert found[-1] == "x0"
 touch([(500, 1000), (500, 600)])  # starts mid-screen: nothing
