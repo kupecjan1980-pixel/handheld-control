@@ -1,0 +1,168 @@
+"""Suspend: lights off before it sleeps; the controller may wake it.
+
+logind announces a suspend with PrepareForSleep(true) and waits for "delay"
+inhibitors (up to InhibitDelayMaxSec, 5 s by default). The plugin holds one
+(systemd-inhibit --mode=delay), turns the lights off when the signal comes,
+then lets go so the suspend goes on; after resume it takes a new one. The
+lights come back with the usual re-apply after resume (controller.tick).
+busctl and systemd-inhibit do the D-Bus part, so no Python D-Bus library.
+
+Waking with the controller: USB remote wakeup has to be allowed on the
+gamepad's USB device and everything above it (hubs, the xHCI controller):
+power/wakeup = enabled. Whether a press or a stick move then wakes it is up
+to the controller's firmware. The previous values go back when it's off.
+"""
+
+import json
+import logging
+import os
+import subprocess
+import threading
+
+from . import proc, sysfs
+
+log = logging.getLogger("hhctl")
+
+SYS_INPUT = "/sys/class/input"
+MATCH = ("type='signal',sender='org.freedesktop.login1',"
+         "interface='org.freedesktop.login1.Manager',member='PrepareForSleep'")
+
+
+class SleepWatch:
+    def __init__(self, before_sleep):
+        self.before_sleep = before_sleep  # called in this thread, quickly
+        self._inhibit: subprocess.Popen | None = None
+        self._monitor: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
+        self.enabled = False
+
+    def _take(self) -> None:
+        if self._inhibit and self._inhibit.poll() is None:
+            return
+        try:
+            self._inhibit = proc.popen(
+                ["systemd-inhibit", "--what=sleep", "--mode=delay", "--who=Handheld Control",
+                 "--why=Turning the lights off first", "sleep", "infinity"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            log.warning("sleep: no inhibitor (%s)", e)
+
+    def _release(self) -> None:
+        if self._inhibit and self._inhibit.poll() is None:
+            self._inhibit.terminate()
+            try:
+                self._inhibit.wait(2)
+            except subprocess.TimeoutExpired:
+                self._inhibit.kill()
+        self._inhibit = None
+
+    def start(self) -> None:
+        if self.enabled:
+            return
+        self.enabled = True
+        self._take()
+        self._thread = threading.Thread(target=self._run, name="hhctl-sleep", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self.enabled = False
+        self._release()
+        if self._monitor and self._monitor.poll() is None:
+            self._monitor.terminate()
+
+    def _run(self) -> None:
+        while self.enabled:
+            try:
+                self._monitor = proc.popen(["busctl", "--system", "--json=short", "monitor", "--match", MATCH],
+                                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                           text=True)
+            except OSError as e:
+                log.warning("sleep: can't watch for suspend (%s)", e)
+                return
+            for line in self._monitor.stdout:
+                self.handle(line)
+            self._monitor.wait()
+            if self.enabled:
+                threading.Event().wait(5)  # busctl went away: start over
+
+    def handle(self, line: str) -> None:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            return
+        if msg.get("member") != "PrepareForSleep":
+            return
+        going = bool((msg.get("payload") or {}).get("data", [False])[0])
+        if going:
+            log.info("sleep: going to sleep")
+            try:
+                self.before_sleep()
+            except Exception:
+                log.exception("sleep: before-sleep failed")
+            self._release()
+        else:
+            log.info("sleep: woke up")
+            self._take()
+
+
+def _wakeup_chain(event_dev: str) -> list[str]:
+    """power/wakeup files from the input device's USB device up to the PCI controller."""
+    out = []
+    d = os.path.realpath(f"{SYS_INPUT}/{event_dev}/device")
+    while d and d != "/" and not d.endswith("/devices"):
+        w = os.path.join(d, "power", "wakeup")
+        if os.path.exists(w) and (os.path.exists(os.path.join(d, "idVendor")) or "/pci" in d):
+            out.append(w)
+        d = os.path.dirname(d)
+    return out
+
+
+def find_gamepads(ids: list[tuple[str, str]]) -> list[str]:
+    """eventN of the input devices with these USB vendor:product ids."""
+    try:
+        names = sorted(n for n in os.listdir(SYS_INPUT) if n.startswith("event"))
+    except OSError:
+        return []
+    found = []
+    for n in names:
+        d = f"{SYS_INPUT}/{n}/device"
+        if (sysfs.read(f"{d}/id/vendor"), sysfs.read(f"{d}/id/product")) in ids:
+            found.append(n)
+    return found
+
+
+class PadWake:
+    """Allows (or takes back) waking from suspend with the controller."""
+
+    def __init__(self, ids: list[tuple[str, str]]):
+        self.ids = ids
+        self.orig: dict[str, str] = {}
+
+    def files(self) -> list[str]:
+        out: list[str] = []
+        for ev in find_gamepads(self.ids):
+            for w in _wakeup_chain(ev):
+                if w not in out:
+                    out.append(w)
+        return out
+
+    def available(self) -> bool:
+        return bool(self.ids) and bool(self.files())
+
+    def enable(self) -> None:
+        for w in self.files():
+            cur = sysfs.read(w)
+            if cur is None:
+                continue
+            self.orig.setdefault(w, cur)
+            if cur != "enabled":
+                sysfs.write(w, "enabled")
+
+    def restore(self) -> None:
+        for w, val in list(self.orig.items()):
+            try:
+                if sysfs.read(w) != val:
+                    sysfs.write(w, val)
+            except OSError:
+                pass
+            self.orig.pop(w, None)

@@ -48,6 +48,7 @@ type Settings = {
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
   controller: { buttons: boolean; ip_target: string | null };
+  sleep: { rgb_off: boolean; pad_wake: boolean | null };
   ui: {
     theme: string;
     font: string;
@@ -130,6 +131,7 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
+  sleep: { rgb_off_available: boolean; pad_wake_available: boolean; pad_wake: boolean };
   inputplumber?: {
     devices: number;
     targets: string[];
@@ -421,6 +423,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   battery: callable<[object], State>("set_battery"),
   ec: callable<[object], State>("set_ec"),
   controller: callable<[object], State>("set_controller"),
+  sleep: callable<[object], State>("set_sleep"),
 };
 
 const BYPASS_LABELS: Record<string, string> = {
@@ -1961,6 +1964,16 @@ function Content() {
                 </ButtonItem>
               </PanelSectionRow>
             )}
+            {state.sleep.rgb_off_available && draft.rgb.enabled && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Lights off while asleep"
+                  description="Turned off just before it suspends, back on when it wakes"
+                  checked={draft.sleep.rgb_off}
+                  onChange={(v) => change("sleep", { rgb_off: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
             <ErrorRow msg={state.errors.rgb} />
               </>
             )}
@@ -2233,6 +2246,17 @@ function Content() {
                 />
               </PanelSectionRow>
             )}
+            {state.sleep.pad_wake_available && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Wake with the controller"
+                  description="Any button or a stick move wakes it from sleep (if the controller can). Careful in a bag: a stick bump wakes it too."
+                  checked={state.sleep.pad_wake}
+                  onChange={(v) => change("sleep", { pad_wake: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            <ErrorRow msg={state.errors.sleep} />
             {state.inputplumber?.configurable && state.inputplumber.status === "missing" && (
               <PanelSectionRow>
                 <Field

@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, buttons, fonts, updater, inputcap, inputplumber, thermal, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
+from . import background, backlight, buttons, fonts, updater, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -47,12 +47,23 @@ DEFAULTS = {
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
+    # rgb_off: lights off while it sleeps. pad_wake: the controller wakes it
+    # (None = the device's default: on for the NEXT 2, which asked for it).
+    "sleep": {"rgb_off": True, "pad_wake": None},
     "battery": {"limit": 100, "bypass": "off"},
     # Raw EC writes are only used when the user opts in.
     "ec": {"enabled": False},
 }
 
 CONFLICTS = ("hhd", "powerstation", "inputplumber")
+
+# USB ids of each handheld's controller (gamepad + the buttons' keyboard), for waking with it.
+PAD_IDS = {
+    "ayaneo_next2": [("045e", "028e"), ("1c4f", "0002")],
+    "oxp3": [("045e", "028e"), ("1a86", "fe00")],
+    "onexfly": [("045e", "028e")],
+}
+PAD_WAKE_DEFAULT = {"ayaneo_next2": True}
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -145,6 +156,8 @@ class Controller:
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
+        self.sleeper = sleep.SleepWatch(self._before_sleep)
+        self.padwake = sleep.PadWake(PAD_IDS.get(self.buttons.key, []))
         self.ip_check_at: float | None = None  # when to check our InputPlumber controller came up
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
@@ -466,7 +479,28 @@ class Controller:
         ip_buttons = c["buttons"] and self.buttons.key == "onexfly"
         self._guard("controller", lambda: self.ip.tick(ip_buttons, c.get("ip_target")))
 
+    def _before_sleep(self) -> None:
+        """From the sleep watcher's thread, while logind waits: just the lights."""
+        if self.settings["sleep"].get("rgb_off") and self.rgb and self.settings["rgb"]["enabled"]:
+            self.rgb.apply("off", 0, 0, 0, None)
+
+    def pad_wake_on(self) -> bool:
+        v = self.settings["sleep"].get("pad_wake")
+        return PAD_WAKE_DEFAULT.get(self.buttons.key, False) if v is None else bool(v)
+
+    def apply_sleep(self) -> None:
+        s = self.settings["sleep"]
+        if s.get("rgb_off") and self.rgb:
+            self.sleeper.start()
+        else:
+            self.sleeper.stop()
+        if self.pad_wake_on():
+            self._guard("sleep", self.padwake.enable)  # also after resume: devices come back new
+        else:
+            self._guard("sleep", self.padwake.restore)
+
     def apply_all(self) -> None:
+        self.apply_sleep()
         self.apply_controller()
         self.apply_tdp()
         self.apply_epp()
@@ -1190,6 +1224,8 @@ class Controller:
         if unload:
             self.buttons.stop()
             self._guard("controller", self.ip.restore)
+            self.sleeper.stop()
+            self._guard("sleep", self.padwake.restore)
             if self.thermal:
                 self._guard("thermal", self.thermal.restore)
             # Clock limits go back to the driver; they're re-applied on load.
@@ -1413,6 +1449,11 @@ class Controller:
                 "bios_path": gpu.bios_path(self.dev.vendor or ""),
             },
             "gpu_mem": self._gpumem_state(),
+            "sleep": {
+                "rgb_off_available": bool(self.rgb),
+                "pad_wake_available": bool(self.padwake.ids),
+                "pad_wake": self.pad_wake_on(),
+            },
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),

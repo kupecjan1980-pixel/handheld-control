@@ -87,6 +87,9 @@ class Plugin:
     async def set_battery(self, values: dict):
         return await self._run(self.ctl.update, "battery", values)
 
+    async def set_sleep(self, values: dict):
+        return await self._run(self.ctl.update, "sleep", values)
+
     async def set_controller(self, values: dict):
         return await self._run(self.ctl.update, "controller", values)
 

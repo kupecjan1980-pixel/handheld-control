@@ -90,6 +90,12 @@ report is saved to `~/handheld-control-inputplumber-game.txt` (also on demand:
 most 6 times an hour; after that the firmware keeps it until a fan mode is
 picked again.
 
+**Sleep**: *RGB → Lights off while asleep* turns the lights off just before a
+suspend (a logind delay inhibitor, let go right after) and the usual re-apply
+after resume brings them back. *Controller → Wake with the controller* allows
+USB remote wakeup on the gamepad's path (on by default on the NEXT 2); whether
+a press or stick move wakes it is up to the controller.
+
 **CPU → Temperature limit**: the CPU boosts as hard as the TDP allows
 until it reaches the set temperature, then holds it there; the CPU does this
 itself. AMD: the SMU's Tctl limit (direct, or ryzenadj `--tctl-temp`),
