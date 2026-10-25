@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import background, backlight, buttons, fonts, updater, inputcap, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
+from . import background, backlight, buttons, fonts, updater, inputcap, inputplumber, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -39,7 +39,8 @@ DEFAULTS = {
     "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
     # bg_pos: which part of the picture shows (CSS background-position %) and zoom (%).
     # Extra buttons open Steam things (AYN -> this plugin, Win+D -> keyboard).
-    "controller": {"buttons": True},
+    # ip_target: controller InputPlumber emulates (None leaves its choice).
+    "controller": {"buttons": True, "ip_target": "xbox-elite"},
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
@@ -137,6 +138,7 @@ class Controller:
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
         self.emit = lambda action: None  # set by main.py: sends a button action to the panel
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
+        self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
         self.gs_applied_pid: int | None = None
@@ -393,6 +395,12 @@ class Controller:
             self.buttons.start()
         else:
             self.buttons.stop()
+        self.sync_inputplumber()
+
+    def sync_inputplumber(self) -> None:
+        c = self.settings["controller"]
+        ip_buttons = c["buttons"] and self.buttons.key == "onexfly"
+        self._guard("controller", lambda: self.ip.tick(ip_buttons, c.get("ip_target")))
 
     def apply_all(self) -> None:
         self.apply_controller()
@@ -994,6 +1002,7 @@ class Controller:
                 log.info("EPP changed behind our back, re-applying %s", e["value"])
                 self.apply_epp()
             self.apply_cpu()
+            self.sync_inputplumber()
             self.hold_profile()
             g = self.settings["gpu"]
             if self.gpuclk.drifted(g["mode"], g.get("mhz")):
@@ -1013,6 +1022,7 @@ class Controller:
             self._guard("cpu", lambda: self.ccx.set(False))
         if unload:
             self.buttons.stop()
+            self._guard("controller", self.ip.restore)
             # Clock limits go back to the driver; they're re-applied on load.
             self._guard("cpu", self.freqcap.restore)
             self._guard("gpu", self.gpuclk.restore)
@@ -1206,6 +1216,7 @@ class Controller:
                 "listening": self.buttons.node,
                 "help": self.buttons.help,
             },
+            "inputplumber": {"devices": len(self.ip.devices), "targets": inputplumber.TARGETS},
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),
                 "lockdown": ec.lockdown(),

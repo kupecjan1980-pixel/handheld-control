@@ -12,6 +12,10 @@ The ONEXPLAYER 3's keyboard (1a86:fe00, input report 2026-10-22) sends
 Ctrl+Win+O (the keyboard button) and Ctrl+Win+F17 (the home button, held as
 long as the button is), handled the same way.
 
+On the OneXFly, InputPlumber (Bazzite 44) grabs the buttons; inputplumber.py
+has it send Turbo and the keyboard button as F23 and F24 on its virtual
+keyboard, which is read here instead (matched by name, it has no USB ids).
+
 The back buttons (NEXT 2: F17-F20; OXP3: vendor HID only) need a virtual
 controller to become paddles; that comes later.
 """
@@ -33,19 +37,29 @@ DEV = "/dev/input"
 EVENT = struct.Struct("llHHi")
 EV_KEY = 0x01
 KEY_O, KEY_D, KEY_LEFTMETA, KEY_RIGHTMETA = 24, 32, 125, 126
-KEY_F17, KEY_F23 = 187, 193
+KEY_F17, KEY_F23, KEY_F24 = 187, 193, 194
 
 HOLD = 0.5  # seconds held before a key's hold action fires (while still held)
 
-# device key -> (vendor, product, {key: action or (tap, hold)}, {key with Meta held: same})
+# device key -> (vendor, product, {key: action or (tap, hold)}, {key with Meta held: same});
+# vendor None: product is the input device's name.
 MAPS = {
     "ayaneo_next2": ("1c4f", "0002", {KEY_F23: ("open_plugin", "qam")}, {KEY_D: "keyboard"}),
     "oxp3": ("1a86", "fe00", {}, {KEY_F17: ("open_plugin", "qam"), KEY_O: "keyboard"}),
+    "onexfly": (None, "InputPlumber Keyboard", {KEY_F23: "open_plugin", KEY_F24: "qam"}, {}),
 }
 HELP = {
     "ayaneo_next2": "AYN: tap opens Handheld Control, hold opens Quick Access · the button next to it opens the Steam keyboard",
     "oxp3": "Home button: tap opens Handheld Control, hold opens Quick Access · keyboard button opens the Steam keyboard",
+    "onexfly": "Turbo opens Handheld Control · keyboard button opens Quick Access (through InputPlumber)",
 }
+
+
+def map_key(dev: Device) -> str:
+    # The OneXFly family runs as a generic device; only its buttons are known.
+    if dev.key == "generic" and dev.name.upper().startswith("ONEXPLAYER F1"):
+        return "onexfly"
+    return dev.key
 
 
 def has_key(caps: str, code: int) -> bool:
@@ -56,14 +70,17 @@ def has_key(caps: str, code: int) -> bool:
     return 0 <= idx < len(words) and bool(int(words[idx], 16) >> (code % bits) & 1)
 
 
-def find_keyboard(vendor: str, product: str, code: int) -> str | None:
+def find_keyboard(vendor: str | None, product: str, code: int) -> str | None:
     try:
         names = sorted(n for n in os.listdir(SYS_INPUT) if n.startswith("event"))
     except OSError:
         return None
     for n in names:
         d = f"{SYS_INPUT}/{n}/device"
-        if sysfs.read(f"{d}/id/vendor") != vendor or sysfs.read(f"{d}/id/product") != product:
+        if vendor is None:
+            if sysfs.read(f"{d}/name") != product:
+                continue
+        elif sysfs.read(f"{d}/id/vendor") != vendor or sysfs.read(f"{d}/id/product") != product:
             continue
         if has_key(sysfs.read(f"{d}/capabilities/key") or "0", code):
             return f"{DEV}/{n}"
@@ -74,8 +91,9 @@ class Buttons:
     RETRY = 3.0  # seconds between looks for the keyboard (it reappears after resume)
 
     def __init__(self, dev: Device, emit):
-        self.map = MAPS.get(dev.key)
-        self.help = HELP.get(dev.key)
+        self.key = map_key(dev)
+        self.map = MAPS.get(self.key)
+        self.help = HELP.get(self.key)
         self.emit = emit
         self.enabled = False
         self.node: str | None = None

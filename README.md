@@ -71,6 +71,15 @@ gamepad's Start, so games keep it. The plugin only
 reads those keys, so nothing is taken from Steam or games. The back buttons
 and the touchpads need a virtual controller; that comes later.
 
+On the OneXFly F1 family under InputPlumber (Bazzite 44 and later, no HHD),
+Turbo opens Handheld Control and the keyboard button opens the Quick Access
+Menu. InputPlumber grabs those buttons, so the plugin loads a device profile
+into it (over D-Bus) that sends them as F23 / F24 on InputPlumber's virtual
+keyboard, which the plugin reads. **Controller → Controller type** picks what
+InputPlumber emulates (Xbox Elite by default, Xbox Series, Xbox 360, Steam
+Deck, or InputPlumber's own choice). Turning these off or unloading the
+plugin gives InputPlumber its own profile and controller back.
+
 On PCs that aren't one of the handhelds, the fan goes through the board's
 Super I/O chip (`nct6775`, `nct6683` or `it87`, loaded at start; e.g. ASRock
 DeskMini X300 / X600): the headers with a spinning fan are driven together,
@@ -349,6 +358,7 @@ py_modules/hhctl/
   updater.py            install any GitHub release from the panel
 desktop/              HHC Desktop: the plugin's panel as a desktop app (server.py, shims/)
   buttons.py            extra buttons (read-only) -> Quick Access / Steam keyboard
+  inputplumber.py       InputPlumber profile + emulated controller (OneXFly, Bazzite 44)
   diag.py               brightness test + report
   gamescope.py          Game Mode HDR (gamescopectl) and brightness (xprop)
   kargs.py              kernel parameters via Limine / GRUB / sdboot / rpm-ostree

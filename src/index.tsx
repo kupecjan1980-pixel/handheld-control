@@ -46,7 +46,7 @@ type Settings = {
   };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
-  controller: { buttons: boolean };
+  controller: { buttons: boolean; ip_target: string | null };
   ui: {
     theme: string;
     font: string;
@@ -127,6 +127,7 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
+  inputplumber?: { devices: number; targets: string[] };
   update: {
     busy: boolean;
     error: string | null;
@@ -321,6 +322,13 @@ const EPP_LABELS: Record<string, string> = {
   balance_performance: "Balance performance",
   balance_power: "Balance power",
   power: "Power saver",
+};
+
+const IP_TARGETS: Record<string, string> = {
+  "xbox-elite": "Xbox Elite",
+  "xbox-series": "Xbox Series",
+  xb360: "Xbox 360",
+  "deck-uhid": "Steam Deck",
 };
 
 const GPU_PROFILES: Record<string, string> = {
@@ -2069,6 +2077,21 @@ function Content() {
                 />
               </PanelSectionRow>
             )}
+            {!!state.inputplumber?.devices && (
+              <PanelSectionRow>
+                <DropdownItem
+                  label="Controller type"
+                  description="What InputPlumber shows Steam and games"
+                  rgOptions={[
+                    ...state.inputplumber.targets.map((t) => ({ data: t, label: IP_TARGETS[t] ?? t })),
+                    { data: "none", label: "InputPlumber's choice" },
+                  ]}
+                  selectedOption={draft.controller.ip_target ?? "none"}
+                  onChange={(o) => change("controller", { ip_target: o.data === "none" ? null : o.data }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            <ErrorRow msg={state.errors.controller} />
             <PanelSectionRow>
               <ButtonItem
                 layout="below"
