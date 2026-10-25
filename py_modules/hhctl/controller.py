@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, background, backlight, buttons, fonts, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, watchdog
+from . import ai, background, backlight, buttons, fonts, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -157,6 +157,7 @@ class Controller:
         self.cpu_util = cpu.Util()
         self.limit_reasons = cpu.LimitReasons()
         self.ai = ai.AiEnv(self._home(), self.gpu.driver)
+        self.upscale = upscale.Upscale(self._home(), self.gpu.driver, self.gpu.dev)
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
         self.uma = gpu.UmaCarveout(self.gpu.dev, self.gpu.driver)
@@ -734,6 +735,10 @@ class Controller:
         self._guard("rgb", lambda: self.rgb.apply(s["mode"], hue, sat, s["bright"], s["effect"]))
 
     # --- display ----------------------------------------------------------
+
+    def set_upscale(self, option: str, on: bool) -> dict:
+        self._guard("upscale", lambda: self.upscale.set(option, bool(on)))
+        return self.state()
 
     def set_ai(self, on: bool) -> dict:
         self._guard("ai", lambda: self.ai.set(bool(on)))
@@ -1531,6 +1536,7 @@ class Controller:
                 "install": "sudo pacman -S inputplumber" if os.path.exists("/usr/bin/pacman") and not os.path.exists("/run/ostree-booted") else None,
             },
             "ai": {"enabled": self.ai.enabled(), "vars": self.ai.vars},
+            "upscale": self.upscale.state(),
             "thermal": {
                 "available": bool(self.thermal),
                 "range": list(self.thermal.range) if self.thermal else None,

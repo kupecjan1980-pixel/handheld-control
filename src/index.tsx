@@ -150,6 +150,7 @@ type State = {
   };
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
   ai: { enabled: boolean; vars: Record<string, string> };
+  upscale: { options: string[]; on: Record<string, boolean>; rdna3: boolean; tools: string[] };
   vram: {
     available: boolean;
     unavailable: string | null;
@@ -304,6 +305,7 @@ const setVram = callable<[number], State>("set_vram");
 const setGpuMem = callable<[number], State>("set_gpu_mem");
 const saveIpReport = callable<[], State>("save_ip_report");
 const setAi = callable<[boolean], State>("set_ai");
+const setUpscale = callable<[string, boolean], State>("set_upscale");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
@@ -436,6 +438,38 @@ function DriveRows() {
       )}
       <ErrorRow msg={d.error ?? undefined} />
     </PanelSection>
+  );
+}
+
+function UpscaleRows({ state, setState }: { state: State; setState: (s: State) => void }) {
+  const u = state.upscale;
+  if (!u) return null;
+  const tools = u.tools.length
+    ? `Installed: ${u.tools.slice(0, 3).join(", ")}${u.tools.length > 3 ? "…" : ""}; pick it per game (Properties › Compatibility).`
+    : "Needs Proton-CachyOS, GE-Proton or Proton-EM picked per game (Properties › Compatibility); install one with ProtonPlus or ProtonUp-Qt. Valve's Proton ignores it.";
+  const text: Record<string, [string, string]> = {
+    fsr4: [
+      "FSR 4 in FSR 3.1 games",
+      `Swaps FSR 3.1 for FSR 4: a sharper, steadier picture.${
+        u.rdna3 ? " On this GPU (RDNA 3 / 3.5) it runs the INT8 model and costs some fps compared with FSR 3.1, so it's worth it from about 60 fps." : ""
+      }`,
+    ],
+    xess: ["Newest XeSS in XeSS games", "Uses the newest XeSS version in games that have XeSS. Best on Intel Arc; also runs on AMD."],
+  };
+  return (
+    <>
+      {u.options.map((o) => (
+        <PanelSectionRow key={o}>
+          <ToggleField
+            label={text[o]?.[0] ?? o}
+            description={`${text[o]?.[1] ?? ""} ${tools} Games started after the next login.`}
+            checked={!!u.on[o]}
+            onChange={async (v) => setState(await setUpscale(o, v))}
+          />
+        </PanelSectionRow>
+      ))}
+      <ErrorRow msg={state.errors.upscale} />
+    </>
   );
 }
 
@@ -1863,6 +1897,7 @@ function Content() {
                 </PanelSectionRow>
               )}
               <VramRows state={state} setState={setState} />
+              <UpscaleRows state={state} setState={setState} />
               <ErrorRow msg={state.errors.gpu} />
             </PanelSection>
           )}
