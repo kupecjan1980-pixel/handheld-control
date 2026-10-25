@@ -129,6 +129,9 @@ class Plugin:
     async def save_ip_report(self):
         return await self._run(self.ctl.save_ip_report)
 
+    async def set_lsfg(self, install: bool):
+        return await self._run(self.ctl.set_lsfg, install)
+
     async def set_upscale(self, option: str, on: bool):
         return await self._run(self.ctl.set_upscale, option, on)
 

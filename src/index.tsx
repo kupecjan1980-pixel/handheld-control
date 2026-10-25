@@ -167,6 +167,7 @@ type State = {
     optiscaler_fg: string;
     opti_upscaler: string;
   };
+  lsfg?: { installed: boolean; ours: boolean; dll: string | null; branch: boolean; vars: Record<string, string>; busy: boolean };
   vram: {
     available: boolean;
     unavailable: string | null;
@@ -322,6 +323,7 @@ const setGpuMem = callable<[number], State>("set_gpu_mem");
 const saveIpReport = callable<[], State>("save_ip_report");
 const setAi = callable<[boolean], State>("set_ai");
 const setUpscale = callable<[string, boolean], State>("set_upscale");
+const setLsfg = callable<[boolean], State>("set_lsfg");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
@@ -516,11 +518,12 @@ function launchOptions(appid: number): Promise<string | null> {
 
 const OPTI_VAR = /(^|\s)PROTON_USE_OPTISCALER=\S+/;
 const FG_ON = /FrameGen\.Enabled=true/;
+const LSFG_MULT = /(^|\s)LSFGVK_MULTIPLIER=(\d+)/;
 
-// The game's launch options with our OptiScaler part replaced by `vars`
-// (null: taken out). Anything else the user put there stays.
-function withOptiscaler(opts: string, vars: string | null): string {
-  let o = opts;
+// The game's launch options with our parts replaced: `opti` for OptiScaler,
+// `lsfg` for Lossless Scaling (null: taken out). Anything else stays.
+function withOptions(opts: string, opti: string | null, lsfg: string | null): string {
+  let o = opts.replace(/(^|\s)LSFGVK_[A-Z_]+=("[^"]*"|\S+)/g, " ");
   if (OPTI_VAR.test(o)) {
     o = o
       .replace(/(^|\s)PROTON_USE_OPTISCALER=\S+/g, " ")
@@ -530,12 +533,43 @@ function withOptiscaler(opts: string, vars: string | null): string {
   }
   o = o.replace(/\s+/g, " ").trim();
   if (o === "%command%") o = "";
+  const vars = [opti, lsfg].filter(Boolean).join(" ");
   if (!vars) return o;
   if (o.includes("%command%")) return `${vars} ${o}`;
   return o ? `${vars} %command% ${o}` : `${vars} %command%`;
 }
 
-function OptiscalerRow({ u }: { u: State["upscale"] }) {
+function LsfgRow({ state, setState }: { state: State; setState: (s: State) => void }) {
+  const l = state.lsfg;
+  if (!l) return null;
+  const need = !l.installed
+    ? "The frame generation layer (lsfg-vk) isn't installed yet: Install below (about 0.5 MB, into your home folder)."
+    : !l.dll
+      ? "Lossless Scaling isn't installed in Steam yet: install it from your library (Steam Play must be on for all titles), then switch it to the \"lsfg-vk\" branch under Properties › Betas."
+      : !l.branch
+        ? "Switch Lossless Scaling to the \"lsfg-vk\" branch in Steam (Properties › Betas)."
+        : "Ready: pick Lossless Scaling under Frame generation for a running game.";
+  return (
+    <>
+      <PanelSectionRow>
+        <Field
+          label="Lossless Scaling frame generation"
+          description={`Uses your own Lossless Scaling (from Steam) through lsfg-vk; works in almost any game, with any Proton. ${need}`}
+        />
+      </PanelSectionRow>
+      {(!l.installed || l.ours) && (
+        <PanelSectionRow>
+          <ButtonItem layout="below" disabled={l.busy} onClick={async () => setState(await setLsfg(!l.installed))}>
+            {l.busy ? "Working…" : l.installed ? "Remove lsfg-vk" : "Install lsfg-vk"}
+          </ButtonItem>
+        </PanelSectionRow>
+      )}
+      <ErrorRow msg={state.errors.lsfg} />
+    </>
+  );
+}
+
+function OptiscalerRow({ u, l }: { u: State["upscale"]; l?: State["lsfg"] }) {
   const [game, setGame] = useState(runningGame());
   const [opts, setOpts] = useState<string | null>(null);
   useEffect(() => {
@@ -548,16 +582,31 @@ function OptiscalerRow({ u }: { u: State["upscale"] }) {
   if (!game || opts === null) {
     return (
       <PanelSectionRow>
-        <Field label="OptiScaler and frame generation" description={`${base} Start the game, then turn it on here for that game.`} />
+        <Field
+          label="OptiScaler and frame generation"
+          description={`${base} Start the game, then open this panel to turn them on for that game.`}
+        />
       </PanelSectionRow>
     );
   }
   const on = OPTI_VAR.test(opts);
-  const fg = on && FG_ON.test(opts);
-  const set = (vars: string | null) => {
-    const next = withOptiscaler(opts, vars);
+  const ls = opts.match(LSFG_MULT)?.[2];
+  const mode = ls ? `ls${ls}` : on && FG_ON.test(opts) ? "fsr" : "off";
+  const lsReady = !!l?.installed && !!l?.dll;
+  const apply = (next: string) => {
     (window as any).SteamClient.Apps.SetAppLaunchOptions(game.appid, next);
     setOpts(next);
+  };
+  const setMode = (m: string) => {
+    const opti = m === "fsr" ? u.optiscaler_fg : on ? u.optiscaler : null; // OptiScaler upscaling stays as it was
+    const lsfg = m.startsWith("ls") ? l?.vars[m.slice(2)] ?? null : null;
+    apply(withOptions(opts, opti, lsfg));
+  };
+  const howto: Record<string, string> = {
+    off: "How to: pick a mode, then restart the game.",
+    fsr: "How to: restart the game, then turn on an upscaler (DLSS, FSR or XeSS) in its settings; frame generation is fed from it. DirectX 12 games with Proton-CachyOS only; don't use it with anti-cheat. The HUD can smear a little.",
+    ls2: "How to: restart the game; nothing else to set. Works with any Proton. Steam's fps counter shows the rendered frames, not the generated ones.",
+    ls3: "How to: restart the game; nothing else to set. 3× needs a steady base fps (about 40+); otherwise use 2×.",
   };
   return (
     <>
@@ -566,15 +615,25 @@ function OptiscalerRow({ u }: { u: State["upscale"] }) {
           label={`OptiScaler for ${game.name}`}
           description={base}
           checked={on}
-          onChange={(v) => set(v ? (fg ? u.optiscaler_fg : u.optiscaler) : null)}
+          onChange={(v) => apply(withOptions(opts, v ? (mode === "fsr" ? u.optiscaler_fg : u.optiscaler) : null, ls ? l?.vars[ls] ?? null : null))}
         />
       </PanelSectionRow>
       <PanelSectionRow>
-        <ToggleField
+        <DropdownItem
           label={`Frame generation for ${game.name}`}
-          description="Adds FSR frame generation through OptiScaler (turns it on too): about twice the frames shown. DirectX 12 games only, and an upscaler must be on in the game. Best from about 40 fps; below that it feels laggy. The HUD can smear a little. Applies when the game starts again."
-          checked={fg}
-          onChange={(v) => set(v ? u.optiscaler_fg : on ? u.optiscaler : null)}
+          description={`More frames shown than rendered; best from about 40 fps (below that it feels laggy). ${howto[mode] ?? howto.off}`}
+          rgOptions={[
+            { data: "off", label: "Off" },
+            { data: "fsr", label: "FSR (OptiScaler, DirectX 12)" },
+            ...(lsReady || ls
+              ? [
+                  { data: "ls2", label: "Lossless Scaling 2×" },
+                  { data: "ls3", label: "Lossless Scaling 3×" },
+                ]
+              : []),
+          ]}
+          selectedOption={mode}
+          onChange={(o) => setMode(o.data)}
         />
       </PanelSectionRow>
     </>
@@ -608,7 +667,8 @@ function UpscaleRows({ state, setState }: { state: State; setState: (s: State) =
           />
         </PanelSectionRow>
       ))}
-      <OptiscalerRow u={u} />
+      <OptiscalerRow u={u} l={state.lsfg} />
+      <LsfgRow state={state} setState={setState} />
       <ErrorRow msg={state.errors.upscale} />
     </>
   );

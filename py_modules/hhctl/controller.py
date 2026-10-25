@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, background, backlight, buttons, fonts, gestures, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, background, backlight, buttons, fonts, gestures, lsfg, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -159,6 +159,8 @@ class Controller:
         self.limit_reasons = cpu.LimitReasons()
         self.ai = ai.AiEnv(self._home(), self.gpu.driver)
         self.upscale = upscale.Upscale(self._home(), self.gpu.driver, self.gpu.dev)
+        self.lsfg = lsfg.Lsfg(self._home())
+        self.lsfg_busy = False
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
         self.uma = gpu.UmaCarveout(self.gpu.dev, self.gpu.driver)
@@ -750,6 +752,21 @@ class Controller:
         self._guard("rgb", lambda: self.rgb.apply(s["mode"], hue, sat, s["bright"], s["effect"]))
 
     # --- display ----------------------------------------------------------
+
+    def set_lsfg(self, install: bool) -> dict:
+        """Install (or remove) the lsfg-vk layer in ~/.local; a download, so in a thread."""
+        if self.lsfg_busy:
+            return self.state()
+
+        def go():
+            try:
+                self._guard("lsfg", self.lsfg.install if install else self.lsfg.remove)
+            finally:
+                self.lsfg_busy = False
+
+        self.lsfg_busy = True
+        threading.Thread(target=go, name="hhctl-lsfg", daemon=True).start()
+        return self.state()
 
     def set_upscale(self, option: str, on: bool) -> dict:
         self._guard("upscale", lambda: self.upscale.set(option, bool(on)))
@@ -1561,6 +1578,7 @@ class Controller:
             },
             "ai": {"enabled": self.ai.enabled(), "vars": self.ai.vars},
             "upscale": self.upscale.state(),
+            "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},
             "thermal": {
                 "available": bool(self.thermal),
                 "range": list(self.thermal.range) if self.thermal else None,
