@@ -2705,7 +2705,16 @@ function Content() {
             {state.conflicts.length > 0 && (
               <PanelSectionRow>
                 <Field
-                  description={`${state.conflicts.join(" and ")} ${state.conflicts.length > 1 ? "are" : "is"} running. If it also controls TDP, RGB or the fan, it may override these settings.`}
+                  description={state.conflicts
+                    .map(
+                      (c) =>
+                        ({
+                          hhd: "Handheld Daemon (HHD) is running: if its TDP, fan, RGB or charging controls are on, they override these settings",
+                          powerstation:
+                            "PowerStation is running: if you also use Steam's TDP or GPU clock limit (Quick Access › Performance), it overrides the plugin's TDP and GPU clock",
+                        })[c] ?? `${c} is running and may override some settings`,
+                    )
+                    .join(" · ")}
                 />
               </PanelSectionRow>
             )}
