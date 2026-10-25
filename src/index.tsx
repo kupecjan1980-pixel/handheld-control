@@ -318,6 +318,7 @@ type Drive = {
   permanent: boolean;
   ours: boolean;
   can_mount: boolean;
+  auto: boolean;
   empty: boolean;
   note: string | null;
 };
@@ -367,7 +368,13 @@ function DriveRows() {
     <PanelSection title="Drives">
       {d.drives.map((v) => {
         const name = `${v.label ?? v.model} · ${driveSize(v.size)}${v.fstype ? ` · ${v.fstype}` : ""}`;
-        const where = v.mountpoint ? (v.permanent ? `Mounted at ${v.mountpoint}, also at every start` : `Mounted at ${v.mountpoint} for now`) : "Not mounted";
+        const where = v.mountpoint
+          ? v.permanent
+            ? `Mounted at ${v.mountpoint}, also at every start`
+            : v.auto
+              ? `Mounted at ${v.mountpoint}`
+              : `Mounted at ${v.mountpoint} for now`
+          : "Not mounted";
         const off = busy !== null;
         return (
           <Fragment key={v.path}>

@@ -128,11 +128,13 @@ def drives() -> list[dict]:
     for disk in _lsblk():
         if disk.get("type") != "disk" or _is_system(disk):
             continue
-        model = (disk.get("model") or disk.get("tran") or "Drive").strip()
+        removable = disk.get("name", "").startswith("mmcblk") or disk.get("tran") in ("usb", "mmc")
+        model = (disk.get("model") or ("SD card" if disk.get("name", "").startswith("mmcblk") else None)
+                 or disk.get("tran") or "Drive").strip()
         parts = [c for c in disk.get("children") or [] if c.get("type") == "part"]
         vols = parts or [disk]
         if not parts and not disk.get("fstype"):
-            out.append(_entry(disk, model, ours, empty=True))
+            out.append(_entry(disk, model, ours, removable, empty=True))
             continue
         for v in vols:
             pt = (v.get("parttypename") or "").lower()
@@ -140,15 +142,21 @@ def drives() -> list[dict]:
                 continue
             if not v.get("fstype") and int(v.get("size") or 0) < 1 << 30:
                 continue  # small unformatted gap, e.g. Microsoft reserved without a type name
-            out.append(_entry(v, model, ours))
+            out.append(_entry(v, model, ours, removable))
     return out
 
 
-def _entry(v: dict, model: str, ours: dict, empty: bool = False) -> dict:
+def _entry(v: dict, model: str, ours: dict, removable: bool = False, empty: bool = False) -> dict:
     fs, uuid = v.get("fstype"), v.get("uuid")
     mounts = _mounts(v)
+    listed = bool(uuid) and _listed(uuid)
+    # An SD card or USB drive the system mounted by itself (Bazzite/SteamOS
+    # automount it when inserted, no password): left where Steam knows it.
+    auto = removable and bool(mounts) and not listed
     note = None
-    if empty:
+    if auto:
+        note = "The system mounts it by itself when inserted, no password needed"
+    elif empty:
         note = "Empty drive: format it to use it"
     elif not fs:
         note = "Not formatted"
@@ -166,9 +174,10 @@ def _entry(v: dict, model: str, ours: dict, empty: bool = False) -> dict:
         "label": v.get("label"),
         "uuid": uuid,
         "mountpoint": mounts[0] if mounts else None,
-        "permanent": bool(uuid) and _listed(uuid),
+        "permanent": listed,
         "ours": bool(uuid) and uuid in ours,
-        "can_mount": bool(uuid) and fs in MOUNTABLE,
+        "can_mount": bool(uuid) and fs in MOUNTABLE and not auto,
+        "auto": auto,
         "empty": empty,
         "note": note,
     }
@@ -224,14 +233,49 @@ def _fstab_line(d: dict, where: str, uid: int, gid: int) -> str:
     return f"UUID={d['uuid']} {where} {fs} defaults,noatime,{common} 0 {2 if fs == 'ext4' else 0}"
 
 
-def _unmount_all(d: dict) -> None:
-    r = proc.run(["lsblk", "-nro", "MOUNTPOINTS", d["path"]], text=True, timeout=10)
-    for m in (r.stdout or "").split("\n"):
-        if m.strip():
-            u = proc.run(["umount", m.strip()], text=True, timeout=60)
-            if u.returncode:
-                raise StorageError(f"Can't unmount {m.strip()}: {u.stderr.strip() or 'in use'}. "
-                                   "Close what uses it (Steam downloads, a file manager) and try again.")
+MOUNTS = "/proc/self/mounts"
+
+
+def _current_mounts(dev: str) -> list[tuple[str, str, str]]:
+    """(target, fstype, options) of each mount of this device."""
+    out = []
+    real = os.path.realpath(dev)
+    try:
+        with open(MOUNTS) as f:
+            for line in f:
+                p = line.split()
+                if len(p) >= 4 and os.path.realpath(p[0]) == real:
+                    out.append((p[1].replace("\\040", " "), p[2], p[3]))
+    except OSError:
+        pass
+    return out
+
+
+def _unmount_all(d: dict) -> list[tuple[str, str, str]]:
+    """Unmount it everywhere; returns what was mounted, for _remount()."""
+    was = _current_mounts(d["path"])
+    for target, _, _ in was:
+        u = proc.run(["umount", target], text=True, timeout=60)
+        if u.returncode:
+            _remount(d["path"], was)
+            raise StorageError(f"Can't unmount {target}: {u.stderr.strip() or 'in use'}. "
+                               "Close what uses it (Steam downloads, a file manager) and try again.")
+    return was
+
+
+def _remount(dev: str, was: list[tuple[str, str, str]]) -> None:
+    """Put back mounts we took away, best effort (FUSE ones go through ntfs-3g)."""
+    for target, fstype, opts in was:
+        if os.path.ismount(target):
+            continue
+        kind = "ntfs-3g" if fstype.startswith("fuse") else fstype
+        try:
+            os.makedirs(target, exist_ok=True)  # udisks removes its folder on unmount
+        except OSError as e:
+            log.warning("storage: no %s (%s)", target, e)
+        r = proc.run(["mount", "-t", kind, "-o", opts, dev, target], text=True, timeout=60)
+        if r.returncode:
+            log.warning("storage: couldn't put %s back at %s: %s", dev, target, r.stderr.strip())
 
 
 def _steam_dir(where: str, uid: int, gid: int) -> str:
@@ -250,10 +294,11 @@ def mount(path: str, home: str) -> dict:
     if d["permanent"] and not d["ours"]:
         raise StorageError("This drive already has its own line in /etc/fstab; change it there")
     uid, gid = _owner(home)
+    was = []
     if d["ours"]:
         where = _ours()[d["uuid"]]
     else:
-        _unmount_all(d)  # e.g. mounted by the desktop under /run/media
+        was = _unmount_all(d)  # e.g. mounted by the desktop under /run/media
         where = _mount_dir(d)
         line = _fstab_line(d, where, uid, gid)
         _write_fstab(_fstab_lines() + [f"{TAG} {d['model']} {d['path']}", line])
@@ -265,10 +310,16 @@ def mount(path: str, home: str) -> dict:
         if r.returncode:
             _remove_entry(d["uuid"])
             _reload()
+            _remount(d["path"], was)
             msg = (r.stderr or "").strip() or f"mount exited with {r.returncode}"
             if d["fstype"] == "ntfs":
-                msg += (". If Windows uses this drive, turn off Fast Startup there and shut Windows down "
-                        "fully (or run chkdsk), then try again")
+                k = proc.run(["dmesg"], text=True, timeout=10)
+                if "dirty" in "\n".join((k.stdout or "").splitlines()[-30:]):
+                    msg += (". Windows didn't close it cleanly (it was pulled out or Windows hibernated): "
+                            "eject it properly in Windows, or run chkdsk there, then try again")
+                else:
+                    msg += (". If Windows uses this drive, turn off Fast Startup there and shut Windows down "
+                            "fully (or run chkdsk), then try again")
             raise StorageError(f"Couldn't mount it, nothing was changed: {msg}")
     if d["fstype"] in ("ext4", "btrfs", "xfs") and os.stat(where).st_uid == 0 \
             and set(os.listdir(where)) <= {"lost+found"}:

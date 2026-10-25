@@ -86,6 +86,31 @@ for fn in (lambda: storage.mount("/dev/nvme1n1p2", home), lambda: storage.unmoun
         fn(); raise SystemExit("someone else's entry must be left alone")
     except storage.StorageError:
         pass
+# an SD card the system mounted itself: left alone
+tree["blockdevices"].append({"name": "mmcblk0", "path": "/dev/mmcblk0", "type": "disk", "size": 128 << 30, "mountpoints": [None],
+    "children": [{"name": "mmcblk0p1", "path": "/dev/mmcblk0p1", "type": "part", "fstype": "ntfs", "uuid": "SD1",
+                  "size": 128 << 30, "mountpoints": ["/run/media/deck/SD"]}]})
+sd = [x for x in storage.drives() if x["path"] == "/dev/mmcblk0p1"][0]
+assert sd["auto"] and not sd["can_mount"] and sd["model"] == "SD card" and "by itself" in sd["note"]
+try:
+    storage.mount("/dev/mmcblk0p1", home); raise SystemExit("automounted card must be left alone")
+except storage.StorageError:
+    pass
+# an internal drive the desktop mounted: unmounted, and put back if our mount fails
+tree["blockdevices"][-1]["name"] = "sdb"; tree["blockdevices"][-1]["tran"] = "sata"
+storage.MOUNTS = f"{tmp}/mounts"
+open(storage.MOUNTS, "w").write("/dev/mmcblk0p1 /run/media/deck/SD ntfs3 rw,uid=1000 0 0\n")
+storage.os.path.realpath = lambda p: mnt if p == "/mnt" else p
+mount_ok[0] = False; calls.clear()
+try:
+    storage.mount("/dev/mmcblk0p1", home); raise SystemExit("should fail")
+except storage.StorageError:
+    pass
+assert ["umount", "/run/media/deck/SD"] in calls
+assert ["mount", "-t", "ntfs3", "-o", "rw,uid=1000", "/dev/mmcblk0p1", "/run/media/deck/SD"] in calls, calls
+mount_ok[0] = True
+tree["blockdevices"].pop()
+
 # an empty disk: partitioned, ext4, mounted for Steam
 r = storage.format_ext4("/dev/sda", home)
 assert ["sfdisk", "--label", "gpt", "/dev/sda"] in calls
