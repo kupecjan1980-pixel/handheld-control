@@ -110,6 +110,10 @@ def _next2(vendor: str, board: str) -> Device:
         # From a NEXT 2 EC map: ports 0x62/0x66 mirror this window. Only
         # used after it matches port reads register for register.
         ec_mmio=0xFE800400,
+        notes=[
+            "The NEXT 2 has no charge limit of its own: the plugin pauses "
+            "charging at the limit, so it only holds while the plugin runs.",
+        ],
         board=board,
         vendor=vendor,
     )

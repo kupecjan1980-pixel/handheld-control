@@ -2124,9 +2124,7 @@ function Content() {
                     <SliderField
                       label="Charge limit"
                       description={
-                        battery.limit_mode === "emulated"
-                          ? "This device has no charge limit of its own: the plugin pauses charging at the limit, so it only holds while the plugin runs"
-                          : undefined
+                        battery.limit_mode === "emulated" ? "Enforced by the plugin while it runs" : undefined
                       }
                       value={b.limit}
                       min={50}
@@ -2706,7 +2704,10 @@ function Content() {
               </>
             )}
             <ErrorRow msg={state.errors.ui} />
-            {state.device.notes.map((n) => (
+            {state.device.notes
+              // HHC Desktop runs on PCs too: the handheld remark means nothing there.
+              .filter((n) => !((window as any).HHC_DESKTOP && n.startsWith("Not one of the supported handhelds")))
+              .map((n) => (
               <PanelSectionRow key={n}>
                 <Field description={n} />
               </PanelSectionRow>
