@@ -349,6 +349,14 @@ function VramRows({ state, setState }: { state: State; setState: (s: State) => v
         </PanelSectionRow>
       )}
       <ErrorRow msg={state.errors.gpumem} />
+      {!intel && (
+        <PanelSectionRow>
+          <Field
+            label="VRAM or GPU memory limit?"
+            description="Both are the same RAM at the same speed. Dedicated VRAM is set aside at boot: the system can't use it even when no game runs, and games see it as the graphics card's own memory (some pick texture quality from it, or refuse to start below a minimum). The GPU memory limit is how much more RAM the GPU may borrow, only while it needs it. Speed is about the same; dedicated VRAM can be a few percent faster in some games. Usually: the suggested VRAM size, limit on Default."
+          />
+        </PanelSectionRow>
+      )}
     </>
   );
 }
