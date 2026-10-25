@@ -1,6 +1,6 @@
 {
   "name": "handheld-control",
-  "version": "0.10.51",
+  "version": "0.10.52",
   "description": "TDP, fan, RGB and battery control for AYANEO NEXT 2 and ONEXPLAYER 3",
   "type": "module",
   "scripts": {

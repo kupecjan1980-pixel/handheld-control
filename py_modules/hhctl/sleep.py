@@ -11,6 +11,9 @@ Waking with the controller: USB remote wakeup has to be allowed on the
 gamepad's USB device and everything above it (hubs, the xHCI controller):
 power/wakeup = enabled. Whether a press or a stick move then wakes it is up
 to the controller's firmware. The previous values go back when it's off.
+A device that keeps sending reports (the NEXT 2's gamepad: its right trigger
+jitters 0-5 all the time) wakes it at once, so each device's power/
+wakeup_count is read before and after a sleep to tell what woke it.
 """
 
 import json
@@ -18,6 +21,7 @@ import logging
 import os
 import subprocess
 import threading
+import time
 
 from . import proc, sysfs
 
@@ -28,9 +32,15 @@ MATCH = ("type='signal',sender='org.freedesktop.login1',"
          "interface='org.freedesktop.login1.Manager',member='PrepareForSleep'")
 
 
+def boottime() -> float:
+    """Seconds since boot, suspend included (monotonic leaves it out)."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
 class SleepWatch:
-    def __init__(self, before_sleep):
+    def __init__(self, before_sleep, after_wake=None):
         self.before_sleep = before_sleep  # called in this thread, quickly
+        self.after_wake = after_wake  # called in this thread; just note it, the tick acts
         self._inhibit: subprocess.Popen | None = None
         self._monitor: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
@@ -103,6 +113,11 @@ class SleepWatch:
         else:
             log.info("sleep: woke up")
             self._take()
+            if self.after_wake:
+                try:
+                    self.after_wake()
+                except Exception:
+                    log.exception("sleep: after-wake failed")
 
 
 def _wakeup_chain(event_dev: str) -> list[str]:
@@ -137,6 +152,17 @@ class PadWake:
     def __init__(self, ids: list[tuple[str, str]]):
         self.ids = ids
         self.orig: dict[str, str] = {}
+        self.counts: dict[str, int] = {}  # wakeup_count per device before the sleep
+
+    def devices(self) -> dict[tuple[str, str], str]:
+        """(vendor, product) -> its USB device's power/wakeup file."""
+        out = {}
+        for ev in find_gamepads(self.ids):
+            d = f"{SYS_INPUT}/{ev}/device"
+            chain = _wakeup_chain(ev)
+            if chain:
+                out.setdefault((sysfs.read(f"{d}/id/vendor"), sysfs.read(f"{d}/id/product")), chain[0])
+        return out
 
     def files(self) -> list[str]:
         out: list[str] = []
@@ -144,6 +170,23 @@ class PadWake:
             for w in _wakeup_chain(ev):
                 if w not in out:
                     out.append(w)
+        return out
+
+    def snapshot(self) -> None:
+        self.counts = {}
+        for ident, w in self.devices().items():
+            n = sysfs.read_int(os.path.join(os.path.dirname(w), "wakeup_count"))
+            if n is not None:
+                self.counts[f"{ident[0]}:{ident[1]}"] = n
+
+    def woke_by(self) -> list[str]:
+        """vendor:product of the devices whose wakeup count went up since snapshot()."""
+        out = []
+        for ident, w in self.devices().items():
+            key = f"{ident[0]}:{ident[1]}"
+            n = sysfs.read_int(os.path.join(os.path.dirname(w), "wakeup_count"))
+            if n is not None and key in self.counts and n > self.counts[key]:
+                out.append(key)
         return out
 
     def available(self) -> bool:

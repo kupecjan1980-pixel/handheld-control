@@ -94,7 +94,11 @@ picked again.
 suspend (a logind delay inhibitor, let go right after) and the usual re-apply
 after resume brings them back. *Controller → Wake with the controller* allows
 USB remote wakeup on the gamepad's path (on by default on the NEXT 2); whether
-a press or stick move wakes it is up to the controller.
+a press or stick move wakes it is up to the controller. On the NEXT 2 only the
+extra buttons (AYN, back buttons, Win+D) wake it: its gamepad's trigger never
+stops sending and woke it right after suspending. Any device that wakes it
+within 15 s is taken off by itself (power/wakeup_count shows which one), and
+the lights come back after every wake, however short.
 
 **CPU → Temperature limit**: the CPU boosts as hard as the TDP allows
 until it reaches the set temperature, then holds it there; the CPU does this

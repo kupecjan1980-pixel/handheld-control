@@ -131,7 +131,13 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
-  sleep: { rgb_off_available: boolean; pad_wake_available: boolean; pad_wake: boolean };
+  sleep: {
+    rgb_off_available: boolean;
+    pad_wake_available: boolean;
+    pad_wake: boolean;
+    note: string | null;
+    pad_wake_text: string | null;
+  };
   inputplumber?: {
     devices: number;
     targets: string[];
@@ -2250,7 +2256,13 @@ function Content() {
               <PanelSectionRow>
                 <ToggleField
                   label="Wake with the controller"
-                  description="Any button or a stick move wakes it from sleep (if the controller can). Careful in a bag: a stick bump wakes it too."
+                  description={[
+                    state.sleep.pad_wake_text ??
+                      "Any button or a stick move wakes it from sleep (if the controller can). Careful in a bag: a stick bump wakes it too.",
+                    state.sleep.note,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                   checked={state.sleep.pad_wake}
                   onChange={(v) => change("sleep", { pad_wake: v }, 0)}
                 />

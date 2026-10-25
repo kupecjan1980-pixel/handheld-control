@@ -49,7 +49,8 @@ DEFAULTS = {
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
     # rgb_off: lights off while it sleeps. pad_wake: the controller wakes it
     # (None = the device's default: on for the NEXT 2, which asked for it).
-    "sleep": {"rgb_off": True, "pad_wake": None},
+    # pad_wake_skip: "vendor:product" taken off because they woke it right away.
+    "sleep": {"rgb_off": True, "pad_wake": None, "pad_wake_skip": []},
     "battery": {"limit": 100, "bypass": "off"},
     # Raw EC writes are only used when the user opts in.
     "ec": {"enabled": False},
@@ -58,12 +59,16 @@ DEFAULTS = {
 CONFLICTS = ("hhd", "powerstation", "inputplumber")
 
 # USB ids of each handheld's controller (gamepad + the buttons' keyboard), for waking with it.
+# NEXT 2: the buttons only. Its gamepad's right trigger jitters all the time and
+# woke it right after every suspend (2026-10-25).
 PAD_IDS = {
-    "ayaneo_next2": [("045e", "028e"), ("1c4f", "0002")],
+    "ayaneo_next2": [("1c4f", "0002")],
     "oxp3": [("045e", "028e"), ("1a86", "fe00")],
     "onexfly": [("045e", "028e")],
 }
 PAD_WAKE_DEFAULT = {"ayaneo_next2": True}
+PAD_WAKE_TEXT = {"ayaneo_next2": "AYN, the back buttons and the button next to AYN wake it from sleep "
+                                 "(not the gamepad: its trigger never stops sending and woke it at once)"}
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -156,8 +161,12 @@ class Controller:
         self.buttons = buttons.Buttons(self.dev, lambda action: self.emit(action))
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
-        self.sleeper = sleep.SleepWatch(self._before_sleep)
-        self.padwake = sleep.PadWake(PAD_IDS.get(self.buttons.key, []))
+        self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake)
+        self.slept_at: float | None = None  # boot time when it went to sleep
+        self.woke: float | None = None  # set by the wake signal; tick() acts on it
+        self.sleep_note: str | None = None
+        self.padwake = sleep.PadWake([i for i in PAD_IDS.get(self.buttons.key, [])
+                                      if f"{i[0]}:{i[1]}" not in self.settings["sleep"].get("pad_wake_skip", [])])
         self.ip_check_at: float | None = None  # when to check our InputPlumber controller came up
         self.gs: gamescope.Gamescope | None = None
         self.gs_seen = 0.0  # when the current gamescope process was first seen
@@ -479,10 +488,42 @@ class Controller:
         ip_buttons = c["buttons"] and self.buttons.key == "onexfly"
         self._guard("controller", lambda: self.ip.tick(ip_buttons, c.get("ip_target")))
 
+    QUICK_WAKE = 15.0  # s: woken this soon by a controller device = that device is noisy
+
     def _before_sleep(self) -> None:
         """From the sleep watcher's thread, while logind waits: just the lights."""
+        self.slept_at = sleep.boottime()
+        if self.pad_wake_on():
+            self.padwake.snapshot()
         if self.settings["sleep"].get("rgb_off") and self.rgb and self.settings["rgb"]["enabled"]:
             self.rgb.apply("off", 0, 0, 0, None)
+
+    def _after_wake(self) -> None:
+        self.woke = sleep.boottime()
+
+    def tick_wake(self) -> None:
+        """After every wake (even one too short for the resume check): lights
+        back on, and a controller device that woke it at once loses its wakeup."""
+        if self.woke is None:
+            return
+        woke, self.woke = self.woke, None
+        slept = woke - self.slept_at if self.slept_at else None
+        self.apply_rgb()
+        if not self.pad_wake_on():
+            return
+        by = self.padwake.woke_by()
+        if by:
+            log.info("sleep: woken after %.0f s by %s", slept or -1, ", ".join(by))
+        if by and slept is not None and slept < self.QUICK_WAKE:
+            noisy = [tuple(x.split(":")) for x in by]
+            self.padwake.restore()
+            self.padwake.ids = [i for i in self.padwake.ids if i not in noisy]
+            self.settings["sleep"]["pad_wake_skip"] = sorted(set(self.settings["sleep"].get("pad_wake_skip", [])) | set(by))
+            self.save()
+            if self.padwake.ids:
+                self.padwake.enable()
+            self.sleep_note = (f"{', '.join(by)} woke it right away ({slept:.0f} s after sleeping), "
+                               "so it no longer wakes it")
 
     def pad_wake_on(self) -> bool:
         v = self.settings["sleep"].get("pad_wake")
@@ -1171,6 +1212,7 @@ class Controller:
 
     def tick(self) -> None:
         self.tick_fan_restart()
+        self.tick_wake()
         self.gpu.sample()
         self.cpu_util.sample()
         self.tick_gamescope()
@@ -1453,6 +1495,8 @@ class Controller:
                 "rgb_off_available": bool(self.rgb),
                 "pad_wake_available": bool(self.padwake.ids),
                 "pad_wake": self.pad_wake_on(),
+                "note": self.sleep_note,
+                "pad_wake_text": PAD_WAKE_TEXT.get(self.buttons.key),
             },
             "ec": {
                 "supported": bool(self.dev.ec_fan or self.dev.ec_charge),

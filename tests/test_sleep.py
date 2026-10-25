@@ -54,4 +54,35 @@ assert all(open(f).read().strip() == "enabled" for f in files)
 p.restore()
 assert all(open(f).read().strip() == "disabled" for f in files)
 assert not sleep.PadWake([("dead", "beef")]).available()
+# wakeup_count tells which device woke it
+open(f"{usb}/power/wakeup_count", "w").write("3\n")
+p.snapshot()
+assert p.woke_by() == []
+open(f"{usb}/power/wakeup_count", "w").write("4\n")
+assert p.woke_by() == ["045e:028e"]
+
+# controller: woken right away by a device -> lights back, that device off the list
+from hhctl import controller, device
+controller.detect = lambda: device._next2("AYA", "AB09")
+ctl = controller.Controller(os.path.join(tmp, "s.json"))
+applied = []
+ctl.apply_rgb = lambda: applied.append("rgb")
+ctl.settings["sleep"]["pad_wake"] = True
+ctl.padwake = sleep.PadWake([("045e", "028e")])
+ctl.padwake.enable()
+ctl._before_sleep()
+open(f"{usb}/power/wakeup_count", "w").write("9\n")
+ctl._after_wake()
+ctl.tick_wake()
+assert applied == ["rgb"], "lights back after every wake"
+assert ctl.padwake.ids == [] and "045e:028e" in ctl.settings["sleep"]["pad_wake_skip"]
+assert open(f"{usb}/power/wakeup").read().strip() == "disabled", "its wakeup taken back"
+assert "woke it right away" in ctl.state()["sleep"]["note"]
+# a normal (long) sleep woken by a device: kept
+ctl.padwake = sleep.PadWake([("045e", "028e")]); ctl.padwake.enable()
+ctl._before_sleep(); ctl.slept_at -= 3600
+open(f"{usb}/power/wakeup_count", "w").write("10\n")
+ctl._after_wake(); ctl.tick_wake()
+assert ctl.padwake.ids == [("045e", "028e")]
+assert controller.PAD_IDS["ayaneo_next2"] == [("1c4f", "0002")], "NEXT 2: buttons only"
 print("all sleep tests passed")
