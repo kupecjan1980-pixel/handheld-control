@@ -22,7 +22,7 @@ APPS="$USER_HOME/.local/share/applications"
 
 if [ "${1:-}" = "--remove" ]; then
     systemctl disable --now hhc-desktop.socket hhc-desktop.service 2>/dev/null || true
-    rm -f "$UNITS/hhc-desktop.socket" "$UNITS/hhc-desktop.service" "$APPS/handheld-control.desktop" "$APPS/chrome-127.0.0.1__-Default.desktop" "$LAUNCHER"
+    rm -f "$UNITS/hhc-desktop.socket" "$UNITS/hhc-desktop.service" "$APPS/handheld-control.desktop" "$APPS/chrome-127.0.0.1__-Default.desktop" "$APPS/brave-127.0.0.1__-Default.desktop" "$LAUNCHER"
     rm -f "$USER_HOME/.local/share/icons/hicolor/scalable/apps/hhc-desktop.svg" "$USER_HOME/.local/share/icons/hicolor/256x256/apps/hhc-desktop.png"
     rm -rf "$DEST"
     systemctl daemon-reload
