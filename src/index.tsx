@@ -344,15 +344,35 @@ async function addToSteam(library: string): Promise<string> {
   return `In Steam, open Settings › Storage › Add drive and pick ${library}`;
 }
 
+// Steam's library folders (Game Mode); null where Steam can't be asked (HHC Desktop).
+async function steamLibraries(): Promise<string[] | null> {
+  const sc = (window as any).SteamClient;
+  try {
+    if (!sc?.InstallFolder?.GetInstallFolders) return null;
+    const list = await sc.InstallFolder.GetInstallFolders();
+    // Each entry has its path in strFolderPath; take any path-like string to be safe.
+    return (Array.isArray(list) ? list : []).flatMap((f: any) =>
+      typeof f === "string" ? [f] : Object.values(f ?? {}).filter((x): x is string => typeof x === "string" && x.startsWith("/")),
+    );
+  } catch (e) {
+    console.warn("hhctl: GetInstallFolders", e);
+    return null;
+  }
+}
+
 function DriveRows() {
   const [d, setD] = useState<Drives | null>(null);
+  const [libs, setLibs] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [erase, setErase] = useState<string | null>(null); // asked to format this one: confirm
   const [msg, setMsg] = useState<string | null>(null);
+  const refreshLibs = () => steamLibraries().then(setLibs);
   useEffect(() => {
     getDrives().then(setD).catch(() => setD(null));
+    refreshLibs();
   }, []);
   if (!d || (d.drives.length === 0 && !d.error)) return null;
+  const inSteam = (mp: string | null) => !!mp && !!libs?.some((l) => l === mp || l.startsWith(`${mp}/`));
   const act = async (action: string, path: string) => {
     setBusy(path);
     setErase(null);
@@ -360,7 +380,10 @@ function DriveRows() {
     try {
       const r = await driveAction(action, path);
       setD(r);
-      if (r.done) setMsg(`${r.done.mountpoint} mounts at every start. ${await addToSteam(r.done.library)}`);
+      if (r.done) {
+        setMsg(`${r.done.mountpoint} mounts at every start. ${await addToSteam(r.done.library)}`);
+        refreshLibs();
+      }
       else if (!r.error && action === "unmount") setMsg("Unmounted; it no longer mounts at start (the data is still there)");
     } finally {
       setBusy(null);
@@ -381,7 +404,12 @@ function DriveRows() {
         return (
           <Fragment key={v.path}>
             <PanelSectionRow>
-              <Field label={name} description={[v.empty ? null : where, v.note, `${v.model} ${v.path}`].filter(Boolean).join(" · ")} />
+              <Field
+                label={name}
+                description={[v.empty ? null : where, inSteam(v.mountpoint) ? "Steam library" : null, v.note, `${v.model} ${v.path}`]
+                  .filter(Boolean)
+                  .join(" · ")}
+              />
             </PanelSectionRow>
             {v.can_mount && !(v.permanent && !v.ours) && !(v.ours && v.mountpoint) && (
               <PanelSectionRow>
@@ -390,9 +418,16 @@ function DriveRows() {
                 </ButtonItem>
               </PanelSectionRow>
             )}
-            {v.ours && v.mountpoint && (
+            {v.ours && v.mountpoint && !inSteam(v.mountpoint) && (
               <PanelSectionRow>
-                <ButtonItem layout="below" disabled={off} onClick={async () => setMsg(await addToSteam(`${v.mountpoint}/SteamLibrary`))}>
+                <ButtonItem
+                  layout="below"
+                  disabled={off}
+                  onClick={async () => {
+                    setMsg(await addToSteam(`${v.mountpoint}/SteamLibrary`));
+                    refreshLibs();
+                  }}
+                >
                   Add to Steam as a library
                 </ButtonItem>
               </PanelSectionRow>
