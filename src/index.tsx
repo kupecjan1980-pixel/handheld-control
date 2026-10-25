@@ -1269,6 +1269,7 @@ function Content() {
   const lastBrightEdit = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const [fitHeight, setFitHeight] = useState<number | null>(null);
+  const fitRef = useRef<(() => void) | null>(null);
   const [view, setViewRaw] = useState<"main" | "pick" | "adjust">("main");
   const bodyRef = useRef<HTMLDivElement>(null);
   const backTo = useRef<HTMLElement | null>(null);
@@ -1377,11 +1378,26 @@ function Content() {
       setFitHeight(h);
     };
     fit();
+    fitRef.current = fit;
     if (bodyRef.current) bodyRef.current.scrollTop = savedScroll; // reopened: back where it was
     const ro = new ResizeObserver(fit);
     ro.observe(sc);
-    return () => ro.disconnect();
+    // On the first open Decky's previous page is still sliding out, so the
+    // first measurement can come out short (half height); nothing resizes
+    // the scroller after it leaves, so measure again once it has.
+    const timers = [150, 400, 1000].map((ms) => setTimeout(fit, ms));
+    return () => {
+      ro.disconnect();
+      timers.forEach(clearTimeout);
+      fitRef.current = null;
+    };
   }, [loaded]);
+
+  useEffect(() => {
+    if (!visible || !fitRef.current) return;
+    const timers = [0, 300].map((ms) => setTimeout(() => fitRef.current?.(), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
