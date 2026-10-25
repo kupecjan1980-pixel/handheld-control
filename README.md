@@ -85,6 +85,11 @@ config is taken away again (plain controller back), the reason is shown and a
 report is saved to `~/handheld-control-inputplumber-game.txt` (also on demand:
 **Save InputPlumber report**).
 
+**Fan, after an EC error**: the fan goes back to firmware control at once
+(safe), and the plugin takes it up again with the chosen mode 30 s later, at
+most 6 times an hour; after that the firmware keeps it until a fan mode is
+picked again.
+
 **CPU → Temperature limit**: the CPU boosts as hard as the TDP allows
 until it reaches the set temperature, then holds it there; the CPU does this
 itself. AMD: the SMU's Tctl limit (direct, or ryzenadj `--tctl-temp`),

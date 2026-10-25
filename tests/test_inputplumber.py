@@ -130,6 +130,7 @@ assert os.path.basename(c.dev_path) < "50-", "sorts before the stock configs"
 assert dev["target_devices"][0] == "xbox-elite" and dev["capability_map_id"] == cmap["id"]
 kb = dev["source_devices"][1]
 assert kb["passthrough"] is True and kb["group"] == "keyboard", "the buttons' keyboard is never grabbed"
+assert kb["unique"] is False, "both AYANEO interfaces join this one device (no second Elite pad)"
 pad = {m["source_events"][0]["keyboard"]: m["target_event"]["gamepad"]["button"] for m in cmap["mapping"]}
 assert pad == {"KeyF19": "LeftPaddle1", "KeyF17": "LeftPaddle2", "KeyF20": "RightPaddle1", "KeyF18": "RightPaddle2"}
 assert ("enable", "--now", "inputplumber.service") in sc, sc

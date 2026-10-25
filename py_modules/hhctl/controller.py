@@ -169,6 +169,11 @@ class Controller:
         self._scan()
         self.errors: dict[str, str] = {}
         self.fan_pct: int | None = None
+        # After an EC error the fan goes back to firmware; it's taken up again
+        # after FAN_RETRY s, at most FAN_RESTARTS times an hour.
+        self.fan_retry_at: float | None = None
+        self.fan_restarts: list[float] = []
+        self.fan_note: str | None = None  # "restarted at …", shown under the fan settings
         self.safety = False
         self.sleep_offset = _sleep_offset()
         self.ac = battery.ac_online()
@@ -208,6 +213,8 @@ class Controller:
         os.replace(tmp, self.settings_path)
 
     def update(self, section: str, values: dict) -> dict:
+        if section == "fan" and not self.fan and self.fan_why:
+            self.fan_restarts, self.fan_retry_at = [], time.monotonic()  # picked again: try now
         if section == "controller" and "ip_target" in values:
             values = {**values, "ip_failed": None}  # picked again: try again
             self.errors.pop("controller", None)
@@ -238,6 +245,8 @@ class Controller:
                 except OSError:
                     pass
                 self._watchdog_stop()
+                if self.settings["fan"]["mode"] != "auto":
+                    self.fan_retry_at = time.monotonic() + self.FAN_RETRY
             elif section == "battery":
                 self.bat.disable_ec(str(e))
         except Exception as e:  # report every hardware error to the UI
@@ -1099,7 +1108,35 @@ class Controller:
         if self.fan:
             self._guard("fan", self._watchdog_start)
 
+    FAN_RETRY = 30.0
+    FAN_RESTARTS = 6
+
+    def tick_fan_restart(self) -> None:
+        """Take the fan up again after an EC error (they're rare and pass)."""
+        if self.fan or self.fan_retry_at is None or time.monotonic() < self.fan_retry_at:
+            return
+        now = time.monotonic()
+        self.fan_restarts = [t for t in self.fan_restarts if now - t < 3600]
+        if len(self.fan_restarts) >= self.FAN_RESTARTS:
+            self.fan_retry_at = None
+            self.errors["fan"] = (f"Fan control stopped {self.FAN_RESTARTS} times this hour, so the firmware "
+                                  f"runs the fan now. Pick a fan mode to take it up again. Last error: {self.fan_why}")
+            return
+        allow_ec = bool(self.settings["ec"]["enabled"])
+        found, why = fan.find_backend(self.dev, allow_ec)
+        if not found:
+            log.warning("fan: not back yet (%s)", why)
+            self.fan_retry_at = now + self.FAN_RETRY
+            return
+        last = self.fan_why
+        self.fan, self.fan_why, self.fan_retry_at = found, None, None
+        self.fan_restarts.append(now)
+        log.info("fan: control taken up again after: %s", last)
+        self.apply_fan()
+        self.fan_note = f"Fan control restarted by itself at {time.strftime('%H:%M')} after: {last}"
+
     def tick(self) -> None:
+        self.tick_fan_restart()
         self.gpu.sample()
         self.cpu_util.sample()
         self.tick_gamescope()
@@ -1297,6 +1334,8 @@ class Controller:
                 "temp": fan.cpu_temp(),
                 "safety": self.safety,
                 "watchdog": self._watchdog_alive(),
+                "restarting": self.fan_retry_at is not None,
+                "note": self.fan_note,
             },
             "battery": {
                 "limit_mode": self.bat.limit_mode(),

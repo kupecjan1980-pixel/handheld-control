@@ -209,7 +209,9 @@ CONFIGS = {
             "source_devices": [
                 {"group": "gamepad", "evdev": {"name": "Microsoft X-Box 360 pad", "vendor_id": "045e",
                                                "product_id": "028e", "handler": "event*"}},
-                {"group": "keyboard", "passthrough": True,
+                # Both interfaces (keyboard + silent mouse) match: unique false keeps
+                # them in this one device (else the second made a second Elite pad).
+                {"group": "keyboard", "passthrough": True, "unique": False,
                  "evdev": {"vendor_id": "1c4f", "product_id": "0002", "handler": "event*"},
                  "events": {"exclude": ["*"], "include": ["Keyboard:KeyF17", "Keyboard:KeyF18",
                                                           "Keyboard:KeyF19", "Keyboard:KeyF20"]}},

@@ -95,6 +95,8 @@ type State = {
     temp: number | null;
     safety: boolean;
     watchdog: boolean;
+    restarting?: boolean;
+    note?: string | null;
   };
   battery: {
     limit_mode: string | null;
@@ -316,15 +318,23 @@ function VramRows({ state, setState }: { state: State; setState: (s: State) => v
             onChange={async (o) => setState(await setVram(o.data))}
           />
         </PanelSectionRow>
-      ) : (
+      ) : intel ? (
         <PanelSectionRow>
           <Field
             label="Dedicated VRAM"
-            description={
-              intel
-                ? "Intel graphics have no dedicated VRAM: the GPU takes system RAM as it needs it, up to the GPU memory limit below. That limit is what Windows' Shared GPU Memory Override sets."
-                : `Now ${vramSize(v.now_mb)}. This BIOS doesn't let Linux change it; in the BIOS: ${v.bios_path}. ${suggest}.`
-            }
+            description="Intel graphics have no dedicated VRAM: the GPU takes system RAM as it needs it, up to the GPU memory limit below. That limit is what Windows' Shared GPU Memory Override sets."
+          />
+        </PanelSectionRow>
+      ) : (
+        <PanelSectionRow>
+          {/* Set in the BIOS: shown like the others, just locked. */}
+          <DropdownItem
+            label="Dedicated VRAM"
+            disabled
+            description={`Set in the BIOS, Linux can't change it here: ${v.bios_path}. ${suggest}.`}
+            rgOptions={[{ data: 0, label: vramSize(v.now_mb) }]}
+            selectedOption={0}
+            onChange={() => {}}
           />
         </PanelSectionRow>
       )}
@@ -720,6 +730,7 @@ const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
   return `
     ${btn}, .hhctl-root select { background: rgba(${r}, ${g}, ${b}, ${a}) !important;${text ? ` color: ${text} !important;` : ""} }
     ${hover}, .hhctl-root select:hover { background: rgba(${r}, ${g}, ${b}, ${text ? 1 : 0.8}) !important; }
+    .hhctl-root [class*="DropDownControlButton"]:disabled, .hhctl-root select:disabled { opacity: 0.5; cursor: default; }
     .hhctl-root select option { background: rgb(${solid}); color: ${fg}; }
     @supports (appearance: base-select) {
       .hhctl-root select, .hhctl-root select::picker(select) { appearance: base-select; }
@@ -1334,7 +1345,7 @@ function Content() {
             </PanelSectionRow>
           </PanelSection>
         )}
-        <div style={view === "main" ? undefined : { display: "none" }}>
+        <div className="hhctl-main" style={view === "main" ? undefined : { display: "none" }}>
           <PanelSection>
             {!tdp.backend ? (
               <Unavailable why="No TDP interface found (firmware-attributes, RAPL, ryzenadj or the AMD SMU)." />
@@ -1696,7 +1707,13 @@ function Content() {
 
           <PanelSection>
             {!fan.backend ? (
-              <Unavailable why={`Fan: ${fan.unavailable ?? "no fan control"}`} />
+              <Unavailable
+                why={
+                  fan.restarting
+                    ? `Fan control stopped (${fan.unavailable}); the firmware runs the fan and the plugin takes it up again in a moment`
+                    : `Fan: ${fan.unavailable ?? "no fan control"}`
+                }
+              />
             ) : (
               <>
                 <PanelSectionRow>
@@ -1754,6 +1771,11 @@ function Content() {
                       valueSuffix="%"
                       onChange={(v) => change("fan", { percent: v })}
                     />
+                  </PanelSectionRow>
+                )}
+                {fan.note && (
+                  <PanelSectionRow>
+                    <Field description={fan.note} />
                   </PanelSectionRow>
                 )}
                 <ErrorRow msg={state.errors.fan} />

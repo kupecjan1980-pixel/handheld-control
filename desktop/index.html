@@ -10,7 +10,15 @@
   :root { color-scheme: dark; }
   html, body { margin: 0; height: 100%; background: #0e141b; color: #dcdedf;
     font-family: "Motiva Sans", "Noto Sans", system-ui, sans-serif; font-size: 14px; }
-  body { display: flex; flex-direction: column; max-width: 420px; margin: 0 auto; }
+  body { display: flex; flex-direction: column; }
+  /* #panel and the plugin's root fill the window (no bars beside a 420 px column). */
+  #scroller { display: flex; flex-direction: column; }
+  #panel, #panel > * { flex: 1; min-height: 0; }
+  /* A wide window (half a screen, maximized) gets the sections in columns. */
+  @media (min-width: 760px) {
+    .hhctl-main { column-width: 380px; column-gap: 32px; }
+    .hhctl-main > * { break-inside: avoid; }
+  }
   #title { flex: none; padding: 14px 16px 10px; background: #0e141b; }
   .staticclasses_Title_d1 { font-size: 22px; font-weight: 700; color: #fff; }
   #scroller { flex: 1; min-height: 0; overflow-y: auto; }
