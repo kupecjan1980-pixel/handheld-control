@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, background, backlight, buttons, fonts, gestures, lsfg, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, background, backlight, buttons, fonts, gestures, lsfg, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -44,7 +44,7 @@ DEFAULTS = {
     # ip_target: controller InputPlumber emulates (None leaves its choice).
     # ip_failed: our InputPlumber config made no controller; off until picked again.
     "controller": {"buttons": True, "ip_target": "xbox-elite", "ip_failed": None,
-                   "swipe_keyboard": False, "swipe_edge": None},
+                   "swipe_keyboard": False, "swipe_edge": None, "chord": None},
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
@@ -169,6 +169,7 @@ class Controller:
         self.swipe = gestures.EdgeSwipe(lambda action: self.emit(action),
                                         lambda: self.settings["controller"].get("swipe_edge"), self._swipe_learned)
         self.swipe_avail = self.swipe.available()
+        self.chord = padchord.PadChord(lambda action: self.emit(action), self.chord_setting)
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
         self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake)
@@ -448,6 +449,14 @@ class Controller:
         except OSError:
             return None
 
+    def chord_setting(self) -> str | None:
+        """The controller shortcut; by default on for PCs (no extra button of
+        their own), off on the handhelds, which have AYN / Home / Turbo."""
+        v = self.settings["controller"].get("chord")
+        if v is None:
+            return "guide_b" if self.buttons.key == "generic" else None
+        return None if v == "off" else v
+
     def _swipe_learned(self, edge: str) -> None:
         self.settings["controller"]["swipe_edge"] = edge
         self.save()
@@ -458,6 +467,10 @@ class Controller:
             self.buttons.start()
         else:
             self.buttons.stop()
+        if self.chord_setting():
+            self.chord.start()
+        else:
+            self.chord.stop()
         if c.get("swipe_keyboard"):
             self.swipe.calibrating = not c.get("swipe_edge")  # first swipe teaches the bottom edge
             self.swipe.start()
@@ -1359,6 +1372,7 @@ class Controller:
         if unload:
             self.buttons.stop()
             self.swipe.stop()
+            self.chord.stop()
             self._guard("controller", self.ip.restore)
             self.sleeper.stop()
             self._guard("sleep", self.padwake.restore)
@@ -1553,6 +1567,7 @@ class Controller:
             "sdr_brightness": self._sdr_brightness_state(),
             "input_capture": dict(self.icap),
             "update": {**self.upd, "releases": [{**r, "notes": r["notes"][:600]} for r in self.upd["releases"]]},
+            "chord": {"value": self.chord_setting() or "off", "pads": len(self.chord.nodes)},
             "swipe": {
                 "available": self.swipe_avail or self.swipe.node is not None,
                 "listening": self.swipe.node,

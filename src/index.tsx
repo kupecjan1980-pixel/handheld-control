@@ -47,7 +47,13 @@ type Settings = {
   };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
-  controller: { buttons: boolean; ip_target: string | null; swipe_keyboard?: boolean; swipe_edge?: string | null };
+  controller: {
+    buttons: boolean;
+    ip_target: string | null;
+    swipe_keyboard?: boolean;
+    swipe_edge?: string | null;
+    chord?: string | null;
+  };
   sleep: { rgb_off: boolean; pad_wake: boolean | null };
   ui: {
     theme: string;
@@ -131,6 +137,7 @@ type State = {
     limits: { cpu: string[]; gpu: string[] };
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
+  chord?: { value: string; pads: number };
   swipe?: {
     available: boolean;
     listening: string | null;
@@ -2705,6 +2712,25 @@ function Content() {
                   }`}
                   checked={draft.controller.buttons}
                   onChange={(v) => change("controller", { buttons: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            {state.chord && (
+              <PanelSectionRow>
+                <DropdownItem
+                  label="Controller shortcut for HHC"
+                  description={`Opens Handheld Control from any Xbox-style controller (Elite, 8BitDo…). Press both together, quickly: holding Xbox + B makes Steam close the game.${
+                    state.chord.value !== "off"
+                      ? ` · ${state.chord.pads ? `${state.chord.pads} controller${state.chord.pads > 1 ? "s" : ""} found` : "no controller found yet"}`
+                      : ""
+                  }`}
+                  rgOptions={[
+                    { data: "guide_b", label: "Xbox + B" },
+                    { data: "select_start", label: "View + Menu" },
+                    { data: "off", label: "Off" },
+                  ]}
+                  selectedOption={state.chord.value}
+                  onChange={(o) => change("controller", { chord: o.data }, 0)}
                 />
               </PanelSectionRow>
             )}
