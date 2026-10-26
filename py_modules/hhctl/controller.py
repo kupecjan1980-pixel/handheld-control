@@ -140,6 +140,8 @@ class Controller:
         self.plugin_dir: str | None = None  # set by main.py; where updates are installed
         # The desktop app (desktop/server.py) installs its own zips and restarts itself.
         self.update_kind = "plugin"
+        self.desktop = False  # HHC Desktop (desktop/server.py): games are found from processes
+        self.next_game_scan = 0.0
         self.after_update = updater.restart_loader
         self.update_note = "Decky restarts in a moment and loads it."
         self.dev = detect()
@@ -642,6 +644,10 @@ class Controller:
 
     def set_game(self, appid: str | None, name: str | None = None) -> dict:
         """From the panel whenever Steam's running game changes."""
+        self.game_changed(appid, name)
+        return self.state()
+
+    def game_changed(self, appid: str | None, name: str | None = None) -> None:
         game = (str(appid), name or f"App {appid}") if appid else None
         if (game and game[0]) != (self.game and self.game[0]):
             self.game = game
@@ -651,7 +657,6 @@ class Controller:
             self.autotune.reset()
             log.info("games: running %s", game[1] if game else "nothing")
             self.switch_profile()
-        return self.state()
 
     def switch_profile(self) -> None:
         g = self.settings["games"]
@@ -712,6 +717,14 @@ class Controller:
             self.autotune.reset()
             self.save()
         return self.state()
+
+    def tick_desktop_game(self) -> None:
+        """HHC Desktop: no Steam UI reports the game, so look for it every 5 s."""
+        if not self.desktop or time.monotonic() < self.next_game_scan:
+            return
+        self.next_game_scan = time.monotonic() + 5
+        g = games.running_steam_game(self.user_home)
+        self.game_changed(*g) if g else self.game_changed(None)
 
     def tick_autotune(self) -> None:
         prof = self.game_profile()
@@ -1504,6 +1517,7 @@ class Controller:
         self.tick_wake()
         self.gpu.sample()
         self.cpu_util.sample()
+        self.tick_desktop_game()
         self.tick_autotune()
         self.tick_gamescope()
         offset = _sleep_offset()
@@ -1790,6 +1804,8 @@ class Controller:
                 "auto": bool((self.game_profile() or {}).get("auto")),
                 "auto_available": self.freqcap.available()[0],
                 "auto_status": self.autotune.status,
+                "steam": not self.desktop or games.steam_installed(self.user_home),
+                "desktop": self.desktop,
             },
             "system": self.systweak.state(),
             "rebar": rebar.status(self.gpu.dev, self.gpu.driver),

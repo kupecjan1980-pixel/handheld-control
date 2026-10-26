@@ -188,6 +188,8 @@ type State = {
     auto: boolean;
     auto_available: boolean;
     auto_status: string | null;
+    steam: boolean;
+    desktop: boolean;
   };
   system?: {
     thp?: { current: string | null; choices: string[] };
@@ -1768,6 +1770,7 @@ function Content() {
             <PanelSectionRow>
               <SliderField
                 label="Zoom"
+                description="How much the picture is enlarged; 100% fits it to the panel"
                 value={pos.zoom}
                 min={100}
                 max={400}
@@ -1780,6 +1783,7 @@ function Content() {
             <PanelSectionRow>
               <SliderField
                 label="Left – right"
+                description="Which part of the picture shows when it is wider than the panel"
                 value={pos.x}
                 min={0}
                 max={100}
@@ -1792,6 +1796,7 @@ function Content() {
             <PanelSectionRow>
               <SliderField
                 label="Top – bottom"
+                description="Which part of the picture shows when it is taller than the panel"
                 value={pos.y}
                 min={0}
                 max={100}
@@ -1804,6 +1809,7 @@ function Content() {
             <PanelSectionRow>
               <SliderField
                 label="Picture dimming"
+                description="Darkens the picture so the text on top stays readable"
                 value={draft.ui.bg_dim ?? 55}
                 min={0}
                 max={90}
@@ -2128,6 +2134,7 @@ function Content() {
                   <PanelSectionRow>
                     <DropdownItem
                       label="Scheduler mode"
+                      description="How the scheduler above weighs things: Gaming favours the game's threads, Power save keeps fewer cores awake, Low latency answers input fastest; Auto lets it decide"
                       rgOptions={state.cpu.scx.modes.map((m) => ({ data: m, label: SCX_MODES[m] ?? titleCase(m) }))}
                       selectedOption={draft.cpu.scx_mode}
                       onChange={(o) => change("cpu", { scx_mode: o.data }, 0)}
@@ -2286,6 +2293,7 @@ function Content() {
                   <PanelSectionRow>
                     <DropdownItem
                       label="Curve"
+                      description="Fan speed by temperature: Quiet runs slower and warmer, Performance faster and cooler, Custom uses the points you set below"
                       rgOptions={fan.curves.map((c) => ({
                         data: c,
                         label: titleCase(c),
@@ -2421,6 +2429,7 @@ function Content() {
                     <PanelSectionRow>
                       <DropdownItem
                         label="Mode"
+                        description="How the lights behave: one solid color, an effect, or off"
                         rgOptions={rgb.modes.map((m) => ({
                           data: m,
                           label: titleCase(m),
@@ -2433,6 +2442,7 @@ function Content() {
                       <PanelSectionRow>
                         <DropdownItem
                           label="Effect"
+                          description="The light animation the controller itself runs"
                           rgOptions={rgb.effects.map((e) => ({
                             data: e,
                             label: titleCase(e),
@@ -2470,6 +2480,7 @@ function Content() {
                         <PanelSectionRow>
                           <SliderField
                             label="Hue"
+                            description="The color, around the color wheel (0 red, 120 green, 240 blue)"
                             value={r.hue}
                             min={0}
                             max={359}
@@ -2482,6 +2493,7 @@ function Content() {
                         <PanelSectionRow>
                           <SliderField
                             label="Saturation"
+                            description="0% is white, 100% the full color"
                             value={r.sat}
                             min={0}
                             max={100}
@@ -2497,6 +2509,7 @@ function Content() {
                       <PanelSectionRow>
                         <SliderField
                           label="Brightness"
+                          description="How bright the lights are; 0% is off"
                           value={r.bright}
                           min={0}
                           max={100}
@@ -2677,6 +2690,7 @@ function Content() {
                     <PanelSectionRow>
                       <SliderField
                         label="Brightness"
+                        description="How bright Steam and normal (SDR) games look while the screen runs in HDR, in nits"
                         value={draft.sdr_brightness.nits}
                         min={state.sdr_brightness.min}
                         max={state.sdr_brightness.max}
@@ -3313,6 +3327,7 @@ function SystemRows({ state, setState }: { state: State; setState: (s: State) =>
 
 let sentGame: string | null | undefined;
 function watchGame() {
+  if ((window as any).HHC_DESKTOP) return; // there the backend finds the game itself
   const g = runningGame();
   const id = g ? String(g.appid) : null;
   if (id === sentGame) return;
@@ -3322,54 +3337,71 @@ function watchGame() {
 
 function GameProfileRows({ state, setState }: { state: State; setState: (s: State) => void }) {
   const gs = state.games;
-  if (!gs || (window as any).HHC_DESKTOP) return null;
-  const saved = gs.count ? ` ${gs.count} game${gs.count === 1 ? "" : "s"} with a profile.` : "";
+  if (!gs) return null;
+  const saved = gs.count ? ` Saved so far: ${gs.count} game${gs.count === 1 ? "" : "s"}.` : "";
+  // Why a switch can't be used right now (it stays visible, grayed out).
+  const why = !gs.steam
+    ? "Needs Steam: profiles follow the games Steam starts, and Steam isn't installed here."
+    : !gs.enabled
+      ? "Game profiles are switched off below."
+      : !gs.game
+        ? `No game running: start a game from Steam, then come back here.${saved}`
+        : null;
+  const name = gs.game?.name ?? "the running game";
   return (
     <PanelSection title="Game profile">
-      {gs.game ? (
-        <PanelSectionRow>
+      <PanelSectionRow>
+        <div className={why ? "hhctl-off" : undefined}>
           <ToggleField
-            label={`Profile for ${gs.game.name}`}
+            label={gs.game ? `Profile for ${name}` : "Profile for this game"}
             description={
-              !gs.enabled
-                ? "Profiles are switched off below."
-                : gs.profile
-                  ? "TDP, CPU, GPU and fan settings below belong to this game: changes are kept for it, " +
-                    "and the usual settings come back when it closes."
-                  : "Keeps the TDP, CPU, GPU and fan settings below for this game, applied whenever it starts."
+              why ??
+              (gs.profile
+                ? `On: the TDP, CPU, GPU and fan settings in this panel belong to ${name}. Whatever you change while it runs is kept for it, and your usual settings come back when it closes. Off deletes the profile and brings your usual settings back now.`
+                : `Saves the TDP, CPU (boost, SMT, cores, clock and temperature limits, scheduler), GPU and fan settings you have now for ${name}. They're applied every time it starts and your usual settings come back when it closes. Lights, battery and controller settings stay the same for every game.`)
             }
             checked={gs.profile}
-            disabled={!gs.enabled}
+            disabled={!!why}
             onChange={async (v) => setState(await saveGameProfile(v))}
           />
-        </PanelSectionRow>
-      ) : (
-        <PanelSectionRow>
-          <Field label="No game running" description={`Start a game to keep settings for it.${saved}`} />
-        </PanelSectionRow>
-      )}
-      {gs.game && gs.auto_available && gs.enabled && (
-        <PanelSectionRow>
+        </div>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <div className={why || !gs.auto_available ? "hhctl-off" : undefined}>
           <ToggleField
             label="Auto-tune"
             description={
-              gs.auto
-                ? `Moves the CPU clock limit every 20 s: down while the GPU holds the game back (its power goes to the GPU), up when a CPU core is maxed out. Setting the CPU clock limit by hand turns this off. ${
-                    gs.auto_status ? `Now: ${gs.auto_status}.` : "Watching the first 20 s…"
-                  }`
-                : "Shares the power between CPU and GPU by what holds this game back, and keeps the result in its profile."
+              why ??
+              (!gs.auto_available
+                ? "Needs a CPU clock limit, which this CPU's driver doesn't offer."
+                : gs.auto
+                  ? `On: every 20 s it looks at what holds ${name} back and moves the CPU clock limit 200-400 MHz. GPU busy and no CPU core maxed out: the CPU gets less, so the shared power goes to the GPU (or it runs cooler). A CPU core maxed out while the GPU waits: the CPU gets more. Light load (frame cap, menus): less, to save battery. It never goes below half the top clock, and the limit it settles on is kept in the profile. Setting the CPU clock limit by hand turns this off. ${
+                      gs.auto_status ? `Last decision: ${gs.auto_status}.` : "Watching the first 20 s…"
+                    }`
+                  : `Lets HHC share the power between CPU and GPU for ${name} by itself, by moving the CPU clock limit while it plays. Turning it on also saves a profile for the game if it has none.`)
             }
             checked={gs.auto}
+            disabled={!!why || !gs.auto_available}
             onChange={async (v) => setState(await setAutotune(v))}
           />
-        </PanelSectionRow>
-      )}
+        </div>
+      </PanelSectionRow>
       <PanelSectionRow>
-        <ToggleField
-          label="Use game profiles"
-          checked={gs.enabled}
-          onChange={async (v) => setState(await setters.games({ enabled: v }))}
-        />
+        <div className={gs.steam ? undefined : "hhctl-off"}>
+          <ToggleField
+            label="Use game profiles"
+            description={
+              gs.enabled
+                ? `On: a game with a profile gets its settings when it starts${
+                    gs.desktop ? " (HHC Desktop notices it within 5 s)" : ""
+                  }. Off keeps your usual settings for every game, without deleting the profiles.`
+                : "Off: every game runs with your usual settings; saved profiles are kept for when this is on again."
+            }
+            checked={gs.enabled}
+            disabled={!gs.steam}
+            onChange={async (v) => setState(await setters.games({ enabled: v }))}
+          />
+        </div>
       </PanelSectionRow>
     </PanelSection>
   );

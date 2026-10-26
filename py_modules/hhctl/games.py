@@ -51,3 +51,44 @@ def record(profile: dict, section: str, values: dict) -> None:
     for k, v in values.items():
         if keys is None or k in keys:
             profile["settings"].setdefault(section, {})[k] = copy.deepcopy(v)
+
+
+def running_steam_game(home: str) -> tuple[str, str] | None:
+    """For HHC Desktop (no Steam UI to ask): the game Steam started, from its
+    launcher process ("reaper SteamLaunch AppId=NNN -- ..."), named from its
+    appmanifest. None when no Steam game runs."""
+    import glob
+    import re
+
+    from .lsfg import steam_libraries
+
+    for path in glob.glob("/proc/[0-9]*/cmdline"):
+        try:
+            with open(path, "rb") as f:
+                args = f.read().split(b"\0")
+        except OSError:
+            continue
+        if b"SteamLaunch" not in args:
+            continue
+        for a in args:
+            if a.startswith(b"AppId="):
+                appid = a[6:].decode(errors="replace")
+                if not appid.isdigit() or appid == "0":
+                    continue
+                for lib in steam_libraries(home):
+                    try:
+                        with open(f"{lib}/appmanifest_{appid}.acf", encoding="utf-8", errors="replace") as m:
+                            name = re.search(r'"name"\s+"([^"]+)"', m.read())
+                        if name:
+                            return appid, name.group(1)
+                    except OSError:
+                        continue
+                return appid, f"App {appid}"
+    return None
+
+
+def steam_installed(home: str) -> bool:
+    import os
+
+    return any(os.path.isdir(f"{home}/{d}") for d in
+               (".local/share/Steam", ".steam/steam", ".var/app/com.valvesoftware.Steam"))

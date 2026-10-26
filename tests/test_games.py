@@ -55,3 +55,20 @@ assert s["tdp"]["watts"] == 14
 C.save_game_profile(ctl, False)
 assert "100" not in s["games"]["profiles"] and s["tdp"]["enabled"] is False and s["games"]["base"] is None
 print("all game profile tests passed")
+
+# HHC Desktop: the game from Steam's launcher process and its appmanifest
+import tempfile, os, glob as g
+tmp = tempfile.mkdtemp()
+lib = f"{tmp}/.local/share/Steam/steamapps"
+os.makedirs(lib)
+open(f"{lib}/appmanifest_1245620.acf", "w").write('"AppState"\n{\n\t"appid"\t"1245620"\n\t"name"\t"ELDEN RING"\n}\n')
+os.makedirs(f"{tmp}/proc/77")
+open(f"{tmp}/proc/77/cmdline", "wb").write(b"/steam/reaper\0SteamLaunch\0AppId=1245620\0--\0game.exe\0")
+real = g.glob
+g.glob = lambda pat: [f"{tmp}/proc/77/cmdline"] if pat.startswith("/proc/") else real(pat)
+assert games.running_steam_game(tmp) == ("1245620", "ELDEN RING")
+open(f"{tmp}/proc/77/cmdline", "wb").write(b"/usr/bin/bash\0")
+assert games.running_steam_game(tmp) is None
+g.glob = real
+assert games.steam_installed(tmp) and not games.steam_installed(f"{tmp}/nope")
+print("desktop game detection ok")

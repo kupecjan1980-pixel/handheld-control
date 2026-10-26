@@ -87,10 +87,13 @@ open(fd1, "w").write("pos:\t0\ndrm-driver:\txe\ndrm-pdev:\t0000:00:02.0\ndrm-cli
 open(fd2, "w").write(open(fd1).read())  # same client, second fd
 open(fd3, "w").write("drm-driver:\txe\ndrm-pdev:\t0000:00:02.0\ndrm-client-id:\t9\ndrm-resident-system:\t1 GiB\n")
 real_glob = gpu.glob.glob
-gpu.glob = types.SimpleNamespace(glob=lambda pat: [fd1, fd2, fd3] if "fdinfo" in pat else real_glob(pat))
+real_fdinfos = gpu._drm_fdinfos
+gpu._drm_fdinfos = lambda: [fd1, fd2, fd3]
 assert gpu.drm_client_memory("xe") == (512 << 20) + (1024 << 10) + (1 << 30)
+open(fd3, "w").write("drm-driver:\txe\n")
+assert gpu.drm_client_memory("xe") == (512 << 20) + (1024 << 10) + (1 << 30), "cached: not read again for 30 s"
 assert gpu.drm_client_memory("i915") is None
-gpu.glob = types.SimpleNamespace(glob=real_glob)
+gpu._drm_fdinfos = real_fdinfos
 print("fdinfo memory sum ok (dedupes clients)")
 
 # ---- live read on this machine

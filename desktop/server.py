@@ -188,6 +188,7 @@ def main() -> None:
     asyncio.set_event_loop(loop)
     loop.run_until_complete(plugin._main())
     ctl = plugin.ctl
+    ctl.desktop = True  # Steam games are found from their processes
     st = os.stat(ROOT)
     if st.st_uid == 0 and not os.path.exists(os.path.join(ROOT, ".git")):
         # Installed copy (/opt, root-owned): it updates itself from the desktop

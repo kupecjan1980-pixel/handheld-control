@@ -89,12 +89,36 @@ def _hwmon(dev: str) -> str | None:
     return found[0] if found else None
 
 
+_client_mem: tuple[float, str, int | None] | None = None
+CLIENT_MEM_EVERY = 30.0  # seconds
+
+
+def _drm_fdinfos() -> list[str]:
+    """fdinfo of the open GPU device files only: telling them apart by the fd's
+    link costs nothing, while reading a GPU fdinfo makes the driver collect
+    its stats (xe wakes the GPU for its cycle counters)."""
+    out = []
+    for fd in glob.glob("/proc/[0-9]*/fd/*"):
+        try:
+            if os.readlink(fd).startswith("/dev/dri/"):
+                out.append(fd.replace("/fd/", "/fdinfo/"))
+        except OSError:
+            continue
+    return out
+
+
 def drm_client_memory(driver: str) -> int | None:
-    """Sum resident GPU memory over all DRM clients of `driver`, in bytes."""
+    """Sum resident GPU memory over all DRM clients of `driver`, in bytes.
+    Looked up at most every CLIENT_MEM_EVERY seconds: each look wakes an idle
+    Intel GPU (it showed 100 % busy at 1.4 W with the panel open, OXP3)."""
+    global _client_mem
+    now = time.monotonic()
+    if _client_mem and _client_mem[1] == driver and now - _client_mem[0] < CLIENT_MEM_EVERY:
+        return _client_mem[2]
     seen = set()
     total = 0
     found = False
-    for fdinfo in glob.glob("/proc/[0-9]*/fdinfo/*"):
+    for fdinfo in _drm_fdinfos():
         try:
             with open(fdinfo) as f:
                 text = f.read()
@@ -117,7 +141,8 @@ def drm_client_memory(driver: str) -> int | None:
                     total += int(num) * {"": 1, "KiB": 1024, "MiB": 1 << 20, "GiB": 1 << 30}[unit]
                 except (ValueError, KeyError):
                     pass
-    return total if found else None
+    _client_mem = (now, driver, total if found else None)
+    return _client_mem[2]
 
 
 DEBUG_DRI = "/sys/kernel/debug/dri"
