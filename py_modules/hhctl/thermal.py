@@ -94,6 +94,11 @@ class IntelTcc:
             v = cls._rd(cpus[0], TEMPERATURE_TARGET)
             tjmax = v >> 16 & 0xFF
             programmable = bool(cls._rd(cpus[0], PLATFORM_INFO) >> 30 & 1)
+            if v >> 31 & 1:
+                # Locked by the firmware: intel_tcc refuses every write (EPERM)
+                # and the MSR ignores it (ONEXPLAYER 3, 2026-10-26).
+                log.info("thermal: the TCC offset is locked by the firmware")
+                return None
         except (OSError, IndexError):
             tjmax, programmable = 0, False
         if not tjmax:

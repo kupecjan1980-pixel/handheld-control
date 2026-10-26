@@ -291,7 +291,8 @@ class Controller:
             elif section == "battery":
                 self.bat.disable_ec(str(e))
         except Exception as e:  # report every hardware error to the UI
-            log.exception("%s apply failed", section)
+            if self.errors.get(section) != str(e):  # not again every 10 s
+                log.exception("%s apply failed", section)
             self.errors[section] = str(e)
 
     # --- fan watchdog -----------------------------------------------------
