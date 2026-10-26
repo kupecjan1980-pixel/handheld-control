@@ -199,6 +199,7 @@ type State = {
     usb_awake?: { current: number | null };
     wifi_ps_off?: { current: boolean; iface: string };
   };
+  topuse?: { cpu: [string, number][]; gpu: [string, number][]; at: string } | null;
   rebar?: { state: "on" | "off" | "partial" | "n/a"; bar_mb: number; vram_mb: number | null; text: string } | null;
   upscale: {
     options: string[];
@@ -370,6 +371,7 @@ const setLsfg = callable<[boolean], State>("set_lsfg");
 const setGame = callable<[string | null, string | null], State>("set_game");
 const saveGameProfile = callable<[boolean], State>("save_game_profile");
 const setAutotune = callable<[boolean], State>("set_autotune");
+const topUse = callable<[], State>("top_use");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
@@ -2248,6 +2250,7 @@ function Content() {
             </PanelSection>
           )}
           <SystemRows state={state} setState={setState} />
+          <TopUseRows state={state} setState={setState} />
 
           <PanelSection>
             {!fan.backend ? (
@@ -3229,6 +3232,39 @@ function openKeyboard() {
       console.warn("hhctl: keyboard", e);
     }
   }, 250);
+}
+
+// --- What's using the CPU and GPU (topuse.py) ---------------------------------
+
+function TopUseRows({ state, setState }: { state: State; setState: (s: State) => void }) {
+  const [busy, setBusy] = useState(false);
+  const t = state.topuse;
+  const list = (rows: [string, number][]) => (rows.length ? rows.map(([n, p]) => `${n} ${p}%`).join(", ") : "nothing busy");
+  return (
+    <PanelSection title="What's using it">
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={busy}
+          description={
+            t
+              ? `At ${t.at}. CPU (share of all cores): ${list(t.cpu)}. GPU (busiest engine): ${list(t.gpu)}.`
+              : "Measures every process for 2 s and lists the busiest ones on the CPU and the GPU, for when the device works harder than it should. Only runs when you press it."
+          }
+          onClick={async () => {
+            setBusy(true);
+            try {
+              setState(await topUse());
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "Measuring for 2 s…" : t ? "Measure again" : "What's using the CPU and GPU?"}
+        </ButtonItem>
+      </PanelSectionRow>
+    </PanelSection>
+  );
 }
 
 // --- System toggles (systweak.py) ---------------------------------------------

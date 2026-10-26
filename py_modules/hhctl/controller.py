@@ -140,6 +140,7 @@ class Controller:
         self.plugin_dir: str | None = None  # set by main.py; where updates are installed
         # The desktop app (desktop/server.py) installs its own zips and restarts itself.
         self.update_kind = "plugin"
+        self.topuse: dict | None = None  # last "what's using it" look
         self.desktop = False  # HHC Desktop (desktop/server.py): games are found from processes
         self.next_game_scan = 0.0
         self.after_update = updater.restart_loader
@@ -716,6 +717,12 @@ class Controller:
             prof["auto"] = bool(on)
             self.autotune.reset()
             self.save()
+        return self.state()
+
+    def set_topuse(self, res: dict) -> dict:
+        """Panel button: the busiest processes over 2 s (topuse.sample)."""
+        self.topuse = res
+        log.info("topuse: %s", res)
         return self.state()
 
     def tick_desktop_game(self) -> None:
@@ -1808,6 +1815,7 @@ class Controller:
                 "desktop": self.desktop,
             },
             "system": self.systweak.state(),
+            "topuse": self.topuse,
             "rebar": rebar.status(self.gpu.dev, self.gpu.driver),
             "upscale": self.upscale.state(),
             "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},

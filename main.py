@@ -4,6 +4,7 @@ import os
 
 import decky
 
+from hhctl import topuse
 from hhctl.controller import Controller
 
 TICK = 2.0
@@ -98,6 +99,11 @@ class Plugin:
 
     async def save_game_profile(self, on: bool):
         return await self._run(self.ctl.save_game_profile, on)
+
+    async def top_use(self):
+        # The 2 s look runs outside the lock, so the regular tick goes on meanwhile.
+        res = await asyncio.to_thread(topuse.sample)
+        return await self._run(self.ctl.set_topuse, res)
 
     async def set_autotune(self, on: bool):
         return await self._run(self.ctl.set_autotune, on)
