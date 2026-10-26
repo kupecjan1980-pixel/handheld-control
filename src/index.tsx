@@ -2986,7 +2986,7 @@ function Content() {
             <PanelSectionRow>
               <ButtonItem
                 layout="below"
-                description="PNG, JPG or WebP, up to 8 MB. It's copied into the plugin's settings."
+                description="PNG, JPG or WebP, up to 40 MB. Pictures over 8 MB are shrunk to fit the screen first; the picture is copied into the plugin's settings, so the original can be moved or deleted."
                 onClick={() => setView("pick")}
               >
                 {draft.ui?.bg ? "Change background picture" : "Choose background picture"}
