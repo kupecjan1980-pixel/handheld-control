@@ -352,16 +352,36 @@ class Util:
     def __init__(self):
         self.prev: tuple[int, int] | None = None
         self.value: float | None = None
+        self.cores_prev: dict[str, tuple[int, int]] = {}
+        self.busiest: float | None = None  # the busiest core's share, for auto-tune
+
+    @staticmethod
+    def _busy_total(fields: list[str]) -> tuple[int, int]:
+        v = [int(x) for x in fields[1:9]] + [0] * 8
+        return sum(v) - v[3] - v[4], sum(v)  # minus idle and iowait
 
     def sample(self) -> float | None:
-        line = (sysfs.read(self.STAT) or "").split("\n", 1)[0].split()
+        lines = (sysfs.read(self.STAT) or "").splitlines()
+        line = lines[0].split() if lines else []
         if not line or line[0] != "cpu":
             return self.value
-        v = [int(x) for x in line[1:9]]
-        busy, total = sum(v) - v[3] - v[4], sum(v)  # minus idle and iowait
+        busy, total = self._busy_total(line)
         if self.prev and total > self.prev[1]:
             self.value = round(100 * (busy - self.prev[0]) / (total - self.prev[1]), 1)
         self.prev = (busy, total)
+        top = None
+        for ln in lines[1:]:
+            f = ln.split()
+            if not f or not f[0].startswith("cpu"):
+                break
+            b, t = self._busy_total(f)
+            p = self.cores_prev.get(f[0])
+            if p and t > p[1]:
+                share = 100 * (b - p[0]) / (t - p[1])
+                top = share if top is None else max(top, share)
+            self.cores_prev[f[0]] = (b, t)
+        if top is not None:
+            self.busiest = round(top, 1)
         return self.value
 
 

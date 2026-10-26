@@ -36,7 +36,7 @@ type Settings = {
     memtweak?: boolean;
   };
   gpu: { mode: GpuMode; mhz: number | null; profile: string | null };
-  fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string };
+  fan: { mode: "auto" | "fixed" | "curve"; percent: number; curve: string; points: number[] | null };
   rgb: {
     enabled: boolean;
     mode: string;
@@ -49,6 +49,14 @@ type Settings = {
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
   games: { enabled: boolean };
+  system: {
+    thp: string | null;
+    swappiness: number | null;
+    nvme_none: boolean;
+    aspm: string | null;
+    usb_awake: boolean;
+    wifi_ps_off: boolean;
+  };
   controller: {
     buttons: boolean;
     ip_target: string | null;
@@ -99,6 +107,8 @@ type State = {
     backend: string | null;
     unavailable: string | null;
     curves: string[];
+    custom_temps?: number[];
+    custom_default?: number[];
     rpm: number | null;
     percent: number | null;
     temp: number | null;
@@ -168,7 +178,24 @@ type State = {
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
   ai: { enabled: boolean; vars: Record<string, string> };
   memtweak?: { available: Record<string, string>; pending: string[] };
-  games?: { enabled: boolean; game: { appid: string; name: string } | null; profile: boolean; count: number };
+  games?: {
+    enabled: boolean;
+    game: { appid: string; name: string } | null;
+    profile: boolean;
+    count: number;
+    auto: boolean;
+    auto_available: boolean;
+    auto_status: string | null;
+  };
+  system?: {
+    thp?: { current: string | null; choices: string[] };
+    swappiness?: { current: number | null; choices: number[]; zram: boolean };
+    nvme_none?: { current: string[] };
+    aspm?: { current: string | null; choices: string[] };
+    usb_awake?: { current: number | null };
+    wifi_ps_off?: { current: boolean; iface: string };
+  };
+  rebar?: { state: "on" | "off" | "partial" | "n/a"; bar_mb: number; vram_mb: number | null; text: string } | null;
   upscale: {
     options: string[];
     on: Record<string, boolean>;
@@ -338,6 +365,7 @@ const setUpscale = callable<[string, boolean], State>("set_upscale");
 const setLsfg = callable<[boolean], State>("set_lsfg");
 const setGame = callable<[string | null, string | null], State>("set_game");
 const saveGameProfile = callable<[boolean], State>("save_game_profile");
+const setAutotune = callable<[boolean], State>("set_autotune");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
@@ -840,6 +868,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   controller: callable<[object], State>("set_controller"),
   sleep: callable<[object], State>("set_sleep"),
   games: callable<[object], State>("set_games"),
+  system: callable<[object], State>("set_system"),
 };
 
 const BYPASS_LABELS: Record<string, string> = {
@@ -2195,10 +2224,21 @@ function Content() {
                 </PanelSectionRow>
               )}
               <VramRows state={state} setState={setState} />
+              {state.rebar && (
+                <PanelSectionRow>
+                  <Field
+                    label="Resizable BAR"
+                    description={`${state.rebar.text} Only the BIOS can switch it; Linux uses what it gets at boot.`}
+                  >
+                    {{ on: "On", off: "Off", partial: "Partly", "n/a": "–" }[state.rebar.state]}
+                  </Field>
+                </PanelSectionRow>
+              )}
               <UpscaleRows state={state} setState={setState} />
               <ErrorRow msg={state.errors.gpu} />
             </PanelSection>
           )}
+          <SystemRows state={state} setState={setState} />
 
           <PanelSection>
             {!fan.backend ? (
@@ -2253,6 +2293,32 @@ function Content() {
                     />
                   </PanelSectionRow>
                 )}
+                {f.mode === "curve" &&
+                  f.curve === "custom" &&
+                  (fan.custom_temps ?? []).map((temp, i) => {
+                    const pts = f.points ?? fan.custom_default ?? [];
+                    return (
+                      <PanelSectionRow key={temp}>
+                        <SliderField
+                          label={`At ${temp} °C`}
+                          description={i === 0 ? "A point never goes below the one before it" : undefined}
+                          value={pts[i] ?? 50}
+                          min={0}
+                          max={100}
+                          step={5}
+                          showValue
+                          valueSuffix="%"
+                          onChange={(v) => {
+                            const next = [...pts];
+                            next[i] = v;
+                            for (let j = i + 1; j < next.length; j++) next[j] = Math.max(next[j], v);
+                            for (let j = 0; j < i; j++) next[j] = Math.min(next[j], v);
+                            change("fan", { points: next });
+                          }}
+                        />
+                      </PanelSectionRow>
+                    );
+                  })}
                 {f.mode === "fixed" && (
                   <PanelSectionRow>
                     <SliderField
@@ -3127,6 +3193,98 @@ function openKeyboard() {
   }, 250);
 }
 
+// --- System toggles (systweak.py) ---------------------------------------------
+
+function SystemRows({ state, setState }: { state: State; setState: (s: State) => void }) {
+  const st = state.system;
+  const cur = state.settings.system;
+  if (!st || !cur || Object.keys(st).length === 0) return null;
+  const set = async (v: Partial<Settings["system"]>) => setState(await setters.system(v));
+  const now = (v: unknown) => ` · now ${v}`;
+  return (
+    <PanelSection title="System">
+      {st.thp && (
+        <PanelSectionRow>
+          <DropdownItem
+            label="Transparent hugepages"
+            description={`madvise (SteamOS): huge pages only for programs that ask. always can stall a game while memory is tidied${now(st.thp.current)}`}
+            rgOptions={[{ data: null, label: "System's choice" }, ...st.thp.choices.map((c) => ({ data: c, label: c }))]}
+            selectedOption={cur.thp}
+            onChange={(o) => set({ thp: o.data })}
+          />
+        </PanelSectionRow>
+      )}
+      {st.swappiness && (
+        <PanelSectionRow>
+          <DropdownItem
+            label="Swappiness"
+            description={`How readily memory goes to swap. ${
+              st.swappiness.zram
+                ? "This system swaps to zram (compressed RAM), where high values (100-180) are right"
+                : "Swap on a disk: low values (10) keep games in RAM"
+            }${now(st.swappiness.current)}`}
+            rgOptions={[
+              { data: null, label: "System's choice" },
+              ...st.swappiness.choices.map((c) => ({ data: c, label: String(c) })),
+            ]}
+            selectedOption={cur.swappiness}
+            onChange={(o) => set({ swappiness: o.data })}
+          />
+        </PanelSectionRow>
+      )}
+      {st.nvme_none && (
+        <PanelSectionRow>
+          <ToggleField
+            label="NVMe: no I/O scheduler"
+            description={`The fastest choice for NVMe drives${now(st.nvme_none.current.join(", "))}`}
+            checked={cur.nvme_none}
+            onChange={(v) => set({ nvme_none: v })}
+          />
+        </PanelSectionRow>
+      )}
+      {st.aspm && (
+        <PanelSectionRow>
+          <DropdownItem
+            label="PCIe power saving (ASPM)"
+            description={`performance keeps PCIe links awake (less latency, more power); powersave saves battery${now(st.aspm.current)}`}
+            rgOptions={[{ data: null, label: "System's choice" }, ...st.aspm.choices.map((c) => ({ data: c, label: c }))]}
+            selectedOption={cur.aspm}
+            onChange={(o) => set({ aspm: o.data })}
+          />
+        </PanelSectionRow>
+      )}
+      {st.usb_awake && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Keep USB devices awake"
+            description={`No USB autosuspend, so controllers and dongles never doze off (a little more power)${now(
+              st.usb_awake.current === -1 ? "never suspended" : `suspended after ${st.usb_awake.current} s idle`,
+            )}`}
+            checked={cur.usb_awake}
+            onChange={(v) => set({ usb_awake: v })}
+          />
+        </PanelSectionRow>
+      )}
+      {st.wifi_ps_off && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Wi-Fi power saving off"
+            description={`Steadier game streaming and online play, a little more power${now(
+              st.wifi_ps_off.current ? "on" : "off",
+            )}`}
+            checked={cur.wifi_ps_off}
+            onChange={(v) => set({ wifi_ps_off: v })}
+          />
+        </PanelSectionRow>
+      )}
+      <PanelSectionRow>
+        <Field description="Changed only while set here: picking System's choice, unloading or a restart puts the old values back." />
+      </PanelSectionRow>
+      <ErrorRow msg={state.errors.system} />
+    </PanelSection>
+  );
+}
+
 // --- Per-game profiles: tell the backend which game runs ----------------------
 
 let sentGame: string | null | undefined;
@@ -3164,6 +3322,22 @@ function GameProfileRows({ state, setState }: { state: State; setState: (s: Stat
       ) : (
         <PanelSectionRow>
           <Field label="No game running" description={`Start a game to keep settings for it.${saved}`} />
+        </PanelSectionRow>
+      )}
+      {gs.game && gs.auto_available && gs.enabled && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Auto-tune"
+            description={
+              gs.auto
+                ? `Moves the CPU clock limit every 20 s: down while the GPU holds the game back (its power goes to the GPU), up when a CPU core is maxed out. Setting the CPU clock limit by hand turns this off. ${
+                    gs.auto_status ? `Now: ${gs.auto_status}.` : "Watching the first 20 s…"
+                  }`
+                : "Shares the power between CPU and GPU by what holds this game back, and keeps the result in its profile."
+            }
+            checked={gs.auto}
+            onChange={async (v) => setState(await setAutotune(v))}
+          />
         </PanelSectionRow>
       )}
       <PanelSectionRow>

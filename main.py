@@ -99,6 +99,12 @@ class Plugin:
     async def save_game_profile(self, on: bool):
         return await self._run(self.ctl.save_game_profile, on)
 
+    async def set_autotune(self, on: bool):
+        return await self._run(self.ctl.set_autotune, on)
+
+    async def set_system(self, values: dict):
+        return await self._run(self.ctl.update, "system", values)
+
     async def set_games(self, values: dict):
         return await self._run(self.ctl.update, "games", values)
 

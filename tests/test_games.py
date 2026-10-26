@@ -5,6 +5,8 @@ C = controller.Controller
 ctl = C.__new__(C)
 ctl.settings = copy.deepcopy(controller.DEFAULTS)
 ctl.game = ctl.pre_game = None
+from hhctl import autotune
+ctl.autotune = autotune.AutoTune()
 applied, tdp_applied = [], []
 ctl.save = lambda: None
 ctl.state = lambda: {}

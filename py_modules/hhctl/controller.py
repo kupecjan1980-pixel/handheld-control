@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, background, games, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, autotune, background, games, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -48,7 +48,8 @@ DEFAULTS = {
     "controller": {"buttons": True, "ip_target": "xbox-elite", "ip_failed": None,
                    "swipe_keyboard": False, "swipe_edge": None, "chord": None},
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
-    "fan": {"mode": "auto", "percent": 50, "curve": "balanced"},
+    # curve "custom": the speeds in "points", one per fan.CUSTOM_TEMPS.
+    "fan": {"mode": "auto", "percent": 50, "curve": "balanced", "points": None},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
     # rgb_off: lights off while it sleeps. pad_wake: the controller wakes it
     # (None = the device's default: on for the NEXT 2, which asked for it).
@@ -60,6 +61,9 @@ DEFAULTS = {
     # Per-game profiles (games.py): appid -> {"name", "settings"}; base: the
     # settings put aside while a game with a profile runs.
     "games": {"enabled": True, "profiles": {}, "base": None},
+    # System toggles (systweak.py); None / False leaves the system's value.
+    "system": {"thp": None, "swappiness": None, "nvme_none": False, "aspm": None,
+               "usb_awake": False, "wifi_ps_off": False},
 }
 
 # Daemons that may also set TDP, RGB or the fan. Not InputPlumber: it only does the
@@ -173,6 +177,8 @@ class Controller:
         self.upscale = upscale.Upscale(self._home(), self.gpu.driver, self.gpu.dev)
         self.lsfg = lsfg.Lsfg(self._home())
         self.memtweak = memtweak.MemTweak()
+        self.systweak = systweak.SysTweaks()
+        self.autotune = autotune.AutoTune()
         self.lsfg_busy = False
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
@@ -277,6 +283,9 @@ class Controller:
                 values = {**values, "profile": None}
         self.settings[section].update(values)
         prof = self.game_profile()
+        if prof and prof.get("auto") and section == "cpu" and {"cap", "cap_mhz"} & set(values):
+            prof["auto"] = False  # set by hand: the user tunes it now
+            self.autotune.reset()
         if prof and self.settings["games"]["base"] is not None:
             games.record(prof, section, values)
         self.save()
@@ -634,6 +643,7 @@ class Controller:
             # Tuning for a game before saving its profile: the usual settings
             # are what was in use when it started.
             self.pre_game = games.snapshot(self.settings) if game and not self.game_profile() else None
+            self.autotune.reset()
             log.info("games: running %s", game[1] if game else "nothing")
             self.switch_profile()
         return self.state()
@@ -685,6 +695,39 @@ class Controller:
             self.save()
         return self.state()
 
+    def set_autotune(self, on: bool) -> dict:
+        """Panel switch: auto-tune the running game (saves its profile first)."""
+        if not self.game:
+            return self.state()
+        if not self.game_profile():
+            self.save_game_profile(True)
+        prof = self.game_profile()
+        if prof:
+            prof["auto"] = bool(on)
+            self.autotune.reset()
+            self.save()
+        return self.state()
+
+    def tick_autotune(self) -> None:
+        prof = self.game_profile()
+        if not (prof and prof.get("auto") and self.settings["games"]["base"] is not None
+                and self.freqcap.available()[0]):
+            return
+        now = time.monotonic()
+        self.autotune.feed(now, self.gpu._util(), self.cpu_util.busiest)
+        lo, hi = self.freqcap.range_mhz()
+        s = self.settings["cpu"]
+        cap = int(s["cap_mhz"]) if s.get("cap") and s.get("cap_mhz") else None
+        new = self.autotune.decide(now, cap, lo, hi)
+        if new is False:
+            return
+        vals = {"cap": new is not None, "cap_mhz": new or s.get("cap_mhz")}
+        s.update(vals)
+        games.record(prof, "cpu", vals)
+        self.save()
+        log.info("autotune: %s -> CPU limit %s", self.autotune.status, new or "off")
+        self._guard("cpu", (lambda: self.freqcap.apply(int(new))) if new else self.freqcap.restore)
+
     def apply_games(self) -> None:
         self.switch_profile()  # profiles switched on or off
 
@@ -707,7 +750,11 @@ class Controller:
         else:
             self._guard("sleep", self.padwake.restore)
 
+    def apply_system(self) -> None:
+        self._guard("system", lambda: self.systweak.apply(self.settings["system"]))
+
     def apply_all(self) -> None:
+        self.apply_system()
         self.apply_sleep()
         self.apply_controller()
         self.apply_tdp()
@@ -1379,7 +1426,9 @@ class Controller:
             return
         temp = fan.cpu_temp()
         if s["mode"] == "curve":
-            target = fan.interpolate(fan.CURVES.get(s["curve"], fan.CURVES["balanced"]), temp or 100)
+            curve = (fan.custom_curve(s.get("points")) if s["curve"] == "custom"
+                     else fan.CURVES.get(s["curve"], fan.CURVES["balanced"]))
+            target = fan.interpolate(curve, temp or 100)
         else:
             target = int(s["percent"])
         if temp is None or temp >= fan.SAFETY_TEMP:
@@ -1428,6 +1477,7 @@ class Controller:
         self.tick_wake()
         self.gpu.sample()
         self.cpu_util.sample()
+        self.tick_autotune()
         self.tick_gamescope()
         offset = _sleep_offset()
         resumed = offset - self.sleep_offset > 2
@@ -1481,6 +1531,7 @@ class Controller:
             self.swipe.stop()
             self.chord.stop()
             self._guard("memtweak", self.memtweak.restore)
+            self._guard("system", self.systweak.restore)
             self._guard("controller", self.ip.restore)
             self.sleeper.stop()
             self._guard("sleep", self.padwake.restore)
@@ -1622,7 +1673,9 @@ class Controller:
             "fan": {
                 "backend": getattr(self.fan, "name", None),
                 "unavailable": self.fan_why,
-                "curves": list(fan.CURVES),
+                "curves": [*fan.CURVES, "custom"],
+                "custom_temps": list(fan.CUSTOM_TEMPS),
+                "custom_default": fan.CUSTOM_DEFAULT,
                 "rpm": rpm,
                 "percent": self.fan_pct,
                 "temp": fan.cpu_temp(),
@@ -1706,7 +1759,12 @@ class Controller:
                 "game": {"appid": self.game[0], "name": self.game[1]} if self.game else None,
                 "profile": bool(self.game and self.game[0] in self.settings["games"]["profiles"]),
                 "count": len(self.settings["games"]["profiles"]),
+                "auto": bool((self.game_profile() or {}).get("auto")),
+                "auto_available": self.freqcap.available()[0],
+                "auto_status": self.autotune.status,
             },
+            "system": self.systweak.state(),
+            "rebar": rebar.status(self.gpu.dev, self.gpu.driver),
             "upscale": self.upscale.state(),
             "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},
             "thermal": {

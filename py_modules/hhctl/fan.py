@@ -13,6 +13,22 @@ CURVES = {
     "performance": [(40, 30), (50, 45), (60, 60), (70, 80), (78, 100)],
 }
 
+# The editable curve: a speed (%) at each of these temperatures (°C).
+CUSTOM_TEMPS = (40, 50, 60, 70, 80, 88)
+CUSTOM_DEFAULT = [p for _, p in CURVES["balanced"]]
+
+
+def custom_curve(points) -> list[tuple[int, int]]:
+    """The user's speeds, made non-decreasing so it never slows as it heats up."""
+    pts = list(points or CUSTOM_DEFAULT)[: len(CUSTOM_TEMPS)]
+    pts += CUSTOM_DEFAULT[len(pts):]
+    out, low = [], 0
+    for t, p in zip(CUSTOM_TEMPS, pts):
+        low = max(low, min(100, max(0, int(p))))
+        out.append((t, low))
+    return out
+
+
 # Above this the fan is forced to 100% in every manual mode.
 SAFETY_TEMP = 90
 SAFETY_RELEASE = 80
