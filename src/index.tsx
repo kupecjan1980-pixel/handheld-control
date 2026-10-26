@@ -52,8 +52,6 @@ type Settings = {
   system: {
     thp: string | null;
     swappiness: number | null;
-    nvme_none: boolean;
-    aspm: string | null;
     usb_awake: boolean;
     wifi_ps_off: boolean;
   };
@@ -194,8 +192,6 @@ type State = {
   system?: {
     thp?: { current: string | null; choices: string[] };
     swappiness?: { current: number | null; choices: number[]; zram: boolean };
-    nvme_none?: { current: string[] };
-    aspm?: { current: string | null; choices: string[] };
     usb_awake?: { current: number | null };
     wifi_ps_off?: { current: boolean; iface: string };
   };
@@ -3306,32 +3302,11 @@ function SystemRows({ state, setState }: { state: State; setState: (s: State) =>
           />
         </PanelSectionRow>
       )}
-      {st.nvme_none && (
-        <PanelSectionRow>
-          <ToggleField
-            label="NVMe: no I/O scheduler"
-            description={`The fastest choice for NVMe drives${now(st.nvme_none.current.join(", "))}`}
-            checked={cur.nvme_none}
-            onChange={(v) => set({ nvme_none: v })}
-          />
-        </PanelSectionRow>
-      )}
-      {st.aspm && (
-        <PanelSectionRow>
-          <DropdownItem
-            label="PCIe power saving (ASPM)"
-            description={`performance keeps PCIe links awake (less latency, more power); powersave saves battery${now(st.aspm.current)}`}
-            rgOptions={[{ data: null, label: "System's choice" }, ...st.aspm.choices.map((c) => ({ data: c, label: c }))]}
-            selectedOption={cur.aspm}
-            onChange={(o) => set({ aspm: o.data })}
-          />
-        </PanelSectionRow>
-      )}
       {st.usb_awake && (
         <PanelSectionRow>
           <ToggleField
             label="Keep USB devices awake"
-            description={`No USB autosuspend, so controllers and dongles never doze off (a little more power)${now(
+            description={`No USB autosuspend, so controllers and dongles never doze off (a little more power). USB drives and card readers are left alone${now(
               st.usb_awake.current === -1 ? "never suspended" : `suspended after ${st.usb_awake.current} s idle`,
             )}`}
             checked={cur.usb_awake}
@@ -3352,7 +3327,7 @@ function SystemRows({ state, setState }: { state: State; setState: (s: State) =>
         </PanelSectionRow>
       )}
       <PanelSectionRow>
-        <Field description="Changed only while set here: picking System's choice, unloading or a restart puts the old values back." />
+        <Field description="Changed only while set here: picking System's choice, unloading or a restart puts the old values back. Nothing here touches drives or SD cards." />
       </PanelSectionRow>
       <ErrorRow msg={state.errors.system} />
     </PanelSection>
@@ -3411,10 +3386,10 @@ function GameProfileRows({ state, setState }: { state: State; setState: (s: Stat
               (!gs.auto_available
                 ? "Needs a CPU clock limit, which this CPU's driver doesn't offer."
                 : gs.auto
-                  ? `On: every 20 s it looks at what holds ${name} back and moves the CPU clock limit 200-400 MHz. GPU busy and no CPU core maxed out: the CPU gets less, so the shared power goes to the GPU (or it runs cooler). A CPU core maxed out while the GPU waits: the CPU gets more. Light load (frame cap, menus): less, to save battery. It never goes below half the top clock, and the limit it settles on is kept in the profile. Setting the CPU clock limit by hand turns this off. ${
+                  ? `On: every 20 s it looks at what holds ${name} back. While the GPU is busy and no CPU core is maxed out, or the load is light (frame cap, menus), the CPU gives way a step at a time: first its clock limit by 200 MHz (down to half the top clock), then SMT off, and under light load only the small cores (E-cores / Zen 5c). The power it frees goes to the GPU, or it just runs cooler and longer. When a CPU core is maxed out while the GPU waits, it undoes those steps in reverse. What it settles on is kept in the profile. Setting the CPU clock limit by hand turns this off; changing SMT or cores by hand stays until it needs to move them again. ${
                       gs.auto_status ? `Last decision: ${gs.auto_status}.` : "Watching the first 20 s…"
                     }`
-                  : `Lets HHC share the power between CPU and GPU for ${name} by itself, by moving the CPU clock limit while it plays. Turning it on also saves a profile for the game if it has none.`)
+                  : `Lets HHC share the power between CPU and GPU for ${name} by itself while it plays: CPU clock limit, SMT and which cores run. Turning it on also saves a profile for the game if it has none.`)
             }
             checked={gs.auto}
             disabled={!!why || !gs.auto_available}

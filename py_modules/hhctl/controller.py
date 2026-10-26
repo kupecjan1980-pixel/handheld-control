@@ -64,8 +64,8 @@ DEFAULTS = {
     # settings put aside while a game with a profile runs.
     "games": {"enabled": True, "profiles": {}, "base": None},
     # System toggles (systweak.py); None / False leaves the system's value.
-    "system": {"thp": None, "swappiness": None, "nvme_none": False, "aspm": None,
-               "usb_awake": False, "wifi_ps_off": False},
+    # Nothing touches drives or SD cards (see systweak.py).
+    "system": {"thp": None, "swappiness": None, "usb_awake": False, "wifi_ps_off": False},
 }
 
 # Daemons that may also set TDP, RGB or the fan. Not InputPlumber: it only does the
@@ -742,16 +742,15 @@ class Controller:
         self.autotune.feed(now, self.gpu._util(), self.cpu_util.busiest)
         lo, hi = self.freqcap.range_mhz()
         s = self.settings["cpu"]
-        cap = int(s["cap_mhz"]) if s.get("cap") and s.get("cap_mhz") else None
-        new = self.autotune.decide(now, cap, lo, hi)
-        if new is False:
+        vals = self.autotune.decide(now, s, lo, hi, self.smt.available()[0],
+                                    self.cores.available()[0] and bool(self.cores.small))
+        if not vals:
             return
-        vals = {"cap": new is not None, "cap_mhz": new or s.get("cap_mhz")}
         s.update(vals)
         games.record(prof, "cpu", vals)
         self.save()
-        log.info("autotune: %s -> CPU limit %s", self.autotune.status, new or "off")
-        self._guard("cpu", (lambda: self.freqcap.apply(int(new))) if new else self.freqcap.restore)
+        log.info("autotune: %s", self.autotune.status)
+        self.apply_cpu()
 
     def apply_games(self) -> None:
         self.switch_profile()  # profiles switched on or off

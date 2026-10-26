@@ -3,21 +3,23 @@ sys.path.insert(0, sys.argv[1] + "/py_modules")
 from hhctl import systweak, rebar
 tmp = tempfile.mkdtemp()
 w = lambda p, v: (os.makedirs(os.path.dirname(p), exist_ok=True), open(p, "w").write(f"{v}\n"))
-systweak.THP, systweak.SWAPPINESS, systweak.ASPM = f"{tmp}/thp", f"{tmp}/swap", f"{tmp}/aspm"
+systweak.THP, systweak.SWAPPINESS = f"{tmp}/thp", f"{tmp}/swap"
 systweak.USB_AUTOSUSPEND, systweak.USB_DEVICES, systweak.NET = f"{tmp}/usbas", f"{tmp}/usb", f"{tmp}/net"
-w(systweak.THP, "[always] madvise never"); w(systweak.SWAPPINESS, 60); w(systweak.ASPM, "[default] performance powersave")
+w(systweak.THP, "[always] madvise never"); w(systweak.SWAPPINESS, 60)
 w(systweak.USB_AUTOSUSPEND, 2); w(f"{tmp}/usb/1-1/power/control", "auto")
+w(f"{tmp}/usb/1-2/power/control", "auto"); w(f"{tmp}/usb/1-2/1-2:1.0/bInterfaceClass", "08")  # a card reader
 t = systweak.SysTweaks()
 st = t.state()
 assert st["thp"]["current"] == "always" and st["swappiness"]["current"] == 60 and "wifi_ps_off" not in st
-t.apply({"thp": "madvise", "swappiness": 180, "aspm": "performance", "usb_awake": True})
+t.apply({"thp": "madvise", "swappiness": 180, "usb_awake": True})
 r = lambda p: open(p).read().strip()
-assert r(systweak.THP) == "madvise" and r(systweak.SWAPPINESS) == "180" and r(systweak.ASPM) == "performance"
+assert r(systweak.THP) == "madvise" and r(systweak.SWAPPINESS) == "180"
 assert r(systweak.USB_AUTOSUSPEND) == "-1" and r(f"{tmp}/usb/1-1/power/control") == "on"
-t.apply({"thp": None, "swappiness": 180, "aspm": "performance", "usb_awake": True})
+assert r(f"{tmp}/usb/1-2/power/control") == "auto", "storage is left alone"
+t.apply({"thp": None, "swappiness": 180, "usb_awake": True})
 assert r(systweak.THP) == "always", "set back to the system's: the old value returns"
 t.restore()
-assert r(systweak.SWAPPINESS) == "60" and r(systweak.ASPM) == "default"
+assert r(systweak.SWAPPINESS) == "60"
 assert r(systweak.USB_AUTOSUSPEND) == "2" and r(f"{tmp}/usb/1-1/power/control") == "auto"
 # Resizable BAR
 dev = f"{tmp}/gpu"

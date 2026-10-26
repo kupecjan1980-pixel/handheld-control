@@ -1,4 +1,4 @@
-"""System toggles: memory, storage, PCIe, USB and Wi-Fi power settings.
+"""System toggles: memory, USB and Wi-Fi power settings.
 
 Each one is set at runtime only, and only when picked; the value it had goes
 back when it's set to "system" again, when the plugin unloads and with every
@@ -9,10 +9,12 @@ values, so the panel shows the current one next to each.
   programs that ask; "always" can stall a game while memory is compacted.
 - swappiness: how readily memory goes to swap. With zram (compressed RAM,
   Bazzite / CachyOS / SteamOS) a high value is right; with swap on a disk, low.
-- nvme_none: the "none" I/O scheduler on NVMe drives (fastest for them).
-- aspm: PCIe link power saving. "performance" keeps links awake (less
-  latency, more power); "powersave" saves battery.
 - usb_awake: no USB autosuspend, so controllers and dongles never doze off.
+  USB drives and card readers are left alone.
+
+Nothing here touches drives or SD cards: a PCIe power (ASPM) change made
+Steam lose a game library on an SD card (ONEXPLAYER 3, 2026-10-26), so the
+NVMe scheduler and ASPM toggles were taken out again.
 - wifi_ps_off: Wi-Fi power saving off, for steadier game streaming (more power).
 """
 
@@ -27,15 +29,15 @@ log = logging.getLogger("hhctl")
 
 THP = "/sys/kernel/mm/transparent_hugepage/enabled"
 SWAPPINESS = "/proc/sys/vm/swappiness"
-ASPM = "/sys/module/pcie_aspm/parameters/policy"
 USB_AUTOSUSPEND = "/sys/module/usbcore/parameters/autosuspend"
 USB_DEVICES = "/sys/bus/usb/devices"
 NET = "/sys/class/net"
 SWAPPINESS_CHOICES = (10, 60, 100, 180)
 
 
-def nvme_queues() -> list[str]:
-    return sorted(glob.glob("/sys/block/nvme*n*/queue/scheduler"))
+def _storage(dev: str) -> bool:
+    """A USB drive or card reader (mass storage interface, class 08)."""
+    return any(sysfs.read(f) == "08" for f in glob.glob(f"{dev}/*/bInterfaceClass"))
 
 
 def wifi_ifaces() -> list[str]:
@@ -66,11 +68,6 @@ class SysTweaks:
         if os.path.exists(SWAPPINESS):
             out["swappiness"] = {"current": sysfs.read_int(SWAPPINESS), "choices": list(SWAPPINESS_CHOICES),
                                  "zram": zram()}
-        queues = nvme_queues()
-        if queues and any("none" in sysfs.choices(q) for q in queues):
-            out["nvme_none"] = {"current": sorted({sysfs.selected(q) for q in queues})}
-        if sysfs.writable(ASPM):
-            out["aspm"] = {"current": sysfs.selected(ASPM), "choices": sysfs.choices(ASPM)}
         if os.path.exists(USB_AUTOSUSPEND):
             out["usb_awake"] = {"current": sysfs.read_int(USB_AUTOSUSPEND)}
         ifaces = wifi_ifaces()
@@ -93,7 +90,7 @@ class SysTweaks:
     def apply(self, s: dict) -> None:
         """s: the "system" settings. None / False leaves (or puts back) a setting."""
         errors = []
-        for key in ("thp", "swappiness", "nvme_none", "aspm", "usb_awake", "wifi_ps_off"):
+        for key in ("thp", "swappiness", "usb_awake", "wifi_ps_off"):
             want = s.get(key)
             try:
                 if want in (None, False):
@@ -115,16 +112,6 @@ class SysTweaks:
             if cur != int(want):
                 self._keep(key, cur)
                 sysfs.write(SWAPPINESS, int(want))
-        elif key == "nvme_none":
-            for q in nvme_queues():
-                cur = sysfs.selected(q)
-                if cur != "none" and "none" in sysfs.choices(q):
-                    self.orig.setdefault(key, {})[q] = cur  # type: ignore[index]
-                    sysfs.write(q, "none")
-        elif key == "aspm":
-            if sysfs.selected(ASPM) != want:
-                self._keep(key, sysfs.selected(ASPM))
-                sysfs.write(ASPM, want)
         elif key == "usb_awake":
             cur = sysfs.read_int(USB_AUTOSUSPEND)
             if cur != -1:
@@ -133,6 +120,8 @@ class SysTweaks:
             # ...and the ones already there
             ctl = self.orig.setdefault("usb_awake_dev", {})
             for c in glob.glob(f"{USB_DEVICES}/*/power/control"):
+                if _storage(os.path.dirname(os.path.dirname(c))):
+                    continue
                 v = sysfs.read(c)
                 if v and v != "on":
                     ctl.setdefault(c, v)  # type: ignore[union-attr]
@@ -158,14 +147,6 @@ class SysTweaks:
             sysfs.write(THP, old)
         elif key == "swappiness":
             sysfs.write(SWAPPINESS, old)
-        elif key == "nvme_none":
-            for q, v in old.items():  # type: ignore[union-attr]
-                try:
-                    sysfs.write(q, v)
-                except OSError:
-                    pass  # drive gone
-        elif key == "aspm":
-            sysfs.write(ASPM, old)
         elif key == "usb_awake":
             sysfs.write(USB_AUTOSUSPEND, old)
             for c, v in self.orig.pop("usb_awake_dev", {}).items():  # type: ignore[union-attr]

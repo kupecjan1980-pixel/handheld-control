@@ -5,13 +5,14 @@ need can go to the GPU. While a game with auto-tune runs, the GPU's load
 and the busiest CPU core's are averaged over WINDOW seconds, and the CPU
 clock limit moves a step at a time:
 
-- GPU-bound (GPU busy, no CPU core maxed out): lower the CPU limit, so the
+- GPU-bound (GPU busy, no CPU core maxed out): the CPU gives way, so the
   GPU gets the power (or, below the power limit, it just runs cooler).
-- CPU-bound (a core maxed out while the GPU waits): raise it again.
-- Light load (frame cap, menus): lower it to save power.
+- CPU-bound (a core maxed out while the GPU waits): the CPU gets it back.
+- Light load (frame cap, menus): the CPU gives way to save power.
 
-It never goes below FLOOR of the CPU's top clock, and the limit it settles
-on is kept in the game's profile, so the next start begins there.
+Giving way: the clock limit first (never below FLOOR of the top clock), then
+SMT off, then (light load only) just the small cores. What it settles on is
+kept in the game's profile, so the next start begins there.
 """
 
 WINDOW = 20.0  # seconds averaged per decision
@@ -39,25 +40,48 @@ class AutoTune:
             self.started = now
         self.samples.append((gpu, core))
 
-    def decide(self, now: float, cap: int | None, lo: int, hi: int) -> int | None | bool:
-        """After a full window: the new CPU limit (MHz), None for no limit,
-        or False to leave it. cap: the limit now (None: none)."""
+    def decide(self, now: float, cpu: dict, lo: int, hi: int, can_smt: bool, can_small: bool) -> dict | None:
+        """After a full window: the CPU settings to change (a dict for
+        settings["cpu"]), or None to leave them. cpu: settings["cpu"] now.
+
+        Giving way goes a step at a time, cheapest first: the clock limit down
+        to FLOOR, then SMT off (half the threads), then, under light load
+        only, the small cores alone (E-cores / Zen 5c). A maxed-out core
+        undoes it in the opposite order."""
         if self.started is None or now - self.started < WINDOW or len(self.samples) < 5:
-            return False
+            return None
         gpu = sum(g for g, _ in self.samples) / len(self.samples)
         core = sum(c for _, c in self.samples) / len(self.samples)
         self.samples, self.started = [], None
         floor = max(lo, int(hi * FLOOR) // 100 * 100)
-        cur = cap or hi
-        if gpu >= GPU_BOUND and core < CPU_BUSY:
-            why, new = "GPU-bound", max(floor, cur - STEP)
+        cur = int(cpu["cap_mhz"]) if cpu.get("cap") and cpu.get("cap_mhz") else hi
+        light = gpu < LIGHT and core < LIGHT
+        change: dict = {}
+        if gpu >= GPU_BOUND and core < CPU_BUSY or light:
+            why = "light load" if light else "GPU-bound"
+            if cur > floor:
+                new = max(floor, cur - STEP)
+                change = {"cap": True, "cap_mhz": new}
+                what = f"CPU limit {new} MHz"
+            elif can_smt and cpu.get("smt") is not False:
+                change, what = {"smt": False}, "SMT off"
+            elif light and can_small and cpu.get("cores") != "small":
+                change, what = {"cores": "small"}, "small cores only"
+            else:
+                what = "as low as it goes"
         elif core >= CORE_MAXED and gpu < GPU_WAITING:
-            why, new = "CPU-bound", min(hi, cur + 2 * STEP)
-        elif gpu < LIGHT and core < LIGHT:
-            why, new = "light load", max(floor, cur - STEP)
+            why = "CPU-bound"
+            if cpu.get("cores") == "small":
+                change, what = {"cores": "all"}, "all cores"
+            elif cpu.get("smt") is False:
+                change, what = {"smt": True}, "SMT on"
+            elif cur < hi:
+                new = min(hi, cur + 2 * STEP)
+                change = {"cap": False} if new >= hi else {"cap": True, "cap_mhz": new}
+                what = "no CPU limit" if new >= hi else f"CPU limit {new} MHz"
+            else:
+                what = "already at full speed"
         else:
-            why, new = "balanced", cur
-        self.status = f"{why} (GPU {gpu:.0f} %, busiest core {core:.0f} %)"
-        if new == cur:
-            return False
-        return None if new >= hi else new
+            why, what = "balanced", "no change"
+        self.status = f"{why} (GPU {gpu:.0f} %, busiest core {core:.0f} %): {what}"
+        return change or None
