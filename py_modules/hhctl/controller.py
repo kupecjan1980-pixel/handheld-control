@@ -150,6 +150,11 @@ class Controller:
         self.settings = self._load()
         self.game: tuple[str, str] | None = None  # running Steam game: (appid, name)
         self.pre_game: dict | None = None  # settings when a game without a profile started
+        for prof in self.settings["games"]["profiles"].values():
+            # 0.10.85's auto-tune could leave a game on the small cores only (see autotune.py).
+            cpu_s = prof.get("settings", {}).get("cpu", {})
+            if prof.get("auto") and cpu_s.get("cores") == "small":
+                cpu_s["cores"] = None
         if self.settings["games"]["base"]:
             # Stopped while a game's profile was in use: back to the usual settings.
             games.put(self.settings, self.settings["games"]["base"])
@@ -742,8 +747,7 @@ class Controller:
         self.autotune.feed(now, self.gpu._util(), self.cpu_util.busiest)
         lo, hi = self.freqcap.range_mhz()
         s = self.settings["cpu"]
-        vals = self.autotune.decide(now, s, lo, hi, self.smt.available()[0],
-                                    self.cores.available()[0] and bool(self.cores.small))
+        vals = self.autotune.decide(now, s, lo, hi, self.smt.available()[0])
         if not vals:
             return
         s.update(vals)

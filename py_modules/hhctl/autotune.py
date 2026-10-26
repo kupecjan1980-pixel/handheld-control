@@ -11,8 +11,13 @@ clock limit moves a step at a time:
 - Light load (frame cap, menus): the CPU gives way to save power.
 
 Giving way: the clock limit first (never below FLOOR of the top clock), then
-SMT off, then (light load only) just the small cores. What it settles on is
-kept in the game's profile, so the next start begins there.
+SMT off. What it settles on is kept in the game's profile, so the next start
+begins there.
+
+Never "small cores only": that limits all of user.slice, Steam included, and
+on the ONEXPLAYER 3 (4 LP E-cores) quitting a game then took so long it
+looked stuck; the forced reboot left the SD card's library unreadable
+(2026-10-26).
 """
 
 WINDOW = 20.0  # seconds averaged per decision
@@ -40,14 +45,14 @@ class AutoTune:
             self.started = now
         self.samples.append((gpu, core))
 
-    def decide(self, now: float, cpu: dict, lo: int, hi: int, can_smt: bool, can_small: bool) -> dict | None:
+    def decide(self, now: float, cpu: dict, lo: int, hi: int, can_smt: bool) -> dict | None:
         """After a full window: the CPU settings to change (a dict for
         settings["cpu"]), or None to leave them. cpu: settings["cpu"] now.
 
-        Giving way goes a step at a time, cheapest first: the clock limit down
-        to FLOOR, then SMT off (half the threads), then, under light load
-        only, the small cores alone (E-cores / Zen 5c). A maxed-out core
-        undoes it in the opposite order."""
+        Giving way goes a step at a time: the clock limit down to FLOOR, then
+        SMT off (half the threads). A maxed-out core undoes it in the
+        opposite order; cores left on the small ones (older versions) come
+        back first."""
         if self.started is None or now - self.started < WINDOW or len(self.samples) < 5:
             return None
         gpu = sum(g for g, _ in self.samples) / len(self.samples)
@@ -65,8 +70,6 @@ class AutoTune:
                 what = f"CPU limit {new} MHz"
             elif can_smt and cpu.get("smt") is not False:
                 change, what = {"smt": False}, "SMT off"
-            elif light and can_small and cpu.get("cores") != "small":
-                change, what = {"cores": "small"}, "small cores only"
             else:
                 what = "as low as it goes"
         elif core >= CORE_MAXED and gpu < GPU_WAITING:
