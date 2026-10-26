@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, autotune, background, games, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, autotune, background, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -38,6 +38,8 @@ DEFAULTS = {
     "gpu": {"mode": "auto", "mhz": None, "profile": None},
     # Game Mode HDR: "steam" leaves gamescope alone; others only after confirm.
     "gamescope": {"hdr": "steam"},
+    # stop_idle: end Steam's performance overlay (mangoapp) while no game runs.
+    "overlay": {"stop_idle": False},
     # Game Mode brightness through gamescope's SDR-in-HDR nits. The first
     # change is a trial that must be confirmed; after that it applies directly.
     "sdr_brightness": {"enabled": False, "nits": 203, "confirmed": False},
@@ -191,6 +193,7 @@ class Controller:
         self.memtweak = memtweak.MemTweak()
         self.systweak = systweak.SysTweaks()
         self.autotune = autotune.AutoTune()
+        self.overlay = overlay.IdleOverlay()
         self.lsfg_busy = False
         self.gpuclk = gpu.GpuClock(self.gpu.dev, self.gpu.driver)  # snapshots the driver's clocks
         self.gpu_profile = gpu.PowerProfile(self.gpu.dev, self.gpu.driver)
@@ -1128,7 +1131,16 @@ class Controller:
             log.info("Backlight at %s%% in Game Mode SDR, raising to %s%%", pct, backlight.MIN_PCT)
             self._guard("display", lambda: self.backlight.set_percent(backlight.MIN_PCT))
 
+    def apply_overlay(self) -> None:
+        self.overlay.reset()  # switched again: try again
+
+    def tick_overlay(self) -> None:
+        if self.desktop or not gamescope._gamescope_pid():
+            return
+        self.overlay.tick(bool(self.settings["overlay"]["stop_idle"]), self.game is not None)
+
     def tick_gamescope(self) -> None:
+        self.tick_overlay()
         self._gs_refresh()
         self._brightness_floor()
         now = time.monotonic()
@@ -1819,6 +1831,8 @@ class Controller:
             },
             "system": self.systweak.state(),
             "topuse": self.topuse,
+            "overlay": {"note": self.overlay.note, "idle_since": self.overlay.seen_idle,
+                        "game_mode": not self.desktop},
             "rebar": rebar.status(self.gpu.dev, self.gpu.driver),
             "upscale": self.upscale.state(),
             "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},

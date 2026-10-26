@@ -49,6 +49,7 @@ type Settings = {
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
   games: { enabled: boolean };
+  overlay: { stop_idle: boolean };
   system: {
     thp: string | null;
     swappiness: number | null;
@@ -195,6 +196,7 @@ type State = {
     usb_awake?: { current: number | null };
     wifi_ps_off?: { current: boolean; iface: string };
   };
+  overlay?: { note: string | null; idle_since: string | null; game_mode: boolean };
   topuse?: { cpu: [string, number][]; gpu: [string, number][]; at: string } | null;
   rebar?: { state: "on" | "off" | "partial" | "n/a"; bar_mb: number; vram_mb: number | null; text: string } | null;
   upscale: {
@@ -871,6 +873,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   sleep: callable<[object], State>("set_sleep"),
   games: callable<[object], State>("set_games"),
   system: callable<[object], State>("set_system"),
+  overlay: callable<[object], State>("set_overlay"),
 };
 
 const BYPASS_LABELS: Record<string, string> = {
@@ -3275,6 +3278,22 @@ function TopUseRows({ state, setState }: { state: State; setState: (s: State) =>
           {busy ? "…" : "Measure with the menu closed"}
         </ButtonItem>
       </PanelSectionRow>
+      {state.overlay?.game_mode && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Stop the performance overlay outside games"
+            description={[
+              "Steam hides its performance overlay when a game closes but leaves the program that draws it (mangoapp) running, so the GPU never rests on the Steam screen. With this on, HHC ends it once no game has run for 10 s; Steam starts it again when a game shows the overlay.",
+              state.overlay.idle_since ? `Seen running with no game since ${state.overlay.idle_since}.` : null,
+              state.overlay.note,
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            checked={!!state.settings.overlay?.stop_idle}
+            onChange={async (v) => setState(await setters.overlay({ stop_idle: v }))}
+          />
+        </PanelSectionRow>
+      )}
     </PanelSection>
   );
 }

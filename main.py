@@ -113,6 +113,9 @@ class Plugin:
     async def set_system(self, values: dict):
         return await self._run(self.ctl.update, "system", values)
 
+    async def set_overlay(self, values: dict):
+        return await self._run(self.ctl.update, "overlay", values)
+
     async def set_games(self, values: dict):
         return await self._run(self.ctl.update, "games", values)
 
