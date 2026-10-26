@@ -210,6 +210,8 @@ class DesktopPad:
 
     def _loop(self, fds: dict[int, Pad], mouse: VirtualMouse, nodes: list[str]) -> None:
         held = {BTN_LEFT: False, BTN_RIGHT: False}
+        digital = {BTN_LEFT: False, BTN_RIGHT: False}  # pads with trigger buttons instead of axes
+        last_l3 = 0.0
         wheel = [0.0, 0.0]  # fractional notches (vertical, horizontal)
         rem = [0.0, 0.0]  # fractional pixels
         next_check = time.monotonic() + RESCAN
@@ -230,19 +232,20 @@ class DesktopPad:
                     if etype == EV_ABS and code in pad.abs:
                         pad.abs[code] = value
                     elif etype == EV_KEY and code == BTN_THUMBL and value == 1:
-                        threading.Thread(target=toggle_kde_keyboard, args=(self.home,), daemon=True).start()
+                        if time.monotonic() - last_l3 > 0.5:  # once, even when two pads send it
+                            last_l3 = time.monotonic()
+                            threading.Thread(target=toggle_kde_keyboard, args=(self.home,), daemon=True).start()
                     elif etype == EV_KEY and code in (BTN_TL2, BTN_TR2) and value in (0, 1):
-                        btn = BTN_LEFT if code == BTN_TR2 else BTN_RIGHT
-                        if held[btn] != bool(value):
-                            held[btn] = bool(value)
-                            mouse.emit([(EV_KEY, btn, value)])
+                        digital[BTN_LEFT if code == BTN_TR2 else BTN_RIGHT] = bool(value)
             out = []
+            # Pressed on any gamepad: InputPlumber's virtual one and the real
+            # one it grabbed are both listed, and the grabbed one stays at rest.
+            for btn, codes in ((BTN_LEFT, (ABS_RZ, ABS_GAS)), (BTN_RIGHT, (ABS_Z, ABS_BRAKE))):
+                down = any(pad.trigger(*codes) for pad in fds.values()) or digital[btn]
+                if down != held[btn]:
+                    held[btn] = down
+                    out.append((EV_KEY, btn, int(down)))
             for pad in fds.values():
-                for btn, codes in ((BTN_LEFT, (ABS_RZ, ABS_GAS)), (BTN_RIGHT, (ABS_Z, ABS_BRAKE))):
-                    down = pad.trigger(*codes)
-                    if down != held[btn]:
-                        held[btn] = down
-                        out.append((EV_KEY, btn, int(down)))
                 for i, code in enumerate((ABS_RX, ABS_RY)):
                     rem[i] += pad.axis(code) * SPEED
                 wheel[0] -= pad.axis(ABS_Y) * SCROLL
