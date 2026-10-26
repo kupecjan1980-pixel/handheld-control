@@ -177,6 +177,7 @@ class Controller:
         self.ipconf = inputplumber.Configs(self.buttons.key)
         self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake)
         self.slept_at: float | None = None  # boot time when it went to sleep
+        self.sleep_bat: tuple[int | None, bool, bool] = (None, False, False)  # capacity, on AC, charging paused
         self.woke: float | None = None  # set by the wake signal; tick() acts on it
         self.sleep_note: str | None = None
         self.wake_before: dict = {}
@@ -532,8 +533,16 @@ class Controller:
     QUICK_WAKE = 15.0  # s: woken this soon by a controller device = that device is noisy
 
     def _before_sleep(self) -> None:
-        """From the sleep watcher's thread, while logind waits: just the lights."""
+        """From the sleep watcher's thread, while logind waits: the lights and
+        the charge limit."""
         self.slept_at = sleep.boottime()
+        self.sleep_bat = (self.bat.capacity(), battery.ac_online(), False)
+        b = self.settings["battery"]
+        try:
+            held = self.bat.hold_for_sleep(int(b["limit"]), b["bypass"])
+            self.sleep_bat = self.sleep_bat[:2] + (held,)
+        except Exception:
+            log.exception("sleep: couldn't pause charging")
         if self.pad_wake_on():
             self.padwake.snapshot()
         if self.settings["sleep"].get("rgb_off") and self.rgb and self.settings["rgb"]["enabled"]:
@@ -559,6 +568,12 @@ class Controller:
         parts = [f"slept {slept:.0f} s" if slept is not None else "woke"]
         if sources or irq:
             parts.append("woken by " + ", ".join(sources + ([irq] if irq else [])))
+        cap0, ac0, held = self.sleep_bat
+        cap1 = self.bat.capacity()
+        if ac0 and cap0 is not None and cap1 is not None and self.bat.limit_mode() == "emulated":
+            raw = self.bat.raw_behaviour()
+            parts.append(f"battery {cap0} → {cap1} %, charging {'paused' if held else 'on'}"
+                         + (f" (EC 0x{raw:02X})" if raw is not None else ""))
         self.last_wake = f"Last sleep ({time.strftime('%H:%M')}): " + ", ".join(parts)
         log.info("sleep: %s", self.last_wake)
         if not self.pad_wake_on():
@@ -595,9 +610,13 @@ class Controller:
         v = self.settings["sleep"].get("pad_wake")
         return PAD_WAKE_DEFAULT.get(self.buttons.key, False) if v is None else bool(v)
 
+    def limit_while_asleep(self) -> bool:
+        b = self.settings["battery"]
+        return self.bat.limit_mode() == "emulated" and int(b["limit"]) < 100
+
     def apply_sleep(self) -> None:
         s = self.settings["sleep"]
-        if (s.get("rgb_off") and self.rgb) or self.pad_wake_on():
+        if (s.get("rgb_off") and self.rgb) or self.pad_wake_on() or self.limit_while_asleep():
             self.sleeper.start()
         else:
             self.sleeper.stop()
@@ -760,6 +779,8 @@ class Controller:
                     self.bat.set_bypass("off")
 
         self._guard("battery", go)
+        if self.limit_while_asleep() and not self.sleeper.enabled:
+            self.apply_sleep()  # the limit has to be held before it sleeps too
 
     def apply_rgb(self) -> None:
         s = self.settings["rgb"]

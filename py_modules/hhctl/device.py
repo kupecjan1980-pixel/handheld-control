@@ -112,7 +112,8 @@ def _next2(vendor: str, board: str) -> Device:
         ec_mmio=0xFE800400,
         notes=[
             "The NEXT 2 has no charge limit of its own: the plugin pauses "
-            "charging at the limit, so it only holds while the plugin runs.",
+            "charging at the limit. Asleep it holds only if it was at the "
+            "limit when it went to sleep; below it, it charges to full.",
         ],
         board=board,
         vendor=vendor,

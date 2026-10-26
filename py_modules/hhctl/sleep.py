@@ -1,4 +1,5 @@
-"""Suspend: lights off before it sleeps; the controller may wake it.
+"""Suspend: lights off and the charge limit held before it sleeps; the
+controller may wake it.
 
 logind announces a suspend with PrepareForSleep(true) and waits for "delay"
 inhibitors (up to InhibitDelayMaxSec, 5 s by default). The plugin holds one
@@ -52,7 +53,7 @@ class SleepWatch:
         try:
             self._inhibit = proc.popen(
                 ["systemd-inhibit", "--what=sleep", "--mode=delay", "--who=Handheld Control",
-                 "--why=Turning the lights off first", "sleep", "infinity"],
+                 "--why=Lights off and charge limit first", "sleep", "infinity"],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError as e:
             log.warning("sleep: no inhibitor (%s)", e)

@@ -133,6 +133,29 @@ class Battery:
         elif cap <= limit - HYSTERESIS and self.inhibited:
             self.set_behaviour("auto")
 
+    def hold_for_sleep(self, limit: int, bypass: str) -> bool:
+        """Emulated limit, just before a suspend: nothing runs tick() while it
+        sleeps, so a charger would fill it to 100 %. At (or just under) the
+        limit charging is paused now, and the EC keeps that while asleep.
+        Further below, it charges on (it can't stop at the limit asleep).
+        True if paused."""
+        if self.limit_mode() != "emulated" or bypass != "off" or limit >= 100:
+            return False
+        cap = self.capacity()
+        if cap is None or cap < limit - HYSTERESIS:
+            return False
+        self.set_behaviour("inhibit-charge")  # written again even if paused: firmware may have reset it
+        return True
+
+    def raw_behaviour(self) -> int | None:
+        """The EC's charge register, for the wake report."""
+        if self.native_behaviour or not (self.ec_ok and self.dev.ec_charge):
+            return None
+        try:
+            return ec.read(self.dev.ec_charge.behaviour_reg)
+        except Exception:
+            return None
+
     # --- telemetry --------------------------------------------------------
 
     def capacity(self) -> int | None:
