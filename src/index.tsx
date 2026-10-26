@@ -60,6 +60,7 @@ type Settings = {
     buttons: boolean;
     ip_target: string | null;
     swipe_keyboard?: boolean;
+    desktop_mouse?: boolean | null;
     swipe_edge?: string | null;
     chord?: string | null;
   };
@@ -149,6 +150,7 @@ type State = {
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
   chord?: { value: string; pads: number };
+  desktop_mouse?: { on: boolean; pads: number; game_mode: boolean; game: boolean; error: string | null };
   swipe?: {
     available: boolean;
     listening: string | null;
@@ -2840,6 +2842,28 @@ function Content() {
                   ]}
                   selectedOption={state.chord.value}
                   onChange={(o) => change("controller", { chord: o.data }, 0)}
+                />
+              </PanelSectionRow>
+            )}
+            {state.desktop_mouse && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Controller as mouse in Desktop Mode"
+                  description={`Like hhd's desktop mode: outside Game Mode the left stick moves the pointer, the right stick scrolls, the right trigger is a left click, the left trigger a right click, and the left stick click (L3) shows or hides KDE's on-screen keyboard. Pauses while a Steam game runs, and in Game Mode the controller works as usual. Apps that use a gamepad still get it too. If Steam's own desktop layout also moves the pointer, turn one of them off. ${
+                    state.desktop_mouse.error
+                      ? `Not working: ${state.desktop_mouse.error}.`
+                      : !state.desktop_mouse.on
+                        ? ""
+                        : state.desktop_mouse.game_mode
+                          ? "Now: in Game Mode, so waiting for Desktop Mode."
+                          : state.desktop_mouse.game
+                            ? "Now: paused, a game is running."
+                            : state.desktop_mouse.pads
+                              ? "Now: active."
+                              : "Now: no controller found yet."
+                  }`}
+                  checked={state.desktop_mouse.on}
+                  onChange={(v) => change("controller", { desktop_mouse: v }, 0)}
                 />
               </PanelSectionRow>
             )}

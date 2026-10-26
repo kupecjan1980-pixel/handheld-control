@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, autotune, background, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, autotune, background, desktoppad, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -48,7 +48,10 @@ DEFAULTS = {
     # ip_target: controller InputPlumber emulates (None leaves its choice).
     # ip_failed: our InputPlumber config made no controller; off until picked again.
     "controller": {"buttons": True, "ip_target": "xbox-elite", "ip_failed": None,
-                   "swipe_keyboard": False, "swipe_edge": None, "chord": None},
+                   "swipe_keyboard": False, "swipe_edge": None, "chord": None,
+                   # desktop_mouse: the controller as a mouse in Desktop Mode (desktoppad.py);
+                   # None = on for the handhelds, off for PCs.
+                   "desktop_mouse": None},
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
     # curve "custom": the speeds in "points", one per fan.CUSTOM_TEMPS.
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced", "points": None},
@@ -205,6 +208,9 @@ class Controller:
         self.swipe_avail = self.swipe.available()
         self.chord = padchord.PadChord(lambda action: self.emit(action), self.chord_setting)
         self.powerkey = powerkey.PowerKey(self._power_short)
+        self.desktop_game = False  # a Steam game runs outside Game Mode (checked every 5 s)
+        self.next_desktop_game = 0.0
+        self.desktoppad = desktoppad.DesktopPad(self._home(), self.desktop_mouse_active)
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
         self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake)
@@ -500,6 +506,20 @@ class Controller:
             return "guide_b" if self.buttons.key == "generic" else None
         return None if v == "off" else v
 
+    def desktop_mouse_on(self) -> bool:
+        v = self.settings["controller"].get("desktop_mouse")
+        return self.buttons.key != "generic" if v is None else bool(v)
+
+    def desktop_mouse_active(self) -> bool:
+        """From the desktop pad's thread: on, outside Game Mode, no game running."""
+        if not self.desktop_mouse_on() or gamescope._gamescope_pid():
+            return False
+        now = time.monotonic()
+        if now >= self.next_desktop_game:
+            self.next_desktop_game = now + 5
+            self.desktop_game = games.running_steam_game(self.user_home) is not None
+        return not self.desktop_game
+
     def _swipe_learned(self, edge: str) -> None:
         self.settings["controller"]["swipe_edge"] = edge
         self.save()
@@ -514,6 +534,10 @@ class Controller:
             self.chord.start()
         else:
             self.chord.stop()
+        if self.desktop_mouse_on():
+            self.desktoppad.start()
+        else:
+            self.desktoppad.stop()
         if c.get("swipe_keyboard"):
             self.swipe.calibrating = not c.get("swipe_edge")  # first swipe teaches the bottom edge
             self.swipe.start()
@@ -1594,6 +1618,7 @@ class Controller:
             self.swipe.stop()
             self.chord.stop()
             self.powerkey.stop()
+            self.desktoppad.stop()
             self._guard("memtweak", self.memtweak.restore)
             self._guard("system", self.systweak.restore)
             self._guard("controller", self.ip.restore)
@@ -1793,6 +1818,9 @@ class Controller:
             "input_capture": dict(self.icap),
             "update": {**self.upd, "releases": [{**r, "notes": r["notes"][:600]} for r in self.upd["releases"]]},
             "chord": {"value": self.chord_setting() or "off", "pads": len(self.chord.nodes)},
+            "desktop_mouse": {"on": self.desktop_mouse_on(), "pads": len(self.desktoppad.nodes),
+                              "game_mode": bool(gamescope._gamescope_pid()), "game": self.desktop_game,
+                              "error": self.desktoppad.error},
             "swipe": {
                 "available": self.swipe_avail or self.swipe.node is not None,
                 "listening": self.swipe.node,
