@@ -48,6 +48,7 @@ type Settings = {
   };
   battery: { limit: number; bypass: string };
   ec: { enabled: boolean };
+  games: { enabled: boolean };
   controller: {
     buttons: boolean;
     ip_target: string | null;
@@ -167,6 +168,7 @@ type State = {
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
   ai: { enabled: boolean; vars: Record<string, string> };
   memtweak?: { available: Record<string, string>; pending: string[] };
+  games?: { enabled: boolean; game: { appid: string; name: string } | null; profile: boolean; count: number };
   upscale: {
     options: string[];
     on: Record<string, boolean>;
@@ -334,6 +336,8 @@ const saveIpReport = callable<[], State>("save_ip_report");
 const setAi = callable<[boolean], State>("set_ai");
 const setUpscale = callable<[string, boolean], State>("set_upscale");
 const setLsfg = callable<[boolean], State>("set_lsfg");
+const setGame = callable<[string | null, string | null], State>("set_game");
+const saveGameProfile = callable<[boolean], State>("save_game_profile");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
@@ -835,6 +839,7 @@ const setters: Record<Section, (v: object) => Promise<State>> = {
   ec: callable<[object], State>("set_ec"),
   controller: callable<[object], State>("set_controller"),
   sleep: callable<[object], State>("set_sleep"),
+  games: callable<[object], State>("set_games"),
 };
 
 const BYPASS_LABELS: Record<string, string> = {
@@ -1790,6 +1795,7 @@ function Content() {
           </PanelSection>
         )}
         <div className="hhctl-main" style={view === "main" ? undefined : { display: "none" }}>
+          <GameProfileRows state={state} setState={setState} />
           <PanelSection>
             {!tdp.backend ? (
               <Unavailable why="No TDP interface found (firmware-attributes, RAPL, ryzenadj or the AMD SMU)." />
@@ -3121,8 +3127,60 @@ function openKeyboard() {
   }, 250);
 }
 
+// --- Per-game profiles: tell the backend which game runs ----------------------
+
+let sentGame: string | null | undefined;
+function watchGame() {
+  const g = runningGame();
+  const id = g ? String(g.appid) : null;
+  if (id === sentGame) return;
+  sentGame = id;
+  setGame(id, g?.name ?? null).catch(() => (sentGame = undefined));
+}
+
+function GameProfileRows({ state, setState }: { state: State; setState: (s: State) => void }) {
+  const gs = state.games;
+  if (!gs || (window as any).HHC_DESKTOP) return null;
+  const saved = gs.count ? ` ${gs.count} game${gs.count === 1 ? "" : "s"} with a profile.` : "";
+  return (
+    <PanelSection title="Game profile">
+      {gs.game ? (
+        <PanelSectionRow>
+          <ToggleField
+            label={`Profile for ${gs.game.name}`}
+            description={
+              !gs.enabled
+                ? "Profiles are switched off below."
+                : gs.profile
+                  ? "TDP, CPU, GPU and fan settings below belong to this game: changes are kept for it, " +
+                    "and the usual settings come back when it closes."
+                  : "Keeps the TDP, CPU, GPU and fan settings below for this game, applied whenever it starts."
+            }
+            checked={gs.profile}
+            disabled={!gs.enabled}
+            onChange={async (v) => setState(await saveGameProfile(v))}
+          />
+        </PanelSectionRow>
+      ) : (
+        <PanelSectionRow>
+          <Field label="No game running" description={`Start a game to keep settings for it.${saved}`} />
+        </PanelSectionRow>
+      )}
+      <PanelSectionRow>
+        <ToggleField
+          label="Use game profiles"
+          checked={gs.enabled}
+          onChange={async (v) => setState(await setters.games({ enabled: v }))}
+        />
+      </PanelSectionRow>
+    </PanelSection>
+  );
+}
+
 export default definePlugin(() => {
   addEventListener<[string]>("hhctl_button", onButton);
+  // Runs while Steam does, panel open or not, so profiles switch by themselves.
+  const gameWatch = setInterval(watchGame, 2000);
   // Closing with B isn't seen by the plugin, so note the tab while it's open.
   const tabWatch = setInterval(rememberTab, 1000);
   return {
@@ -3133,6 +3191,7 @@ export default definePlugin(() => {
     onDismount: () => {
       removeEventListener("hhctl_button", onButton);
       clearInterval(tabWatch);
+      clearInterval(gameWatch);
     },
   };
 });

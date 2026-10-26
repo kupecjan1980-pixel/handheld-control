@@ -93,6 +93,15 @@ class Plugin:
     async def set_controller(self, values: dict):
         return await self._run(self.ctl.update, "controller", values)
 
+    async def set_game(self, appid: str | None, name: str | None):
+        return await self._run(self.ctl.set_game, appid, name)
+
+    async def save_game_profile(self, on: bool):
+        return await self._run(self.ctl.save_game_profile, on)
+
+    async def set_games(self, values: dict):
+        return await self._run(self.ctl.update, "games", values)
+
     async def set_ui(self, values: dict):
         return await self._run(self.ctl.update, "ui", values)
 

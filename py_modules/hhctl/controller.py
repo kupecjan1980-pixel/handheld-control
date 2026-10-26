@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, background, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, background, games, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -57,6 +57,9 @@ DEFAULTS = {
     "battery": {"limit": 100, "bypass": "off"},
     # Raw EC writes are only used when the user opts in.
     "ec": {"enabled": False},
+    # Per-game profiles (games.py): appid -> {"name", "settings"}; base: the
+    # settings put aside while a game with a profile runs.
+    "games": {"enabled": True, "profiles": {}, "base": None},
 }
 
 # Daemons that may also set TDP, RGB or the fan. Not InputPlumber: it only does the
@@ -134,6 +137,13 @@ class Controller:
         self.dev = detect()
         self.cpu_model = cpu_model()
         self.settings = self._load()
+        self.game: tuple[str, str] | None = None  # running Steam game: (appid, name)
+        self.pre_game: dict | None = None  # settings when a game without a profile started
+        if self.settings["games"]["base"]:
+            # Stopped while a game's profile was in use: back to the usual settings.
+            games.put(self.settings, self.settings["games"]["base"])
+            self.settings["games"]["base"] = None
+            self.save()
         self.tdp = tdp.find_backend(self.dev)
         self.thermal = self._thermal_backend()
         # Intel only: firmware-attributes already selects "custom", ryzenadj needs nothing.
@@ -266,6 +276,9 @@ class Controller:
             elif values.get("mode", "auto") != "auto":
                 values = {**values, "profile": None}
         self.settings[section].update(values)
+        prof = self.game_profile()
+        if prof and self.settings["games"]["base"] is not None:
+            games.record(prof, section, values)
         self.save()
         getattr(self, f"apply_{section}")()
         return self.state()
@@ -606,6 +619,74 @@ class Controller:
                 self.padwake.enable()
             self.sleep_note = (f"{', '.join(by)} woke it right away ({slept:.0f} s after sleeping), "
                                "so it no longer wakes it")
+
+    # --- per-game profiles ------------------------------------------------
+
+    def game_profile(self) -> dict | None:
+        g = self.settings["games"]
+        return g["profiles"].get(self.game[0]) if self.game and g["enabled"] else None
+
+    def set_game(self, appid: str | None, name: str | None = None) -> dict:
+        """From the panel whenever Steam's running game changes."""
+        game = (str(appid), name or f"App {appid}") if appid else None
+        if (game and game[0]) != (self.game and self.game[0]):
+            self.game = game
+            # Tuning for a game before saving its profile: the usual settings
+            # are what was in use when it started.
+            self.pre_game = games.snapshot(self.settings) if game and not self.game_profile() else None
+            log.info("games: running %s", game[1] if game else "nothing")
+            self.switch_profile()
+        return self.state()
+
+    def switch_profile(self) -> None:
+        g = self.settings["games"]
+        prof = self.game_profile()
+        if prof:
+            if g["base"] is None:
+                g["base"] = games.snapshot(self.settings)
+            games.put(self.settings, prof["settings"])
+            log.info("games: profile for %s", prof.get("name"))
+        elif g["base"] is not None:
+            tdp_on = self.settings["tdp"]["enabled"]
+            games.put(self.settings, g["base"])
+            g["base"] = None
+            if tdp_on and not self.settings["tdp"]["enabled"] and self.tdp:
+                # Custom TDP was only on for the game: the device's default again.
+                self._guard("tdp", lambda: self.tdp.apply(self.dev, self.dev.tdp_default, True))
+            log.info("games: usual settings")
+        else:
+            return
+        self.save()
+        self.apply_profiled()
+
+    def apply_profiled(self) -> None:
+        self.apply_tdp()
+        self.apply_epp()
+        self.apply_cpu()
+        self.apply_temp_limit(force=True)
+        self.apply_gpu()
+        self.fan_pct = None
+        self.apply_fan()
+
+    def save_game_profile(self, on: bool) -> dict:
+        """Panel switch: keep the current settings for the running game, or drop its profile."""
+        if not self.game:
+            return self.state()
+        g = self.settings["games"]
+        appid, name = self.game
+        if on:
+            if g["base"] is None:
+                g["base"] = self.pre_game or games.snapshot(self.settings)
+            g["profiles"][appid] = {"name": name, "settings": games.snapshot(self.settings)}
+            self.save()
+        elif appid in g["profiles"]:
+            del g["profiles"][appid]
+            self.switch_profile()  # back to the usual settings
+            self.save()
+        return self.state()
+
+    def apply_games(self) -> None:
+        self.switch_profile()  # profiles switched on or off
 
     def pad_wake_on(self) -> bool:
         v = self.settings["sleep"].get("pad_wake")
@@ -1620,6 +1701,12 @@ class Controller:
             },
             "ai": {"enabled": self.ai.enabled(), "vars": self.ai.vars},
             "memtweak": {"available": self.memtweak.available(), "pending": self.memtweak.pending()},
+            "games": {
+                "enabled": self.settings["games"]["enabled"],
+                "game": {"appid": self.game[0], "name": self.game[1]} if self.game else None,
+                "profile": bool(self.game and self.game[0] in self.settings["games"]["profiles"]),
+                "count": len(self.settings["games"]["profiles"]),
+            },
             "upscale": self.upscale.state(),
             "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},
             "thermal": {
