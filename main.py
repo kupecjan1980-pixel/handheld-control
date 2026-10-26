@@ -100,8 +100,10 @@ class Plugin:
     async def save_game_profile(self, on: bool):
         return await self._run(self.ctl.save_game_profile, on)
 
-    async def top_use(self):
+    async def top_use(self, delay: float = 0):
         # The 2 s look runs outside the lock, so the regular tick goes on meanwhile.
+        # delay: time to close Quick Access first (Steam redraws while it's open).
+        await asyncio.sleep(max(0.0, min(30.0, float(delay or 0))))
         res = await asyncio.to_thread(topuse.sample)
         return await self._run(self.ctl.set_topuse, res)
 

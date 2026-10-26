@@ -367,7 +367,7 @@ const setLsfg = callable<[boolean], State>("set_lsfg");
 const setGame = callable<[string | null, string | null], State>("set_game");
 const saveGameProfile = callable<[boolean], State>("save_game_profile");
 const setAutotune = callable<[boolean], State>("set_autotune");
-const topUse = callable<[], State>("top_use");
+const topUse = callable<[number], State>("top_use");
 
 const vramSize = (mb: number | null) => (mb == null ? "?" : mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
@@ -3233,30 +3233,46 @@ function openKeyboard() {
 // --- What's using the CPU and GPU (topuse.py) ---------------------------------
 
 function TopUseRows({ state, setState }: { state: State; setState: (s: State) => void }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const t = state.topuse;
   const list = (rows: [string, number][]) => (rows.length ? rows.map(([n, p]) => `${n} ${p}%`).join(", ") : "nothing busy");
+  const measure = async (delay: number) => {
+    setBusy(delay ? "Close this menu now: measuring in 5 s…" : "Measuring for 2 s…");
+    try {
+      setState(await topUse(delay));
+    } finally {
+      setBusy(null);
+    }
+  };
   return (
     <PanelSection title="What's using it">
       <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          disabled={busy}
+        <Field
           description={
             t
-              ? `At ${t.at}. CPU (share of all cores): ${list(t.cpu)}. GPU (busiest engine): ${list(t.gpu)}.`
-              : "Measures every process for 2 s and lists the busiest ones on the CPU and the GPU, for when the device works harder than it should. Only runs when you press it."
+              ? `Last look at ${t.at}. CPU (share of all cores): ${list(t.cpu)}. GPU (busiest engine): ${list(t.gpu)}.`
+              : "Measures every process for 2 s and lists the busiest ones on the CPU and the GPU, for when the device works harder than it should. Only runs when you press a button below."
           }
-          onClick={async () => {
-            setBusy(true);
-            try {
-              setState(await topUse());
-            } finally {
-              setBusy(false);
-            }
-          }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={!!busy}
+          description="Measures right away. Steam keeps redrawing while this menu is open, so steamwebhelper and gamescope show up higher than they would otherwise."
+          onClick={() => measure(0)}
         >
-          {busy ? "Measuring for 2 s…" : t ? "Measure again" : "What's using the CPU and GPU?"}
+          {busy ?? "Measure now"}
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={!!busy}
+          description="Waits 5 s so you can close this menu (and leave the screen as it is) before it measures. Open the menu again afterwards to read the result."
+          onClick={() => measure(5)}
+        >
+          {busy ? "…" : "Measure with the menu closed"}
         </ButtonItem>
       </PanelSectionRow>
     </PanelSection>
