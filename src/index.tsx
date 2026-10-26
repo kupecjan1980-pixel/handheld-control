@@ -3443,12 +3443,12 @@ function GameProfileRows({ state, setState }: { state: State; setState: (s: Stat
             description={
               why ??
               (!gs.auto_available
-                ? "Needs a CPU clock limit, which this CPU's driver doesn't offer."
+                ? "Needs a CPU clock limit, CPU boost or TDP control, and this device offers none of them."
                 : gs.auto
-                  ? `On: every 20 s it looks at what holds ${name} back. While the GPU is busy and no CPU core is maxed out, or the load is light (frame cap, menus), the CPU gives way a step at a time: first its clock limit by 200 MHz (down to half the top clock), then SMT off where the CPU has it. All cores always stay on, so Steam stays responsive. The power it frees goes to the GPU, or it just runs cooler and longer. When a CPU core is maxed out while the GPU waits, it undoes those steps in reverse. What it settles on is kept in the profile. Setting the CPU clock limit by hand turns this off; changing SMT or cores by hand stays until it needs to move them again. ${
+                  ? `On: every 20 s it looks at what holds ${name} back and moves one setting a step, so no power goes where the game doesn't need it. Light load (frame cap, menus, simple games): CPU clock limit down 200 MHz at a time to half the top clock, then CPU boost off, then EPP to balance_power, then the TDP down 1 W at a time to 60% of where it started. GPU busy: a lowered TDP goes back up first, then the CPU gives way so the shared power goes to the GPU. A CPU core maxed out: everything goes back in reverse. Cores and SMT are never touched. What it settles on is kept in the profile, and your usual settings come back when the game closes. Changing the CPU clock limit, CPU boost, EPP or TDP by hand turns this off, so your own tuning stays. ${
                       gs.auto_status ? `Last decision: ${gs.auto_status}.` : "Watching the first 20 s…"
                     }`
-                  : `Lets HHC share the power between CPU and GPU for ${name} by itself while it plays, with the CPU clock limit and SMT. Turning it on also saves a profile for the game if it has none.`)
+                  : `Lets HHC share the power between CPU and GPU for ${name} by itself while it plays, with the CPU clock limit, CPU boost, EPP and TDP, so it doesn't waste power the game doesn't need. Turning it on also saves a profile for the game if it has none.`)
             }
             checked={gs.auto}
             disabled={!!why || !gs.auto_available}

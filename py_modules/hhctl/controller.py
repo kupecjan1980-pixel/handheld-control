@@ -156,10 +156,12 @@ class Controller:
         self.game: tuple[str, str] | None = None  # running Steam game: (appid, name)
         self.pre_game: dict | None = None  # settings when a game without a profile started
         for prof in self.settings["games"]["profiles"].values():
-            # 0.10.85's auto-tune could leave a game on the small cores only (see autotune.py).
+            # Older auto-tune could leave a game on the small cores or without SMT (see autotune.py).
             cpu_s = prof.get("settings", {}).get("cpu", {})
             if prof.get("auto") and cpu_s.get("cores") == "small":
                 cpu_s["cores"] = None
+            if prof.get("auto") and cpu_s.get("smt") is False:
+                cpu_s["smt"] = None  # 0.10.85-88 auto-tune: SMT off slowed loading (OneXFly)
         if self.settings["games"]["base"]:
             # Stopped while a game's profile was in use: back to the usual settings.
             games.put(self.settings, self.settings["games"]["base"])
@@ -305,7 +307,8 @@ class Controller:
                 values = {**values, "profile": None}
         self.settings[section].update(values)
         prof = self.game_profile()
-        if prof and prof.get("auto") and section == "cpu" and {"cap", "cap_mhz"} & set(values):
+        moved = {"cpu": {"cap", "cap_mhz", "boost"}, "tdp": {"enabled", "watts"}, "epp": {"enabled", "value"}}
+        if prof and prof.get("auto") and moved.get(section, set()) & set(values):
             prof["auto"] = False  # set by hand: the user tunes it now
             self.autotune.reset()
         if prof and self.settings["games"]["base"] is not None:
@@ -765,23 +768,35 @@ class Controller:
         g = games.running_steam_game(self.user_home)
         self.game_changed(*g) if g else self.game_changed(None)
 
+    def autotune_levers(self) -> dict:
+        """What auto-tune may move here (see autotune.decide)."""
+        can: dict = {}
+        if self.freqcap.available()[0]:
+            can["lo"], can["hi"] = self.freqcap.range_mhz()
+        can["boost"] = self.boost.available()[0]
+        can["epp"] = self.epp.available()[0] and "balance_power" in self.epp.options()
+        if self.tdp:
+            base = (self.settings["games"]["base"] or {}).get("tdp") or {}
+            can["tdp"] = int(base["watts"]) if base.get("enabled") and base.get("watts") else self.dev.tdp_default
+            can["tdp_min"] = self.dev.tdp_min
+        return can
+
     def tick_autotune(self) -> None:
         prof = self.game_profile()
-        if not (prof and prof.get("auto") and self.settings["games"]["base"] is not None
-                and self.freqcap.available()[0]):
+        if not (prof and prof.get("auto") and self.settings["games"]["base"] is not None):
             return
         now = time.monotonic()
         self.autotune.feed(now, self.gpu._util(), self.cpu_util.busiest)
-        lo, hi = self.freqcap.range_mhz()
-        s = self.settings["cpu"]
-        vals = self.autotune.decide(now, s, lo, hi, self.smt.available()[0])
-        if not vals:
+        change = self.autotune.decide(now, self.settings, self.autotune_levers())
+        if not change:
             return
-        s.update(vals)
-        games.record(prof, "cpu", vals)
-        self.save()
         log.info("autotune: %s", self.autotune.status)
-        self.apply_cpu()
+        for section, vals in change.items():
+            self.settings[section].update(vals)
+            games.record(prof, section, vals)
+        self.save()
+        for section in change:
+            getattr(self, f"apply_{section}")()
 
     def apply_games(self) -> None:
         self.switch_profile()  # profiles switched on or off
@@ -1852,7 +1867,7 @@ class Controller:
                 "profile": bool(self.game and self.game[0] in self.settings["games"]["profiles"]),
                 "count": len(self.settings["games"]["profiles"]),
                 "auto": bool((self.game_profile() or {}).get("auto")),
-                "auto_available": self.freqcap.available()[0],
+                "auto_available": bool(self.freqcap.available()[0] or self.boost.available()[0] or self.tdp),
                 "auto_status": self.autotune.status,
                 "steam": not self.desktop or games.steam_installed(self.user_home),
                 "desktop": self.desktop,
