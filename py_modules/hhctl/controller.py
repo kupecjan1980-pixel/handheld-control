@@ -211,6 +211,8 @@ class Controller:
         self.chord = padchord.PadChord(lambda action: self.emit(action), self.chord_setting)
         self.powerkey = powerkey.PowerKey(self._power_short)
         self.desktop_game = False  # a Steam game runs outside Game Mode (checked every 5 s)
+        self.session_game_mode: bool | None = None  # last seen: Game Mode or Desktop
+        self.rgb_again: list[float] = []  # when to set the lights again after a switch
         self.next_desktop_game = 0.0
         self.desktoppad = desktoppad.DesktopPad(self._home(), self.desktop_mouse_active)
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
@@ -1178,9 +1180,25 @@ class Controller:
             return
         self.overlay.tick(bool(self.settings["overlay"]["stop_idle"]), self.game is not None)
 
+    def tick_session(self) -> None:
+        """Game Mode <-> Desktop: the controller (and InputPlumber with it)
+        starts over and its lights go out (OneXFly, 2026-10-27), so the
+        lights are set again a little after the switch, twice."""
+        game_mode = self.gs is not None
+        now = time.monotonic()
+        if game_mode != self.session_game_mode:
+            if self.session_game_mode is not None:
+                log.info("session: %s", "Game Mode" if game_mode else "Desktop")
+                self.rgb_again = [now + 3, now + 10]
+            self.session_game_mode = game_mode
+        if self.rgb_again and now >= self.rgb_again[0]:
+            self.rgb_again.pop(0)
+            self.apply_rgb()
+
     def tick_gamescope(self) -> None:
         self.tick_overlay()
         self._gs_refresh()
+        self.tick_session()
         self._brightness_floor()
         now = time.monotonic()
         self.tick_sdr_brightness(now)

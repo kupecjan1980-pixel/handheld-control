@@ -2849,7 +2849,7 @@ function Content() {
               <PanelSectionRow>
                 <ToggleField
                   label="Controller as mouse in Desktop Mode"
-                  description={`Like hhd's desktop mode: outside Game Mode the left stick moves the pointer, the right stick scrolls, the right trigger is a left click, the left trigger a right click, and the left stick click (L3) shows or hides KDE's on-screen keyboard. Pauses while a Steam game runs, and in Game Mode the controller works as usual. Apps that use a gamepad still get it too. If Steam's own desktop layout also moves the pointer, turn one of them off. ${
+                  description={`Like hhd's desktop mode: outside Game Mode the right stick moves the pointer, the left stick scrolls, the right trigger is a left click, the left trigger a right click, and the left stick click (L3) shows or hides KDE's on-screen keyboard. Pauses while a Steam game runs, and in Game Mode the controller works as usual. Apps that use a gamepad still get it too. If Steam's own desktop layout also moves the pointer, turn one of them off. ${
                     state.desktop_mouse.error
                       ? `Not working: ${state.desktop_mouse.error}.`
                       : !state.desktop_mouse.on

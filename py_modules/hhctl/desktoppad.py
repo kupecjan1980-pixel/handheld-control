@@ -4,8 +4,8 @@ Outside Game Mode nothing turns the gamepad into a mouse unless Steam's
 desktop layout runs. While this is on, in Desktop Mode and with no Steam game
 running:
 
-- left stick: moves the pointer (faster the further it's pushed)
-- right stick: scrolls (up/down and sideways)
+- right stick: moves the pointer (faster the further it's pushed)
+- left stick: scrolls (up/down and sideways)
 - right trigger: left click, left trigger: right click
 - left stick click (L3): KDE's on-screen keyboard, on and off
 
@@ -243,10 +243,10 @@ class DesktopPad:
                     if down != held[btn]:
                         held[btn] = down
                         out.append((EV_KEY, btn, int(down)))
-                for i, code in enumerate((ABS_X, ABS_Y)):
+                for i, code in enumerate((ABS_RX, ABS_RY)):
                     rem[i] += pad.axis(code) * SPEED
-                wheel[0] -= pad.axis(ABS_RY) * SCROLL
-                wheel[1] += pad.axis(ABS_RX) * SCROLL
+                wheel[0] -= pad.axis(ABS_Y) * SCROLL
+                wheel[1] += pad.axis(ABS_X) * SCROLL
             for i, rel in enumerate((REL_X, REL_Y)):
                 whole = int(rem[i])
                 if whole:
