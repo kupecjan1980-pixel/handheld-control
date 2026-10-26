@@ -64,7 +64,7 @@ type Settings = {
     swipe_edge?: string | null;
     chord?: string | null;
   };
-  sleep: { rgb_off: boolean; pad_wake: boolean | null };
+  sleep: { rgb_off: boolean; pad_wake: boolean | null; power_key?: boolean | null };
   ui: {
     theme: string;
     font: string;
@@ -161,6 +161,8 @@ type State = {
   sleep: {
     rgb_off_available: boolean;
     pad_wake_available: boolean;
+    power_key?: boolean;
+    power_key_listening?: string[];
     pad_wake: boolean;
     note: string | null;
     pad_wake_text: string | null;
@@ -2865,6 +2867,18 @@ function Content() {
                 />
               </PanelSectionRow>
             )}
+            {state.sleep.power_key != null && !(window as any).HHC_DESKTOP && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Power button sleeps in Game Mode"
+                  description={`For systems where a short power press does nothing in Game Mode: if no sleep starts within 3 s of the press, HHC asks Steam to sleep.${
+                    state.sleep.power_key && !state.sleep.power_key_listening?.length ? " No power button found yet." : ""
+                  }`}
+                  checked={state.sleep.power_key}
+                  onChange={(v) => change("sleep", { power_key: v }, 0)}
+                />
+              </PanelSectionRow>
+            )}
             <ErrorRow msg={state.errors.sleep} />
             {state.inputplumber?.configurable && state.inputplumber.status === "missing" && (
               <PanelSectionRow>
@@ -3164,6 +3178,16 @@ const onButton = (action: string) => {
     Navigation.OpenQuickAccessMenu(holdTab as never);
   } else if (action === "keyboard") {
     openKeyboard();
+  } else if (action === "sleep") {
+    // The power button in Game Mode, when nothing else passed it to Steam.
+    const sc = (window as any).SteamClient;
+    if (qamVisible()) Navigation.CloseSideMenus();
+    try {
+      if (typeof sc?.System?.SuspendPC === "function") sc.System.SuspendPC();
+      else sc.URL.ExecuteSteamURL("steam://shortpowerpress");
+    } catch (e) {
+      console.warn("hhctl: sleep", e);
+    }
   }
 };
 

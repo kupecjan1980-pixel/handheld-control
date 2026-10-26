@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, autotune, background, games, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, autotune, background, games, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -54,7 +54,9 @@ DEFAULTS = {
     # rgb_off: lights off while it sleeps. pad_wake: the controller wakes it
     # (None = the device's default: on for the NEXT 2, which asked for it).
     # pad_wake_skip: "vendor:product" taken off because they woke it right away.
-    "sleep": {"rgb_off": True, "pad_wake": None, "pad_wake_skip": []},
+    # power_key: a short power press sleeps in Game Mode when nothing else
+    # acts on it (None = the device's default, POWER_KEY_DEFAULT).
+    "sleep": {"rgb_off": True, "pad_wake": None, "pad_wake_skip": [], "power_key": None},
     "battery": {"limit": 100, "bypass": "off"},
     # Raw EC writes are only used when the user opts in.
     "ec": {"enabled": False},
@@ -79,6 +81,8 @@ PAD_IDS = {
     "onexfly": [("045e", "028e")],
 }
 PAD_WAKE_DEFAULT = {"ayaneo_next2": True}
+# CachyOS on the ONEXPLAYER 3: logind sees the press, nothing passes it to Steam (2026-10-26).
+POWER_KEY_DEFAULT = {"oxp3": True}
 PAD_WAKE_TEXT = {"ayaneo_next2": "AYN, the back buttons and the button next to AYN wake it from sleep "
                                  "(not the gamepad: its trigger never stops sending and woke it at once)"}
 
@@ -189,6 +193,7 @@ class Controller:
                                         lambda: self.settings["controller"].get("swipe_edge"), self._swipe_learned)
         self.swipe_avail = self.swipe.available()
         self.chord = padchord.PadChord(lambda action: self.emit(action), self.chord_setting)
+        self.powerkey = powerkey.PowerKey(self._power_short)
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
         self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake)
@@ -731,6 +736,24 @@ class Controller:
     def apply_games(self) -> None:
         self.switch_profile()  # profiles switched on or off
 
+    def power_key_on(self) -> bool:
+        v = self.settings["sleep"].get("power_key")
+        return POWER_KEY_DEFAULT.get(self.dev.key, False) if v is None else bool(v)
+
+    POWER_WAIT = 3.0  # s: time for Steam or logind to start a sleep by themselves
+
+    def _power_short(self) -> None:
+        """From the power key thread: a short press. In Game Mode, if no sleep
+        starts by itself, ask Steam to sleep."""
+        if not self.power_key_on() or not gamescope._gamescope_pid():
+            return
+        pressed = sleep.boottime()
+        time.sleep(self.POWER_WAIT)
+        if self.slept_at and self.slept_at >= pressed - 0.5:
+            return  # something else put it to sleep
+        log.info("powerkey: nothing put it to sleep, asking Steam")
+        self.emit("sleep")
+
     def pad_wake_on(self) -> bool:
         v = self.settings["sleep"].get("pad_wake")
         return PAD_WAKE_DEFAULT.get(self.buttons.key, False) if v is None else bool(v)
@@ -741,7 +764,11 @@ class Controller:
 
     def apply_sleep(self) -> None:
         s = self.settings["sleep"]
-        if (s.get("rgb_off") and self.rgb) or self.pad_wake_on() or self.limit_while_asleep():
+        if self.power_key_on():
+            self.powerkey.start()
+        else:
+            self.powerkey.stop()
+        if (s.get("rgb_off") and self.rgb) or self.pad_wake_on() or self.limit_while_asleep() or self.power_key_on():
             self.sleeper.start()
         else:
             self.sleeper.stop()
@@ -1530,6 +1557,7 @@ class Controller:
             self.buttons.stop()
             self.swipe.stop()
             self.chord.stop()
+            self.powerkey.stop()
             self._guard("memtweak", self.memtweak.restore)
             self._guard("system", self.systweak.restore)
             self._guard("controller", self.ip.restore)
@@ -1788,6 +1816,8 @@ class Controller:
                 "rgb_off_available": bool(self.rgb),
                 "pad_wake_available": bool(self.padwake.ids),
                 "pad_wake": self.pad_wake_on(),
+                "power_key": self.power_key_on(),
+                "power_key_listening": self.powerkey.nodes,
                 "note": self.sleep_note,
                 "last_wake": self.last_wake,
                 "pad_wake_text": PAD_WAKE_TEXT.get(self.buttons.key),
