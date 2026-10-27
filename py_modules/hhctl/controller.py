@@ -807,18 +807,17 @@ class Controller:
         v = self.settings["sleep"].get("power_key")
         return POWER_KEY_DEFAULT.get(self.dev.key, False) if v is None else bool(v)
 
-    POWER_WAIT = 3.0  # s: time for Steam or logind to start a sleep by themselves
-
     def _power_short(self) -> None:
-        """From the power key thread: a short press. In Game Mode, if no sleep
-        starts by itself, ask Steam to sleep."""
+        """From the power key thread: a short press in Game Mode. Sleeps at
+        once, the way Desktop Mode does (logind), not through Steam, which
+        first waits and dims the screen. Steam's way is the fallback."""
         if not self.power_key_on() or not gamescope._gamescope_pid():
             return
-        pressed = sleep.boottime()
-        time.sleep(self.POWER_WAIT)
-        if self.slept_at and self.slept_at >= pressed - 0.5:
-            return  # something else put it to sleep
-        log.info("powerkey: nothing put it to sleep, asking Steam")
+        r = proc.run(["systemctl", "suspend"], text=True, timeout=10)
+        if r.returncode == 0:
+            log.info("powerkey: sleeping")
+            return
+        log.info("powerkey: systemctl suspend failed (%s), asking Steam", r.stderr.strip())
         self.emit("sleep")
 
     def pad_wake_on(self) -> bool:
@@ -1853,7 +1852,7 @@ class Controller:
             "chord": {"value": self.chord_setting() or "off", "pads": len(self.chord.nodes)},
             "desktop_mouse": {"on": self.desktop_mouse_on(), "pads": len(self.desktoppad.nodes),
                               "game_mode": bool(gamescope._gamescope_pid()), "game": self.desktop_game,
-                              "error": self.desktoppad.error},
+                              "error": self.desktoppad.error, "keyboard": self.desktoppad.keyboard},
             "swipe": {
                 "available": self.swipe_avail or self.swipe.node is not None,
                 "listening": self.swipe.node,

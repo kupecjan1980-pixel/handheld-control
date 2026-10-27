@@ -1,4 +1,5 @@
-"""The controller as a mouse in Desktop Mode (what hhd's "desktop" mode did).
+"""The controller as mouse and keys in Desktop Mode (what hhd + Steam's
+desktop layout did).
 
 Outside Game Mode nothing turns the gamepad into a mouse unless Steam's
 desktop layout runs. While this is on, in Desktop Mode and with no Steam game
@@ -7,12 +8,17 @@ running:
 - right stick: moves the pointer (faster the further it's pushed)
 - left stick: scrolls (up/down and sideways)
 - right trigger: left click, left trigger: right click
-- left stick click (L3): KDE's on-screen keyboard, on and off
+- D-pad: arrow keys, A: Enter, B: Esc, X: Backspace, Y: Space,
+  RB: Tab, LB: Shift+Tab
+- left stick click (L3): on-screen keyboard. Steam's when Steam runs: it is
+  steered with the controller, so HHC stays out of the way (no pointer, no
+  keys) until it's closed with B or L3 is pressed again. Without Steam,
+  Plasma's keyboard: that one is tapped, so the pointer keeps working; L3
+  again hides it.
 
 The gamepad is read read-only (no grab), so apps that use a gamepad still get
-it; a virtual mouse made through /dev/uinput sends the pointer and clicks. The
-on-screen keyboard is KWin's (Plasma's virtual keyboard, e.g. Maliit), asked
-over the desktop user's session bus.
+it; a virtual mouse + keyboard made through /dev/uinput sends the rest.
+Plasma's keyboard is KWin's, asked over the desktop user's session bus.
 """
 
 import fcntl
@@ -21,6 +27,7 @@ import os
 import pwd
 import select
 import struct
+import subprocess
 import threading
 import time
 
@@ -35,6 +42,18 @@ SYN_REPORT = 0
 REL_X, REL_Y, REL_HWHEEL, REL_WHEEL = 0x00, 0x01, 0x06, 0x08
 BTN_LEFT, BTN_RIGHT, BTN_MIDDLE = 0x110, 0x111, 0x112
 BTN_TL2, BTN_TR2, BTN_THUMBL = 0x138, 0x139, 0x13D
+BTN_SOUTH, BTN_EAST, BTN_X, BTN_Y, BTN_TL, BTN_TR = 0x130, 0x131, 0x133, 0x134, 0x136, 0x137
+BTN_DPAD_UP, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT = 0x220, 0x221, 0x222, 0x223
+ABS_HAT0X, ABS_HAT0Y = 0x10, 0x11
+KEY_ESC, KEY_BACKSPACE, KEY_TAB, KEY_ENTER, KEY_LEFTSHIFT, KEY_SPACE = 1, 14, 15, 28, 42, 57
+KEY_UP, KEY_LEFT, KEY_RIGHT, KEY_DOWN = 103, 105, 106, 108
+# gamepad button -> keys sent together (the D-pad comes as buttons or a hat)
+KEYMAP = {
+    BTN_SOUTH: (KEY_ENTER,), BTN_EAST: (KEY_ESC,), BTN_X: (KEY_BACKSPACE,), BTN_Y: (KEY_SPACE,),
+    BTN_TR: (KEY_TAB,), BTN_TL: (KEY_LEFTSHIFT, KEY_TAB),
+    BTN_DPAD_UP: (KEY_UP,), BTN_DPAD_DOWN: (KEY_DOWN,), BTN_DPAD_LEFT: (KEY_LEFT,), BTN_DPAD_RIGHT: (KEY_RIGHT,),
+}
+KEYS = sorted({k for ks in KEYMAP.values() for k in ks})
 ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_GAS, ABS_BRAKE = 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x09, 0x0A
 
 # uinput ioctls (linux/uinput.h)
@@ -79,7 +98,7 @@ class VirtualMouse:
         try:
             for ev in (EV_KEY, EV_REL, EV_SYN):
                 fcntl.ioctl(self.fd, UI_SET_EVBIT, ev)
-            for key in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE):
+            for key in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, *KEYS):
                 fcntl.ioctl(self.fd, UI_SET_KEYBIT, key)
             for rel in (REL_X, REL_Y, REL_WHEEL, REL_HWHEEL):
                 fcntl.ioctl(self.fd, UI_SET_RELBIT, rel)
@@ -104,29 +123,82 @@ class VirtualMouse:
         os.close(self.fd)
 
 
-def toggle_kde_keyboard(home: str) -> bool:
-    """Show or hide KWin's on-screen keyboard as the desktop user."""
+def _user(home: str) -> tuple[str, int] | None:
     try:
         st = os.stat(home)
-        user = pwd.getpwuid(st.st_uid).pw_name
+        return pwd.getpwuid(st.st_uid).pw_name, st.st_uid
     except (OSError, KeyError):
+        return None
+
+
+def _as_user(user: str, uid: int, home: str) -> list[str]:
+    return ["runuser", "-u", user, "--", "env", f"HOME={home}", f"USER={user}",
+            f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus", f"XDG_RUNTIME_DIR=/run/user/{uid}",
+            "DISPLAY=:0", "WAYLAND_DISPLAY=wayland-0"]
+
+
+def steam_running(uid: int) -> bool:
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/comm") as f:
+                if f.read().strip() != "steam":
+                    continue
+            if os.stat(f"/proc/{d}").st_uid == uid:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def open_steam_keyboard(home: str) -> bool:
+    """Steam's on-screen keyboard (steered with the controller). Only when
+    Steam already runs: the URL then goes to it instead of starting Steam."""
+    u = _user(home)
+    if not u or not steam_running(u[1]):
         return False
-    bus = f"unix:path=/run/user/{st.st_uid}/bus"
-    base = ["runuser", "-u", user, "--", "env", f"DBUS_SESSION_BUS_ADDRESS={bus}",
-            f"XDG_RUNTIME_DIR=/run/user/{st.st_uid}", "busctl", "--user"]
+    try:
+        proc.popen(_as_user(u[0], u[1], home) + ["steam", "steam://open/keyboard"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e:
+        log.info("desktoppad: can't ask Steam for its keyboard: %s", e)
+        return False
+    log.info("desktoppad: Steam keyboard")
+    return True
+
+
+def kde_keyboard(home: str, show: bool | None = None, only_hide: bool = False) -> bool | None:
+    """Plasma's (KWin's) on-screen keyboard: show (True), hide (False) or
+    toggle (None; with only_hide, hide it if shown, else leave it). Returns
+    whether it's now shown, None when unavailable or left alone."""
+    u = _user(home)
+    if not u:
+        return None
+    base = _as_user(u[0], u[1], home) + ["busctl", "--user"]
     obj = ["org.kde.KWin", "/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard"]
-    r = proc.run(base + ["get-property", *obj, "active"], text=True, timeout=5)
+
+    def call(*args: str):
+        r = proc.run(base + list(args), text=True, timeout=5)
+        if r.returncode != 0:
+            log.info("desktoppad: busctl %s: %s", args[0], r.stderr.strip())
+        return r
+
+    r = call("get-property", *obj, "visible")
     if r.returncode != 0:
-        log.info("desktoppad: no KWin virtual keyboard (%s)", r.stderr.strip())
-        return False
-    show = "true" not in r.stdout
+        return None
+    if show is None:
+        show = "true" not in r.stdout
+        if show and only_hide:
+            return None
     if show:
-        proc.run(base + ["set-property", *obj, "enabled", "b", "true"], text=True, timeout=5)
-        r = proc.run(base + ["call", *obj, "forceActivate"], text=True, timeout=5)
-        if r.returncode == 0:
-            return True
-    r = proc.run(base + ["set-property", *obj, "active", "b", "true" if show else "false"], text=True, timeout=5)
-    return r.returncode == 0
+        call("set-property", *obj, "enabled", "b", "true")
+        if call("call", *obj, "forceActivate").returncode != 0:
+            call("set-property", *obj, "active", "b", "true")
+    else:
+        call("set-property", *obj, "active", "b", "false")
+    log.info("desktoppad: Plasma keyboard %s", "shown" if show else "hidden")
+    return show
 
 
 class Pad:
@@ -137,6 +209,17 @@ class Pad:
         self.abs = {c: (lo + hi) // 2 for c, (lo, hi) in self.ranges.items()}
         for c in (ABS_Z, ABS_RZ, ABS_GAS, ABS_BRAKE):
             self.abs[c] = self.ranges[c][0]
+        self.hat = [0, 0]  # D-pad as ABS_HAT0X / ABS_HAT0Y
+        self.down: set[int] = set()  # buttons held
+
+    def pressed(self) -> set[int]:
+        """Buttons held, the hat D-pad counted as D-pad buttons."""
+        out = set(self.down)
+        if self.hat[0]:
+            out.add(BTN_DPAD_LEFT if self.hat[0] < 0 else BTN_DPAD_RIGHT)
+        if self.hat[1]:
+            out.add(BTN_DPAD_UP if self.hat[1] < 0 else BTN_DPAD_DOWN)
+        return out
 
     def axis(self, code: int) -> float:
         lo, hi = self.ranges[code]
@@ -156,6 +239,7 @@ class DesktopPad:
         self.active = active  # () -> bool: on, Desktop Mode, no game
         self.nodes: list[str] = []
         self.error: str | None = None
+        self.keyboard: str | None = None  # on-screen keyboard shown by L3: "steam" or "kde"
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -208,13 +292,38 @@ class DesktopPad:
                     os.close(fd)
                 self.nodes = []
 
+    def _toggle_keyboard(self) -> None:
+        """L3, on its own thread (the bus calls take a moment)."""
+        if self.keyboard == "steam":
+            self.keyboard = None  # closed (or never opened): the controller is HHC's again
+        elif kde_keyboard(self.home, None, only_hide=True) is False:
+            self.keyboard = None  # Plasma's was up (from L3 or a swipe): now hidden
+        elif open_steam_keyboard(self.home):
+            self.keyboard = "steam"
+        elif kde_keyboard(self.home, True):
+            self.keyboard = "kde"
+        else:
+            log.info("desktoppad: no on-screen keyboard (Steam isn't running, Plasma's isn't available)")
+
     def _loop(self, fds: dict[int, Pad], mouse: VirtualMouse, nodes: list[str]) -> None:
         held = {BTN_LEFT: False, BTN_RIGHT: False}
         digital = {BTN_LEFT: False, BTN_RIGHT: False}  # pads with trigger buttons instead of axes
+        keys: set[int] = set()  # keyboard keys held down on the virtual device
+        ignore: set[int] = set()  # held while Steam's keyboard was up: ignored until let go
         last_l3 = 0.0
         wheel = [0.0, 0.0]  # fractional notches (vertical, horizontal)
         rem = [0.0, 0.0]  # fractional pixels
         next_check = time.monotonic() + RESCAN
+
+        def release() -> None:
+            out = [(EV_KEY, btn, 0) for btn, down in held.items() if down]
+            out += [(EV_KEY, k, 0) for k in keys]
+            for btn in held:
+                held[btn] = False
+            keys.clear()
+            if out:
+                mouse.emit(out)
+
         while not self._stop.is_set():
             ready = select.select(list(fds), [], [], STEP)[0]
             for fd in ready:
@@ -231,41 +340,66 @@ class DesktopPad:
                     _, _, etype, code, value = EVENT.unpack_from(data, off)
                     if etype == EV_ABS and code in pad.abs:
                         pad.abs[code] = value
-                    elif etype == EV_KEY and code == BTN_THUMBL and value == 1:
-                        if time.monotonic() - last_l3 > 0.5:  # once, even when two pads send it
-                            last_l3 = time.monotonic()
-                            threading.Thread(target=toggle_kde_keyboard, args=(self.home,), daemon=True).start()
-                    elif etype == EV_KEY and code in (BTN_TL2, BTN_TR2) and value in (0, 1):
-                        digital[BTN_LEFT if code == BTN_TR2 else BTN_RIGHT] = bool(value)
-            out = []
-            # Pressed on any gamepad: InputPlumber's virtual one and the real
-            # one it grabbed are both listed, and the grabbed one stays at rest.
-            for btn, codes in ((BTN_LEFT, (ABS_RZ, ABS_GAS)), (BTN_RIGHT, (ABS_Z, ABS_BRAKE))):
-                down = any(pad.trigger(*codes) for pad in fds.values()) or digital[btn]
-                if down != held[btn]:
-                    held[btn] = down
-                    out.append((EV_KEY, btn, int(down)))
+                    elif etype == EV_ABS and code in (ABS_HAT0X, ABS_HAT0Y):
+                        pad.hat[code - ABS_HAT0X] = value
+                    elif etype == EV_KEY and value in (0, 1):
+                        if value:
+                            pad.down.add(code)
+                        else:
+                            pad.down.discard(code)
+                        if code == BTN_THUMBL and value:
+                            if time.monotonic() - last_l3 > 0.5:  # once, even when two pads send it
+                                last_l3 = time.monotonic()
+                                threading.Thread(target=self._toggle_keyboard, daemon=True).start()
+                        elif code == BTN_EAST and value and self.keyboard == "steam":
+                            self.keyboard = None  # B closes Steam's keyboard (and isn't Esc: see ignore)
+                        elif code in (BTN_TL2, BTN_TR2):
+                            digital[BTN_LEFT if code == BTN_TR2 else BTN_RIGHT] = bool(value)
+            pressed: set[int] = set()
             for pad in fds.values():
-                for i, code in enumerate((ABS_RX, ABS_RY)):
-                    rem[i] += pad.axis(code) * SPEED
-                wheel[0] -= pad.axis(ABS_Y) * SCROLL
-                wheel[1] += pad.axis(ABS_X) * SCROLL
-            for i, rel in enumerate((REL_X, REL_Y)):
-                whole = int(rem[i])
-                if whole:
-                    out.append((EV_REL, rel, whole))
-                    rem[i] -= whole
-            for i, rel in enumerate((REL_WHEEL, REL_HWHEEL)):
-                whole = int(wheel[i])
-                if whole:
-                    out.append((EV_REL, rel, whole))
-                    wheel[i] -= whole
-            if out:
-                mouse.emit(out)
+                pressed |= pad.pressed()
+            if self.keyboard == "steam":
+                # Steam's keyboard is steered with the controller: stay out of it.
+                release()
+                ignore = pressed | {BTN_EAST}
+                rem, wheel = [0.0, 0.0], [0.0, 0.0]
+            else:
+                out = []
+                # Pressed on any gamepad: InputPlumber's virtual one and the real
+                # one it grabbed are both listed, and the grabbed one stays at rest.
+                for btn, codes in ((BTN_LEFT, (ABS_RZ, ABS_GAS)), (BTN_RIGHT, (ABS_Z, ABS_BRAKE))):
+                    down = any(pad.trigger(*codes) for pad in fds.values()) or digital[btn]
+                    if down != held[btn]:
+                        held[btn] = down
+                        out.append((EV_KEY, btn, int(down)))
+                ignore &= pressed
+                want = {k for b in pressed - ignore if b in KEYMAP for k in KEYMAP[b]}
+                for k in sorted(keys - want):
+                    out.append((EV_KEY, k, 0))
+                for k in sorted(want - keys, key=lambda k: k != KEY_LEFTSHIFT):  # Shift before Tab
+                    out.append((EV_KEY, k, 1))
+                keys.clear()
+                keys.update(want)
+                for pad in fds.values():
+                    for i, code in enumerate((ABS_RX, ABS_RY)):
+                        rem[i] += pad.axis(code) * SPEED
+                    wheel[0] -= pad.axis(ABS_Y) * SCROLL
+                    wheel[1] += pad.axis(ABS_X) * SCROLL
+                for i, rel in enumerate((REL_X, REL_Y)):
+                    whole = int(rem[i])
+                    if whole:
+                        out.append((EV_REL, rel, whole))
+                        rem[i] -= whole
+                for i, rel in enumerate((REL_WHEEL, REL_HWHEEL)):
+                    whole = int(wheel[i])
+                    if whole:
+                        out.append((EV_REL, rel, whole))
+                        wheel[i] -= whole
+                if out:
+                    mouse.emit(out)
             if time.monotonic() >= next_check:
                 next_check = time.monotonic() + RESCAN
                 if not self.active() or find_gamepads() != nodes:
-                    for btn, down in held.items():
-                        if down:
-                            mouse.emit([(EV_KEY, btn, 0)])
+                    release()
+                    self.keyboard = None
                     return

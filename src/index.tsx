@@ -150,7 +150,7 @@ type State = {
   };
   buttons: { available: boolean; unavailable: string | null; listening: string | null; help: string | null };
   chord?: { value: string; pads: number };
-  desktop_mouse?: { on: boolean; pads: number; game_mode: boolean; game: boolean; error: string | null };
+  desktop_mouse?: { on: boolean; pads: number; game_mode: boolean; game: boolean; error: string | null; keyboard?: string | null };
   swipe?: {
     available: boolean;
     listening: string | null;
@@ -2848,8 +2848,8 @@ function Content() {
             {state.desktop_mouse && (
               <PanelSectionRow>
                 <ToggleField
-                  label="Controller as mouse in Desktop Mode"
-                  description={`Like hhd's desktop mode: outside Game Mode the right stick moves the pointer, the left stick scrolls, the right trigger is a left click, the left trigger a right click, and the left stick click (L3) shows or hides KDE's on-screen keyboard. Pauses while a Steam game runs, and in Game Mode the controller works as usual. Apps that use a gamepad still get it too. If Steam's own desktop layout also moves the pointer, turn one of them off. ${
+                  label="Controller as mouse and keys in Desktop Mode"
+                  description={`Like hhd's desktop mode: outside Game Mode the right stick moves the pointer, the left stick scrolls, the right trigger is a left click, the left trigger a right click; D-pad = arrow keys, A = Enter, B = Esc, X = Backspace, Y = Space, RB = Tab, LB = Shift+Tab. The left stick click (L3) opens the on-screen keyboard: Steam's when Steam runs, which you steer with the controller, so HHC stops the pointer and keys until you close it with B (or press L3 again). Without Steam it's Plasma's keyboard, which you tap, so the pointer keeps working; L3 again hides it (also one opened by swiping). Pauses while a Steam game runs, and in Game Mode the controller works as usual. Apps that use a gamepad still get it too. If Steam's own desktop layout also moves the pointer, turn one of them off. ${
                     state.desktop_mouse.error
                       ? `Not working: ${state.desktop_mouse.error}.`
                       : !state.desktop_mouse.on
@@ -2858,7 +2858,9 @@ function Content() {
                           ? "Now: in Game Mode, so waiting for Desktop Mode."
                           : state.desktop_mouse.game
                             ? "Now: paused, a game is running."
-                            : state.desktop_mouse.pads
+                            : state.desktop_mouse.keyboard === "steam"
+                              ? "Now: Steam's keyboard is up, the controller is steering it."
+                              : state.desktop_mouse.pads
                               ? "Now: active."
                               : "Now: no controller found yet."
                   }`}
@@ -2911,7 +2913,7 @@ function Content() {
               <PanelSectionRow>
                 <ToggleField
                   label="Power button sleeps in Game Mode"
-                  description={`For systems where a short power press does nothing in Game Mode: if no sleep starts within 3 s of the press, HHC asks Steam to sleep.${
+                  description={`For systems where a short power press does nothing in Game Mode: HHC puts it to sleep straight away, like Desktop Mode does (no dimming or wait first). Only if that fails does it ask Steam to sleep.${
                     state.sleep.power_key && !state.sleep.power_key_listening?.length ? " No power button found yet." : ""
                   }`}
                   checked={state.sleep.power_key}

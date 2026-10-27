@@ -12,8 +12,14 @@ class P(d.Pad):
         self.ranges = {c: (0, 255) if c in (d.ABS_Z, d.ABS_RZ, d.ABS_GAS, d.ABS_BRAKE) else (-32768, 32767)
                        for c in (d.ABS_X, d.ABS_Y, d.ABS_RX, d.ABS_RY, d.ABS_Z, d.ABS_RZ, d.ABS_GAS, d.ABS_BRAKE)}
         self.abs = {c: 0 for c in self.ranges}
+        self.hat, self.down = [0, 0], set()
 p = P()
 assert not p.trigger(d.ABS_RZ, d.ABS_GAS)
 p.abs[d.ABS_GAS] = 200
 assert p.trigger(d.ABS_RZ, d.ABS_GAS), "either trigger axis counts"
+p.hat = [-1, 1]
+p.down = {d.BTN_SOUTH}
+assert p.pressed() == {d.BTN_SOUTH, d.BTN_DPAD_LEFT, d.BTN_DPAD_DOWN}, "the hat D-pad counts as D-pad buttons"
+assert d.KEYMAP[d.BTN_DPAD_UP] == (d.KEY_UP,) and d.KEYMAP[d.BTN_SOUTH] == (d.KEY_ENTER,) and d.KEYMAP[d.BTN_EAST] == (d.KEY_ESC,)
+assert d.KEY_LEFTSHIFT in d.KEYS and d.KEY_TAB in d.KEYS
 print("all desktoppad tests passed")
