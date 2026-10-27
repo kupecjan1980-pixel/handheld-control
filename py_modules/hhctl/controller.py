@@ -221,6 +221,7 @@ class Controller:
         self.slept_at: float | None = None  # boot time when it went to sleep
         self.sleep_bat: tuple[int | None, bool, bool] = (None, False, False)  # capacity, on AC, charging paused
         self.woke: float | None = None  # set by the wake signal; tick() acts on it
+        self.blanked: tuple[int, float] | None = None  # power key: (backlight raw, when) until it wakes
         self.sleep_note: str | None = None
         self.wake_before: dict = {}
         self.last_wake: str | None = None  # "slept 3 s, woken by …", shown in the panel
@@ -621,6 +622,7 @@ class Controller:
         self.wake_before = sleep.wake_counts()
 
     def _after_wake(self) -> None:
+        self._unblank()
         self.woke = sleep.boottime()
 
     def tick_wake(self) -> None:
@@ -813,12 +815,31 @@ class Controller:
         first waits and dims the screen. Steam's way is the fallback."""
         if not self.power_key_on() or not gamescope._gamescope_pid():
             return
+        self._blank()
         r = proc.run(["systemctl", "suspend"], text=True, timeout=10)
         if r.returncode == 0:
             log.info("powerkey: sleeping")
             return
         log.info("powerkey: systemctl suspend failed (%s), asking Steam", r.stderr.strip())
         self.emit("sleep")
+
+    BLANK_MAX = 30.0  # s: dark this long with no sleep, the screen comes back
+
+    def _blank(self) -> None:
+        """Screen and lights off the moment the power key is pressed: Steam
+        holds the sleep back to fade the screen out first. Back on at wake."""
+        if self.backlight:
+            raw = sysfs.read_int(f"{self.backlight.path}/brightness")
+            if raw:
+                self.blanked = (raw, time.monotonic())
+                sysfs.write(f"{self.backlight.path}/brightness", 0)
+        if self.rgb and self.settings["rgb"]["enabled"]:
+            self._guard("rgb", lambda: self.rgb.apply("off", 0, 0, 0, None))
+
+    def _unblank(self) -> None:
+        if self.blanked and self.backlight:
+            raw, self.blanked = self.blanked[0], None
+            sysfs.write(f"{self.backlight.path}/brightness", raw)
 
     def pad_wake_on(self) -> bool:
         v = self.settings["sleep"].get("pad_wake")
@@ -1162,7 +1183,7 @@ class Controller:
         first time and can set it to (near) zero, which looks like the screen
         turned off. Only acts while the plugin has changed gamescope's HDR.
         """
-        if not self.backlight or not self.gs:
+        if not self.backlight or not self.gs or self.blanked:
             return
         if not self.gs_pending and self.settings["gamescope"]["hdr"] == "steam":
             return
@@ -1591,6 +1612,10 @@ class Controller:
         self.fan_note = f"Fan control restarted by itself at {time.strftime('%H:%M')} after: {last}"
 
     def tick(self) -> None:
+        if self.blanked and time.monotonic() - self.blanked[1] > self.BLANK_MAX:
+            log.info("powerkey: no sleep came, screen back on")
+            self._unblank()
+            self.apply_rgb()
         self.tick_fan_restart()
         self.tick_wake()
         self.gpu.sample()
