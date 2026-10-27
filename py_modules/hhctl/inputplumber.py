@@ -111,6 +111,9 @@ class InputPlumber:
         self.prev_profile: dict[str, str] = {}
         self.prev_targets: dict[str, list[str]] = {}
         self._looked = -600.0
+        self._next = 0.0  # next check while in sync
+        self.sets: list[float] = []  # when we last changed InputPlumber
+        self.gave_up: str | None = None  # why we stopped (something else keeps changing it)
 
     def _composites(self) -> list[str]:
         try:
@@ -130,8 +133,21 @@ class InputPlumber:
                 out.append(kind)
         return out
 
+    RECHECK = 30.0  # s between checks while it matches
+    FIGHT = (3, 300.0)  # this many changes by us within this long: someone else changes it back
+
     def tick(self, buttons: bool, target: str | None) -> None:
-        """Make InputPlumber match the settings; cheap when it already does."""
+        """Make InputPlumber match the settings; cheap when it already does.
+
+        Every change makes InputPlumber recreate the controller (games see it
+        disconnect), so if something else keeps changing it back, we stop
+        instead of taking turns with it."""
+        if self.gave_up:
+            return
+        now = time.monotonic()
+        if now < self._next:
+            return
+        self._next = now + self.RECHECK
         # Most devices have no InputPlumber (or none of DEVICES): look rarely.
         if not self.devices and not self.prev_profile and not self.prev_targets:
             if time.monotonic() - self._looked < 60:
@@ -151,9 +167,20 @@ class InputPlumber:
                 json.dump(profile(), f, indent=1)  # JSON is YAML too
             self.prev_profile.setdefault(path, cur)
             log.info("inputplumber: %s profile %s -> %s", path, cur or "(none)", self.profile_path)
+            self._changing("profile")
             _call(path, "LoadProfilePath", "s", self.profile_path)
         elif not want and cur == self.profile_path:
             self._restore_profile(path)
+
+    def _changing(self, what: str) -> None:
+        now = time.monotonic()
+        n, window = self.FIGHT
+        self.sets = [t for t in self.sets if now - t < window] + [now]
+        if len(self.sets) > n:
+            self.gave_up = (f"something else keeps changing InputPlumber's {what} back, so HHC stopped "
+                            "changing it (each change reconnects the controller)")
+            log.warning("inputplumber: %s", self.gave_up)
+            raise OSError(self.gave_up)
 
     def _restore_profile(self, path: str) -> None:
         prev = self.prev_profile.pop(path, None) or DEFAULT_PROFILE
@@ -172,6 +199,7 @@ class InputPlumber:
                 return
             self.prev_targets.setdefault(path, cur)
             log.info("inputplumber: %s targets %s -> %s", path, cur, new)
+            self._changing("controller outputs")
             _call(path, "SetTargetDevices", "as", str(len(new)), *new)
         elif path in self.prev_targets:
             self._restore_targets(path)

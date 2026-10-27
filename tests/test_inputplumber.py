@@ -43,6 +43,8 @@ def fake_run(args, timeout=10):
 
 
 ip._run = fake_run
+ip.InputPlumber.RECHECK = 0.0  # check on every tick here
+ip.InputPlumber.FIGHT = (100, 300.0)
 prof = f"{tmp}/inputplumber-profile.yaml"
 p = ip.InputPlumber(prof)
 p.tick(True, "xbox-elite")
@@ -82,6 +84,27 @@ ip._run = lambda args, timeout=10: (calls.append(args), types.SimpleNamespace(re
 n = len(calls)
 q.tick(True, "xbox-elite"); q.tick(True, "xbox-elite")
 assert len(calls) == n + 1 and q.devices == []
+# something else keeps changing it back: HHC stops instead of reconnecting the pad forever
+ip._run = fake_run
+ip.InputPlumber.FIGHT = (3, 300.0)
+f = ip.InputPlumber(prof)
+errors = []
+for _ in range(6):
+    bus[C0].update(ProfilePath="/usr/share/inputplumber/profiles/default.yaml", targets=["deck-uhid"])
+    try:
+        f.tick(True, "xbox-elite")
+    except OSError as e:
+        errors.append(str(e))
+assert f.gave_up and errors and "keeps changing" in errors[0], (f.gave_up, errors)
+n = len(calls)
+f.tick(True, "xbox-elite")
+assert len(calls) == n, "after giving up, InputPlumber is left alone"
+# while it matches, checked every RECHECK seconds only
+ip.InputPlumber.RECHECK = 30.0
+g = ip.InputPlumber(prof)
+bus[C0].update(ProfilePath=prof, targets=["xbox-elite", "keyboard"])
+g.tick(True, "xbox-elite"); n = len(calls); g.tick(True, "xbox-elite")
+assert len(calls) == n, "no D-Bus calls between checks"
 
 # --- listener on InputPlumber's virtual keyboard -----------------------------
 gen = device.Device(**{**vars(device._next2("AYA", "AB09")), "key": "generic", "name": "ONEXPLAYER F1 EVA-02"})

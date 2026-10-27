@@ -569,6 +569,7 @@ class Controller:
             self._guard("controller", self.ipconf.remove)
         self.ip.devices = []  # look for its composite device again now
         self.ip._looked = -600.0
+        self.ip._next = 0.0
 
     def check_ip_controller(self) -> None:
         """Fail-safe: no controller through our config -> take it away again."""
