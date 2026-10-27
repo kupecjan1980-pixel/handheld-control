@@ -84,6 +84,15 @@ ip._run = lambda args, timeout=10: (calls.append(args), types.SimpleNamespace(re
 n = len(calls)
 q.tick(True, "xbox-elite"); q.tick(True, "xbox-elite")
 assert len(calls) == n + 1 and q.devices == []
+# one switch by something else (Game Mode starting): put back, no giving up
+ip._run = fake_run
+ip.InputPlumber.FIGHT = (3, 300.0)
+o = ip.InputPlumber(prof)
+for _ in range(2):
+    bus[C0].update(ProfilePath="/usr/share/inputplumber/profiles/default.yaml", targets=["deck-uhid"])
+    assert o.tick(True, "xbox-elite") is True
+assert not o.gave_up and len(o.sets) == 2, o.sets
+assert o.tick(True, "xbox-elite") is False
 # something else keeps changing it back: HHC stops instead of reconnecting the pad forever
 ip._run = fake_run
 ip.InputPlumber.FIGHT = (3, 300.0)

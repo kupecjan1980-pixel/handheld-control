@@ -597,7 +597,12 @@ class Controller:
     def sync_inputplumber(self) -> None:
         c = self.settings["controller"]
         ip_buttons = c["buttons"] and self.buttons.key == "onexfly"
-        self._guard("controller", lambda: self.ip.tick(ip_buttons, c.get("ip_target")))
+        def tick():
+            # A controller made anew comes up with its lights out (OneXFly).
+            if self.ip.tick(ip_buttons, c.get("ip_target")):
+                now = time.monotonic()
+                self.rgb_again = [now + 3, now + 10]
+        self._guard("controller", tick)
 
     QUICK_WAKE = 15.0  # s: woken this soon by a controller device = that device is noisy
 

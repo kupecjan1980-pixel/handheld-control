@@ -112,7 +112,8 @@ class InputPlumber:
         self.prev_targets: dict[str, list[str]] = {}
         self._looked = -600.0
         self._next = 0.0  # next check while in sync
-        self.sets: list[float] = []  # when we last changed InputPlumber
+        self.sets: list[float] = []  # checks in which we changed InputPlumber
+        self._changed = False  # changed something in this check
         self.gave_up: str | None = None  # why we stopped (something else keeps changing it)
 
     def _composites(self) -> list[str]:
@@ -134,29 +135,36 @@ class InputPlumber:
         return out
 
     RECHECK = 30.0  # s between checks while it matches
-    FIGHT = (3, 300.0)  # this many changes by us within this long: someone else changes it back
+    # More checks than this that had to change something, within this long:
+    # someone else keeps changing it back. Counted per check, not per call: a
+    # check sets the profile and the outputs, and one switch by something else
+    # (OpenGamepadUI as Game Mode starts, OneXFly 2026-10-27) needs one check.
+    FIGHT = (3, 300.0)
 
-    def tick(self, buttons: bool, target: str | None) -> None:
+    def tick(self, buttons: bool, target: str | None) -> bool:
         """Make InputPlumber match the settings; cheap when it already does.
+        True when it changed something (the controller was made anew).
 
         Every change makes InputPlumber recreate the controller (games see it
         disconnect), so if something else keeps changing it back, we stop
         instead of taking turns with it."""
         if self.gave_up:
-            return
+            return False
         now = time.monotonic()
         if now < self._next:
-            return
+            return False
         self._next = now + self.RECHECK
         # Most devices have no InputPlumber (or none of DEVICES): look rarely.
         if not self.devices and not self.prev_profile and not self.prev_targets:
             if time.monotonic() - self._looked < 60:
-                return
+                return False
             self._looked = time.monotonic()
         self.devices = self._composites()
+        self._changed = False
         for path in self.devices:
             self._profile(path, buttons)
             self._target(path, target, buttons)
+        return self._changed
 
     def _profile(self, path: str, want: bool) -> None:
         cur = _get(path, COMPOSITE, "ProfilePath")
@@ -173,6 +181,9 @@ class InputPlumber:
             self._restore_profile(path)
 
     def _changing(self, what: str) -> None:
+        if self._changed:
+            return
+        self._changed = True
         now = time.monotonic()
         n, window = self.FIGHT
         self.sets = [t for t in self.sets if now - t < window] + [now]
