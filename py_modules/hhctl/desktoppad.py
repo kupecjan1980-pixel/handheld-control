@@ -25,6 +25,7 @@ import fcntl
 import logging
 import os
 import pwd
+import re
 import select
 import struct
 import subprocess
@@ -150,6 +151,46 @@ def steam_running(uid: int) -> bool:
         except OSError:
             continue
     return False
+
+
+def _xwayland(uid: int) -> list[str] | None:
+    """env for X11 tools on the user's Xwayland (DISPLAY, XAUTHORITY), None without one."""
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/comm") as f:
+                if f.read().strip() != "Xwayland":
+                    continue
+            if os.stat(f"/proc/{d}").st_uid != uid:
+                continue
+            with open(f"/proc/{d}/cmdline", "rb") as f:
+                args = f.read().decode(errors="replace").split("\0")
+        except OSError:
+            continue
+        disp = next((a for a in args if re.fullmatch(r":\d+", a)), None)
+        auth = args[args.index("-auth") + 1] if "-auth" in args[:-1] else None
+        if disp:
+            return [f"DISPLAY={disp}"] + ([f"XAUTHORITY={auth}"] if auth else [])
+    return None
+
+
+def x_windows(home: str) -> set[str] | None:
+    """The windows on the user's X display that the window manager shows
+    (_NET_CLIENT_LIST); Steam runs on X, so its keyboard is one of them.
+    None when that can't be read (no Xwayland, no xprop)."""
+    u = _user(home)
+    xenv = u and _xwayland(u[1])
+    if not xenv:
+        return None
+    cmd = ["runuser", "-u", u[0], "--", "env", f"HOME={home}", *xenv, "xprop", "-root", "_NET_CLIENT_LIST"]
+    try:
+        r = proc.run(cmd, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return set(re.findall(r"0x[0-9a-f]+", r.stdout))
 
 
 def open_steam_keyboard(home: str) -> bool:
@@ -298,12 +339,40 @@ class DesktopPad:
             self.keyboard = None  # closed (or never opened): the controller is HHC's again
         elif kde_keyboard(self.home, None, only_hide=True) is False:
             self.keyboard = None  # Plasma's was up (from L3 or a swipe): now hidden
-        elif open_steam_keyboard(self.home):
-            self.keyboard = "steam"
-        elif kde_keyboard(self.home, True):
-            self.keyboard = "kde"
         else:
-            log.info("desktoppad: no on-screen keyboard (Steam isn't running, Plasma's isn't available)")
+            before = x_windows(self.home)
+            if open_steam_keyboard(self.home):
+                self.keyboard = "steam"
+                self._watch_keyboard(before)
+                return
+            if kde_keyboard(self.home, True):
+                self.keyboard = "kde"
+            else:
+                log.info("desktoppad: no on-screen keyboard (Steam isn't running, Plasma's isn't available)")
+
+    def _watch_keyboard(self, before: set[str] | None) -> None:
+        """Steam's keyboard can be closed many ways (B, its own close key,
+        Enter): when its window goes away, the controller is HHC's again.
+        Without a way to see windows, B or L3 still give it back."""
+        if before is None:
+            log.info("desktoppad: can't see windows (no xprop?); B or L3 gives the mouse back")
+            return
+        new: set[str] = set()
+        for _ in range(8):  # the keyboard window shows up within a few seconds
+            self._stop.wait(0.5)
+            now = x_windows(self.home) or set()
+            new = now - before
+            if new or self.keyboard != "steam":
+                break
+        if not new:
+            log.info("desktoppad: didn't see Steam's keyboard window; B or L3 gives the mouse back")
+            return
+        while self.keyboard == "steam" and not self._stop.is_set():
+            self._stop.wait(1.0)
+            now = x_windows(self.home)
+            if now is not None and not (new & now):
+                log.info("desktoppad: Steam's keyboard closed, controller back to mouse")
+                self.keyboard = None
 
     def _loop(self, fds: dict[int, Pad], mouse: VirtualMouse, nodes: list[str]) -> None:
         held = {BTN_LEFT: False, BTN_RIGHT: False}
