@@ -3,9 +3,9 @@
 On SteamOS a small service passes a short power press to Steam, which then
 sleeps. Some installs lack it (CachyOS on the ONEXPLAYER 3: logind logs
 "Power key pressed short." and nothing happens). The plugin reads the power
-key read-only (no grab), and the controller puts it to sleep at once
-(systemctl suspend, like Desktop Mode); Steam's slower way (it dims first)
-is only the fallback.
+key read-only (no grab), and the controller passes a short press to Steam
+as steam://shortpowerpress (what the SteamOS service sends: Steam's sleep
+animation, screen off, sleep); logind sleeps if Steam doesn't.
 
 The press that wakes the device is often delivered after the resume; it's
 told apart by the jump between CLOCK_BOOTTIME and CLOCK_MONOTONIC (the time

@@ -2913,7 +2913,7 @@ function Content() {
               <PanelSectionRow>
                 <ToggleField
                   label="Power button sleeps in Game Mode"
-                  description={`For systems where a short power press does nothing in Game Mode: HHC puts it to sleep straight away, like Desktop Mode does (no dimming or wait first). Only if that fails does it ask Steam to sleep.${
+                  description={`For systems where a short power press does nothing in Game Mode: HHC passes the press to Steam the way SteamOS does, so Steam plays its sleep animation, turns the screen off and sleeps (like the NEXT 2 and OneXFly). If Steam hasn't slept within 6 s, the system sleeps anyway.${
                     state.sleep.power_key && !state.sleep.power_key_listening?.length ? " No power button found yet." : ""
                   }`}
                   checked={state.sleep.power_key}
@@ -3220,6 +3220,16 @@ const onButton = (action: string) => {
     Navigation.OpenQuickAccessMenu(holdTab as never);
   } else if (action === "keyboard") {
     openKeyboard();
+  } else if (action === "power_short") {
+    // The power button in Game Mode: what SteamOS's power button service
+    // sends, so Steam plays its animation, turns the screen off and sleeps.
+    const sc = (window as any).SteamClient;
+    if (qamVisible()) Navigation.CloseSideMenus();
+    try {
+      sc.URL.ExecuteSteamURL("steam://shortpowerpress");
+    } catch (e) {
+      console.warn("hhctl: power press", e);
+    }
   } else if (action === "sleep") {
     // The power button in Game Mode, when nothing else passed it to Steam.
     const sc = (window as any).SteamClient;
