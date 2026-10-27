@@ -221,7 +221,7 @@ class Controller:
         self.slept_at: float | None = None  # boot time when it went to sleep
         self.sleep_bat: tuple[int | None, bool, bool] = (None, False, False)  # capacity, on AC, charging paused
         self.woke: float | None = None  # set by the wake signal; tick() acts on it
-        self.blanked: tuple[int, float] | None = None  # power key: (backlight raw, when) until it wakes
+        self.blanked: dict | None = None  # power key: {"at", "raw" backlight, "nits" gamescope} until it wakes
         self.sleep_note: str | None = None
         self.wake_before: dict = {}
         self.last_wake: str | None = None  # "slept 3 s, woken by …", shown in the panel
@@ -622,7 +622,8 @@ class Controller:
         self.wake_before = sleep.wake_counts()
 
     def _after_wake(self) -> None:
-        self._unblank()
+        if self.blanked:
+            threading.Timer(self.UNBLANK_AFTER, self._unblank).start()
         self.woke = sleep.boottime()
 
     def tick_wake(self) -> None:
@@ -824,22 +825,41 @@ class Controller:
         self.emit("sleep")
 
     BLANK_MAX = 30.0  # s: dark this long with no sleep, the screen comes back
+    BLANK_NITS = 1  # Game Mode in HDR: gamescope's SDR brightness while blanked
+    UNBLANK_AFTER = 1.0  # s after wake: Steam's fade-in happens in the dark
 
     def _blank(self) -> None:
         """Screen and lights off the moment the power key is pressed: Steam
-        holds the sleep back to fade the screen out first. Back on at wake."""
+        holds the sleep back to fade the screen out first. Back on at wake.
+        In HDR (the ONEXPLAYER 3's Game Mode) the panel ignores the backlight,
+        so gamescope's SDR brightness goes to almost nothing instead."""
+        b = {"at": time.monotonic(), "raw": None, "nits": False}
+        if self.gs and self.gs.sdr_brightness_supported():
+            try:
+                b["nits"] = self.gs.sdr_brightness()  # None: gamescope's default
+                self.gs.set_sdr_brightness(self.BLANK_NITS)
+            except OSError as e:
+                log.info("powerkey: can't dim through gamescope: %s", e)
+                b["nits"] = False
         if self.backlight:
             raw = sysfs.read_int(f"{self.backlight.path}/brightness")
             if raw:
-                self.blanked = (raw, time.monotonic())
+                b["raw"] = raw
                 sysfs.write(f"{self.backlight.path}/brightness", 0)
+        self.blanked = b
         if self.rgb and self.settings["rgb"]["enabled"]:
             self._guard("rgb", lambda: self.rgb.apply("off", 0, 0, 0, None))
 
     def _unblank(self) -> None:
-        if self.blanked and self.backlight:
-            raw, self.blanked = self.blanked[0], None
-            sysfs.write(f"{self.backlight.path}/brightness", raw)
+        b, self.blanked = self.blanked, None
+        if not b:
+            return
+        if b["raw"] and self.backlight:
+            sysfs.write(f"{self.backlight.path}/brightness", b["raw"])
+        if b["nits"] is not False and self.gs:
+            s = self.settings["sdr_brightness"]
+            nits = self._sb_nits() if s["enabled"] and s["confirmed"] else b["nits"]
+            self._guard("sdr_brightness", lambda: self.gs.set_sdr_brightness(nits))
 
     def pad_wake_on(self) -> bool:
         v = self.settings["sleep"].get("pad_wake")
@@ -1312,6 +1332,8 @@ class Controller:
         s = self.settings["sdr_brightness"]
         if not (s["enabled"] and s["confirmed"]) or not self.gs or not self.gs.sdr_brightness_supported():
             return
+        if self.blanked:
+            return  # dark for the power key until it wakes
         nits = self._sb_nits()
         if self.gs.pid != self.sb_applied_pid:
             if now - self.gs_seen >= self.GS_SETTLE:
@@ -1612,7 +1634,7 @@ class Controller:
         self.fan_note = f"Fan control restarted by itself at {time.strftime('%H:%M')} after: {last}"
 
     def tick(self) -> None:
-        if self.blanked and time.monotonic() - self.blanked[1] > self.BLANK_MAX:
+        if self.blanked and time.monotonic() - self.blanked["at"] > self.BLANK_MAX:
             log.info("powerkey: no sleep came, screen back on")
             self._unblank()
             self.apply_rgb()
