@@ -44,6 +44,7 @@ def fake_run(args, timeout=10):
 
 ip._run = fake_run
 ip.InputPlumber.RECHECK = 0.0  # check on every tick here
+ip.InputPlumber.FAST = (0.0, 120.0)
 ip.InputPlumber.FIGHT = (100, 300.0)
 prof = f"{tmp}/inputplumber-profile.yaml"
 p = ip.InputPlumber(prof)
@@ -111,6 +112,7 @@ assert len(calls) == n, "after giving up, InputPlumber is left alone"
 # while it matches, checked every RECHECK seconds only
 ip.InputPlumber.RECHECK = 30.0
 g = ip.InputPlumber(prof)
+g.fast_until = 0.0  # past the first checks after start
 bus[C0].update(ProfilePath=prof, targets=["xbox-elite", "keyboard"])
 g.tick(True, "xbox-elite"); n = len(calls); g.tick(True, "xbox-elite")
 assert len(calls) == n, "no D-Bus calls between checks"

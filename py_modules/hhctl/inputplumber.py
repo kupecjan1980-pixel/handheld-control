@@ -112,6 +112,7 @@ class InputPlumber:
         self.prev_targets: dict[str, list[str]] = {}
         self._looked = -600.0
         self._next = 0.0  # next check while in sync
+        self.fast_until = time.monotonic() + self.FAST[1]  # check often until then
         self.sets: list[float] = []  # checks in which we changed InputPlumber
         self._changed = False  # changed something in this check
         self.gave_up: str | None = None  # why we stopped (something else keeps changing it)
@@ -135,6 +136,10 @@ class InputPlumber:
         return out
 
     RECHECK = 30.0  # s between checks while it matches
+    # Checks this often (s) for this long after the plugin starts, a switch
+    # between Game Mode and Desktop, or a change: OpenGamepadUI switches the
+    # controller ~30 s into Game Mode, which is then put back within seconds.
+    FAST = (3.0, 120.0)
     # More checks than this that had to change something, within this long:
     # someone else keeps changing it back. Counted per check, not per call: a
     # check sets the profile and the outputs, and one switch by something else
@@ -153,7 +158,7 @@ class InputPlumber:
         now = time.monotonic()
         if now < self._next:
             return False
-        self._next = now + self.RECHECK
+        self._next = now + (self.FAST[0] if now < self.fast_until else self.RECHECK)
         # Most devices have no InputPlumber (or none of DEVICES): look rarely.
         if not self.devices and not self.prev_profile and not self.prev_targets:
             if time.monotonic() - self._looked < 60:
@@ -164,6 +169,8 @@ class InputPlumber:
         for path in self.devices:
             self._profile(path, buttons)
             self._target(path, target, buttons)
+        if self._changed:
+            self.fast_until = time.monotonic() + self.FAST[1]
         return self._changed
 
     def _profile(self, path: str, want: bool) -> None:

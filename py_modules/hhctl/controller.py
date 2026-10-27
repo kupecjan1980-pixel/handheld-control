@@ -1200,6 +1200,8 @@ class Controller:
             if self.session_game_mode is not None:
                 log.info("session: %s", "Game Mode" if game_mode else "Desktop")
                 self.rgb_again = [now + 3, now + 10]
+                self.ip.fast_until = now + self.ip.FAST[1]
+                self.ip._next = 0.0
             self.session_game_mode = game_mode
         if self.rgb_again and now >= self.rgb_again[0]:
             self.rgb_again.pop(0)

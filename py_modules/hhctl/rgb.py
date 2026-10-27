@@ -59,10 +59,21 @@ def find_hidraw(vid: int, pid: int, page: int, usage: int = 0x01) -> str | None:
 
 
 class _Hidraw:
+    IDS: tuple[int, int, int] = (0, 0, 0)  # vid, pid, usage page
+
     def __init__(self, path: str):
         self.path = path
 
+    @classmethod
+    def find(cls):
+        path = find_hidraw(*cls.IDS)
+        return cls(path) if path else None
+
     def send(self, packets: list[bytes], reply_timeout: float = 0.0) -> None:
+        # Looked up again each time: when the controller is made anew (Game
+        # Mode <-> Desktop on the OneXFly) it can come back as another
+        # hidraw node, and the old one is gone or someone else's.
+        self.path = find_hidraw(*self.IDS) or self.path
         fd = os.open(self.path, os.O_RDWR | os.O_NONBLOCK)
         try:
             for pkt in packets:
@@ -84,10 +95,7 @@ class AyaneoHid(_Hidraw):
     modes = ["off", "solid", "pulse", "rainbow"]
     effects: list[str] = []
 
-    @classmethod
-    def find(cls):
-        path = find_hidraw(0x1C4F, 0x0002, 0xFF00)
-        return cls(path) if path else None
+    IDS = (0x1C4F, 0x0002, 0xFF00)
 
     @staticmethod
     def packet(mode: str, r: int, g: int, b: int) -> bytes:
@@ -173,10 +181,7 @@ class OxpHidV1(_Hidraw):
     # magenta whatever is sent (power ring test, 2026-10-23).
     sides = tuple(range(0x01, 0x09))
 
-    @classmethod
-    def find(cls):
-        path = find_hidraw(0x1A86, 0xFE00, 0xFF00)
-        return cls(path) if path else None
+    IDS = (0x1A86, 0xFE00, 0xFF00)
 
     def apply(self, mode: str, hue: int, sat: int, bright: int, effect: str | None) -> None:
         on = mode != "off"
@@ -213,10 +218,7 @@ class OxpHidV2(_Hidraw):
     modes = ["off", "solid", "effect"]
     effects = list(OXP_V1_EFFECTS)
 
-    @classmethod
-    def find(cls):
-        path = find_hidraw(0x1A2C, 0xB001, 0xFF01)
-        return cls(path) if path else None
+    IDS = (0x1A2C, 0xB001, 0xFF01)
 
     def apply(self, mode: str, hue: int, sat: int, bright: int, effect: str | None) -> None:
         on = mode != "off"
