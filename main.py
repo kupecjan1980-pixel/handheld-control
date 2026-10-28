@@ -4,7 +4,7 @@ import os
 
 import decky
 
-from hhctl import topuse
+from hhctl import topuse, upscale
 from hhctl.controller import Controller
 
 TICK = 2.0
@@ -160,6 +160,10 @@ class Plugin:
 
     async def set_upscale(self, option: str, on: bool):
         return await self._run(self.ctl.set_upscale, option, on)
+
+    async def upscale_status(self, appid: int):
+        # What the running game actually got (Proton, variables, loaded DLLs).
+        return await asyncio.to_thread(upscale.game_status, int(appid))
 
     async def set_ai(self, on: bool):
         return await self._run(self.ctl.set_ai, on)

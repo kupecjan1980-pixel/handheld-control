@@ -114,3 +114,88 @@ class Upscale:
         return {"options": self.options, "on": self.current(), "rdna3": self.rdna3, "fsr4_why": self.fsr4_why,
                 "tools": proton_tools(self.home), "optiscaler": self.optiscaler, "optiscaler_fg": self.optiscaler_fg,
                 "opti_upscaler": self.opti_upscaler}
+
+
+# What the running game actually got, from its processes: which Proton runs
+# it, the variables it was started with, and the DLLs / layers loaded into
+# it (Wine maps a game's DLLs from their files, so they show in
+# /proc/<pid>/maps).
+ENV_KEYS = ("PROTON_FSR4_UPGRADE", "FSR4_UPGRADE", "PROTON_XESS_UPGRADE", "PROTON_USE_OPTISCALER",
+            "PROTON_FFX4_UPGRADE", "LSFGVK_MULTIPLIER")
+DLLS = {
+    "fsr4": re.compile(r"/amdxcffx64\.dll$", re.I),  # FSR 4's DLL, there only with the upgrade
+    "fidelityfx": re.compile(r"/amd_fidelityfx_(dx12|vk)\.dll$", re.I),
+    "xess": re.compile(r"/libxess(_dx11)?\.dll$", re.I),
+    "optiscaler": re.compile(r"optiscaler", re.I),
+    "lsfg": re.compile(r"lsfg", re.I),
+}
+PROTON = re.compile(r"/(?:compatibilitytools\.d|steamapps/common)/([^/]+)/(?:proton|files/|dist/)")
+
+
+def _environ(pid: str) -> dict[str, str]:
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            raw = f.read().split(b"\0")
+    except OSError:
+        return {}
+    out = {}
+    for item in raw:
+        k, sep, v = item.partition(b"=")
+        if sep:
+            out[k.decode(errors="replace")] = v.decode(errors="replace")
+    return out
+
+
+def game_status(appid: int) -> dict | None:
+    """None when no process of the game is running."""
+    want = str(appid)
+    pids, env, proton, loaded, optiscaler_dir = [], {}, None, {k: False for k in DLLS}, False
+    for d in glob.glob("/proc/[0-9]*"):
+        pid = d.rsplit("/", 1)[1]
+        e = _environ(pid)
+        if want not in (e.get("SteamAppId"), e.get("STEAM_COMPAT_APP_ID"), e.get("SteamGameId")):
+            continue
+        pids.append(pid)
+        for k in ENV_KEYS:
+            if k in e:
+                env[k] = e[k]
+        try:
+            with open(f"{d}/maps") as f:
+                maps = f.read()
+        except OSError:
+            maps = ""
+        for line in maps.splitlines():
+            parts = line.split(None, 5)
+            if len(parts) < 6:
+                continue
+            path = parts[5]
+            if proton is None and (m := PROTON.search(path)):
+                proton = m.group(1)
+            for k, rx in DLLS.items():
+                if not loaded[k] and rx.search(path):
+                    loaded[k] = True
+        if not optiscaler_dir:
+            try:
+                exe = os.readlink(f"{d}/cwd")
+                optiscaler_dir = os.path.exists(os.path.join(exe, "OptiScaler.ini"))
+            except OSError:
+                pass
+    if not pids:
+        return None
+    if proton is None:
+        for pid in pids:
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    m = PROTON.search(f.read().replace(b"\0", b" ").decode(errors="replace"))
+            except OSError:
+                continue
+            if m:
+                proton = m.group(1)
+                break
+    loaded["optiscaler"] = loaded["optiscaler"] or optiscaler_dir
+    return {
+        "proton": proton,
+        "knows_vars": bool(proton and TOOLS.search(proton)),
+        "env": env,
+        "loaded": loaded,
+    }

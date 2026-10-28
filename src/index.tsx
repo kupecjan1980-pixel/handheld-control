@@ -368,6 +368,13 @@ const setGpuMem = callable<[number], State>("set_gpu_mem");
 const saveIpReport = callable<[], State>("save_ip_report");
 const setAi = callable<[boolean], State>("set_ai");
 const setUpscale = callable<[string, boolean], State>("set_upscale");
+type GameUpscale = {
+  proton: string | null;
+  knows_vars: boolean;
+  env: Record<string, string>;
+  loaded: { fsr4: boolean; fidelityfx: boolean; xess: boolean; optiscaler: boolean; lsfg: boolean };
+} | null;
+const upscaleStatus = callable<[number], GameUpscale>("upscale_status");
 const setLsfg = callable<[boolean], State>("set_lsfg");
 const setGame = callable<[string | null, string | null], State>("set_game");
 const saveGameProfile = callable<[boolean], State>("save_game_profile");
@@ -618,7 +625,7 @@ function LsfgRow({ state, setState }: { state: State; setState: (s: State) => vo
   );
 }
 
-function OptiscalerRow({ u, l }: { u: State["upscale"]; l?: State["lsfg"] }) {
+function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; now: ReturnType<typeof useGameUpscale> }) {
   const [game, setGame] = useState(runningGame());
   const [opts, setOpts] = useState<string | null>(null);
   useEffect(() => {
@@ -680,7 +687,7 @@ function OptiscalerRow({ u, l }: { u: State["upscale"]; l?: State["lsfg"] }) {
       <PanelSectionRow>
         <ToggleField
           label={`OptiScaler for ${game.name}`}
-          description={base}
+          description={`${base}${upscaleNow("optiscaler", on, now.game, now.st)}`}
           checked={on}
           onChange={(v) => apply(withOptions(opts, v ? (mode === "fsr" ? u.optiscaler_fg : u.optiscaler) : null, ls ? l?.vars[ls] ?? null : null))}
         />
@@ -688,7 +695,9 @@ function OptiscalerRow({ u, l }: { u: State["upscale"]; l?: State["lsfg"] }) {
       <PanelSectionRow>
         <DropdownItem
           label={`Frame generation for ${game.name}`}
-          description={`More frames shown than rendered; best from about 40 fps (below that it feels laggy). ${howto[mode] ?? howto.off}`}
+          description={`More frames shown than rendered; best from about 40 fps (below that it feels laggy). ${howto[mode] ?? howto.off}${
+            mode === "fsr" ? upscaleNow("fsrfg", true, now.game, now.st) : mode.startsWith("ls") ? upscaleNow("lsfg", true, now.game, now.st) : ""
+          }`}
           rgOptions={[
             { data: "off", label: "Off" },
             { data: "fsr", label: "FSR (OptiScaler, DirectX 12)" },
@@ -707,8 +716,74 @@ function OptiscalerRow({ u, l }: { u: State["upscale"]; l?: State["lsfg"] }) {
   );
 }
 
+// What the running game actually got, looked up every few seconds while the
+// panel is open: ended on each upscaling note as "Now: ...".
+function useGameUpscale(): { game: { appid: number; name: string } | null; st: GameUpscale | undefined } {
+  const [game, setGame] = useState(runningGame());
+  const [st, setSt] = useState<GameUpscale | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    const look = async () => {
+      const g = runningGame();
+      setGame(g);
+      const r = g ? await upscaleStatus(g.appid).catch(() => undefined) : undefined;
+      if (live) setSt(r);
+    };
+    look();
+    const id = setInterval(look, 4000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, []);
+  return { game, st };
+}
+
+// "Now: ..." for one feature. kind: fsr4 / xess (session-wide variables),
+// optiscaler, fsrfg, lsfg (the game's launch options).
+function upscaleNow(kind: string, on: boolean, game: { name: string } | null, st: GameUpscale | undefined): string {
+  if (!game) return on ? " Now: on; no game running to check." : "";
+  if (st === undefined) return on ? ` Now: checking ${game.name}…` : "";
+  if (st === null) return on ? ` Now: ${game.name} isn't running any more.` : "";
+  const env = st.env;
+  const proton = st.proton ?? "an unknown Proton";
+  const L = st.loaded;
+  if (!on) {
+    if (kind === "fsr4" && L.fsr4) return ` Now: ${game.name} has FSR 4 loaded anyway.`;
+    return "";
+  }
+  if (kind === "lsfg") {
+    if (!env.LSFGVK_MULTIPLIER) return ` Now: ${game.name} was started before this was set: restart the game.`;
+    return L.lsfg
+      ? ` Now: working: Lossless Scaling ${env.LSFGVK_MULTIPLIER}× is loaded in ${game.name}.`
+      : ` Now: set, but lsfg-vk didn't load into ${game.name} (is it a Vulkan/DXVK game?).`;
+  }
+  const cachy = /cachyos/i.test(proton);
+  if (kind === "optiscaler" || kind === "fsrfg") {
+    if (!env.PROTON_USE_OPTISCALER) return ` Now: ${game.name} was started before this was set: restart the game.`;
+    if (!cachy) return ` Now: not working: ${game.name} runs with ${proton}; OptiScaler needs Proton-CachyOS (Properties › Compatibility).`;
+    if (!L.optiscaler) return ` Now: set, but OptiScaler didn't load into ${game.name} (update Proton-CachyOS).`;
+    if (kind === "optiscaler") return ` Now: working: OptiScaler is loaded in ${game.name}; pick an upscaler in the game's settings.`;
+    return L.fidelityfx
+      ? ` Now: working: OptiScaler and the FSR frame generation DLL are loaded in ${game.name}.`
+      : ` Now: OptiScaler is loaded, but not the FSR frame generation DLL: turn on an upscaler in the game (DirectX 12 games only).`;
+  }
+  // fsr4 / xess: from ~/.config/environment.d, read when the session starts
+  const has = kind === "fsr4" ? !!(env.PROTON_FSR4_UPGRADE || env.FSR4_UPGRADE) : !!env.PROTON_XESS_UPGRADE;
+  if (!st.knows_vars) return ` Now: not working: ${game.name} runs with ${proton}, which ignores this; pick Proton-CachyOS, GE-Proton or Proton-EM for it (Properties › Compatibility).`;
+  if (!has) return ` Now: not yet: ${game.name} didn't get the setting. It's read when the session starts: switch to Desktop and back to Game Mode, then start the game again.`;
+  if (kind === "fsr4")
+    return L.fsr4
+      ? ` Now: working: FSR 4 is loaded in ${game.name}.`
+      : ` Now: set, but FSR 4 isn't loaded: ${game.name} isn't using FSR 3.1 right now (pick FSR in its settings), or it has no FSR 3.1.`;
+  return L.xess
+    ? ` Now: XeSS is loaded in ${game.name} (the newest one when Proton could download it).`
+    : ` Now: set, but ${game.name} isn't using XeSS right now (pick XeSS in its settings).`;
+}
+
 function UpscaleRows({ state, setState }: { state: State; setState: (s: State) => void }) {
   const u = state.upscale;
+  const now = useGameUpscale();
   if (!u) return null;
   const tools = u.tools.length
     ? `Installed: ${u.tools.slice(0, 3).join(", ")}${u.tools.length > 3 ? "…" : ""}; pick it per game (Properties › Compatibility).`
@@ -736,13 +811,13 @@ function UpscaleRows({ state, setState }: { state: State; setState: (s: State) =
         <PanelSectionRow key={o}>
           <ToggleField
             label={text[o]?.[0] ?? o}
-            description={`${text[o]?.[1] ?? ""} ${tools} Games started after the next login.`}
+            description={`${text[o]?.[1] ?? ""} ${tools} Games started after the next login.${upscaleNow(o, !!u.on[o], now.game, now.st)}`}
             checked={!!u.on[o]}
             onChange={async (v) => setState(await setUpscale(o, v))}
           />
         </PanelSectionRow>
       ))}
-      <OptiscalerRow u={u} l={state.lsfg} />
+      <OptiscalerRow u={u} l={state.lsfg} now={now} />
       <LsfgRow state={state} setState={setState} />
       <ErrorRow msg={state.errors.upscale} />
     </>
@@ -2629,12 +2704,17 @@ function Content() {
                 </ButtonItem>
               </PanelSectionRow>
             )}
-            {state.sleep.rgb_off_available && draft.rgb.enabled && (
+            {state.sleep.rgb_off_available && (
               <PanelSectionRow>
                 <ToggleField
-                  label="Lights off while asleep"
-                  description="Turned off just before it suspends, back on when it wakes"
-                  checked={draft.sleep.rgb_off}
+                  label="Lights off while asleep or off"
+                  description={
+                    draft.rgb.enabled
+                      ? "Turned off just before it suspends or powers off, back on when it wakes"
+                      : "Turn on the lights setting above first: the plugin only switches lights it controls (it puts them back on after waking)"
+                  }
+                  disabled={!draft.rgb.enabled}
+                  checked={draft.sleep.rgb_off && draft.rgb.enabled}
                   onChange={(v) => change("sleep", { rgb_off: v }, 0)}
                 />
               </PanelSectionRow>
