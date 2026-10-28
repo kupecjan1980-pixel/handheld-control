@@ -975,6 +975,19 @@ const reasons = (xs: string[]) => xs.map((r) => THROTTLE_LABELS[r] ?? r).join(",
 // Table header and cap rows are dimmer.
 const READOUT_CSS = `
   .hhctl-root { box-sizing: border-box; }
+  /* D-pad focus: a flash when it lands, then a slow pulse, so it's easy to follow. */
+  @keyframes hhctl-flash {
+    0% { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 0 14px 4px rgba(255, 255, 255, 0.6); }
+    100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55), 0 0 6px 1px rgba(255, 255, 255, 0.2); }
+  }
+  @keyframes hhctl-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55), 0 0 6px 1px rgba(255, 255, 255, 0.2); }
+    50% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25), 0 0 2px 0 rgba(255, 255, 255, 0); }
+  }
+  .hhctl-root .gpfocus {
+    border-radius: 4px;
+    animation: hhctl-flash 0.35s ease-out, hhctl-pulse 1.6s ease-in-out 0.35s infinite;
+  }
   .hhctl-fit { display: flex; flex-direction: column; }
   .hhctl-header {
     flex: none; padding: 2px 16px 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -1442,6 +1455,31 @@ function Content() {
   const [view, setViewRaw] = useState<"main" | "pick" | "adjust">("main");
   const bodyRef = useRef<HTMLDivElement>(null);
   const backTo = useRef<HTMLElement | null>(null);
+  // D-pad focus coming back from a dropdown's list (or from a setting that was
+  // redrawn after a change) lands at the top of the panel; put it back on the
+  // setting it left. lastFocus is the last setting focused in the panel, its
+  // place among the panel's focusables in case it was redrawn, and whether
+  // focus has left the panel since.
+  const lastFocus = useRef<{ el: HTMLElement; idx: number; out: boolean } | null>(null);
+  const focusables = () =>
+    Array.from(rootRef.current?.querySelectorAll<HTMLElement>(".Focusable, [tabindex], button") ?? []);
+  const onRootFocus = (ev: { target: EventTarget }) => {
+    const el = ev.target as HTMLElement;
+    const last = lastFocus.current;
+    if (last && el !== last.el && view === "main") {
+      const back = last.el.isConnected ? (last.out ? last.el : null) : focusables()[last.idx];
+      if (back && back !== el) {
+        lastFocus.current = { ...last, out: false };
+        requestAnimationFrame(() => back.focus?.());
+        return;
+      }
+    }
+    lastFocus.current = { el, idx: focusables().indexOf(el), out: false };
+  };
+  const onRootBlur = (ev: { relatedTarget: EventTarget | null }) => {
+    const to = ev.relatedTarget as Node | null;
+    if (lastFocus.current && !(to && rootRef.current?.contains(to))) lastFocus.current.out = true;
+  };
   // Leaving the settings remembers the spot (and the focused button); coming
   // back restores both, so there's no scrolling back down.
   const setView = (v: "main" | "pick" | "adjust") => {
@@ -1681,6 +1719,8 @@ function Content() {
     <div
       ref={rootRef}
       className={`hhctl-root ${fitHeight ? "hhctl-fit" : "hhctl-sticky"}`}
+      onFocus={onRootFocus}
+      onBlur={onRootBlur}
       style={{
         ...(bgUrl ? imageStyle(bgUrl, draft.ui?.bg_dim ?? 55, pos, bgDims, box) : {}),
         ...(fitHeight ? { height: fitHeight } : {}),
