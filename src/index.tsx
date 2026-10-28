@@ -977,16 +977,16 @@ const READOUT_CSS = `
   .hhctl-root { box-sizing: border-box; }
   /* D-pad focus: a flash when it lands, then a slow pulse, so it's easy to follow. */
   @keyframes hhctl-flash {
-    0% { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 0 14px 4px rgba(255, 255, 255, 0.6); }
-    100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55), 0 0 6px 1px rgba(255, 255, 255, 0.2); }
+    0% { box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.95), inset 0 0 18px 4px rgba(255, 255, 255, 0.45); }
+    100% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6), inset 0 0 8px 1px rgba(255, 255, 255, 0.15); }
   }
   @keyframes hhctl-pulse {
-    0%, 100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55), 0 0 6px 1px rgba(255, 255, 255, 0.2); }
-    50% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25), 0 0 2px 0 rgba(255, 255, 255, 0); }
+    0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6), inset 0 0 8px 1px rgba(255, 255, 255, 0.15); }
+    50% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.25), inset 0 0 0 0 rgba(255, 255, 255, 0); }
   }
-  .hhctl-root .gpfocus {
+  .hhctl-root .hhctl-navfocus {
     border-radius: 4px;
-    animation: hhctl-flash 0.35s ease-out, hhctl-pulse 1.6s ease-in-out 0.35s infinite;
+    animation: hhctl-flash 0.35s ease-out, hhctl-pulse 1.6s ease-in-out 0.35s infinite !important;
   }
   .hhctl-fit { display: flex; flex-direction: column; }
   .hhctl-header {
@@ -1455,31 +1455,52 @@ function Content() {
   const [view, setViewRaw] = useState<"main" | "pick" | "adjust">("main");
   const bodyRef = useRef<HTMLDivElement>(null);
   const backTo = useRef<HTMLElement | null>(null);
-  // D-pad focus coming back from a dropdown's list (or from a setting that was
-  // redrawn after a change) lands at the top of the panel; put it back on the
-  // setting it left. lastFocus is the last setting focused in the panel, its
-  // place among the panel's focusables in case it was redrawn, and whether
-  // focus has left the panel since.
-  const lastFocus = useRef<{ el: HTMLElement; idx: number; out: boolean } | null>(null);
-  const focusables = () =>
-    Array.from(rootRef.current?.querySelectorAll<HTMLElement>(".Focusable, [tabindex], button") ?? []);
-  const onRootFocus = (ev: { target: EventTarget }) => {
-    const el = ev.target as HTMLElement;
-    const last = lastFocus.current;
-    if (last && el !== last.el && view === "main") {
-      const back = last.el.isConnected ? (last.out ? last.el : null) : focusables()[last.idx];
-      if (back && back !== el) {
-        lastFocus.current = { ...last, out: false };
-        requestAnimationFrame(() => back.focus?.());
-        return;
+  // Quick Access moves a focus of its own (Steam's navigation tree; no DOM
+  // focus events), so it's followed here: the setting it's on gets the
+  // highlight, and when it jumps from a setting back to the top of the panel
+  // (after a dropdown's list closes, or the setting was redrawn), it's put
+  // back on that setting.
+  const lastNav = useRef<{ node: any; idx: number; out: boolean } | null>(null);
+  useEffect(() => {
+    if (view !== "main") return;
+    let lit: Element | null = null;
+    const id = setInterval(() => {
+      const root = rootRef.current;
+      if (!root || root.ownerDocument.hidden) return;
+      const nodes = navNodes(root);
+      const cur = nodes.filter((n) => n.BHasFocus?.()).pop();
+      const last = lastNav.current;
+      const away = !cur || !root.ownerDocument.hasFocus();
+      if (away) {
+        if (last) last.out = true;
+      } else if (last && cur !== last.node) {
+        const idx = nodes.indexOf(cur);
+        const gone = !last.node.m_bMounted || !root.contains(last.node.m_element);
+        const toTop = idx <= 2 && last.idx > idx + 3;
+        const back = gone ? nodes[last.idx] : last.node;
+        if (back && back !== cur && idx < last.idx && (last.out || gone || toTop)) {
+          try {
+            back.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
+            lastNav.current = { node: back, idx: nodes.indexOf(back), out: false };
+            return;
+          } catch {
+            // not ours to move: leave it where Steam put it
+          }
+        }
       }
-    }
-    lastFocus.current = { el, idx: focusables().indexOf(el), out: false };
-  };
-  const onRootBlur = (ev: { relatedTarget: EventTarget | null }) => {
-    const to = ev.relatedTarget as Node | null;
-    if (lastFocus.current && !(to && rootRef.current?.contains(to))) lastFocus.current.out = true;
-  };
+      if (cur) lastNav.current = { node: cur, idx: nodes.indexOf(cur), out: away && !!last?.out };
+      const el = away ? null : (cur?.m_element as Element | undefined) ?? null;
+      if (el !== lit) {
+        lit?.classList.remove("hhctl-navfocus");
+        el?.classList.add("hhctl-navfocus");
+        lit = el;
+      }
+    }, 120);
+    return () => {
+      clearInterval(id);
+      lit?.classList.remove("hhctl-navfocus");
+    };
+  }, [view]);
   // Leaving the settings remembers the spot (and the focused button); coming
   // back restores both, so there's no scrolling back down.
   const setView = (v: "main" | "pick" | "adjust") => {
@@ -1719,8 +1740,6 @@ function Content() {
     <div
       ref={rootRef}
       className={`hhctl-root ${fitHeight ? "hhctl-fit" : "hhctl-sticky"}`}
-      onFocus={onRootFocus}
-      onBlur={onRootBlur}
       style={{
         ...(bgUrl ? imageStyle(bgUrl, draft.ui?.bg_dim ?? 55, pos, bgDims, box) : {}),
         ...(fitHeight ? { height: fitHeight } : {}),
@@ -3217,6 +3236,30 @@ function TitleView() {
 // Extra buttons (backend listener): runs while the plugin is loaded, panel open or not.
 const QAM_DECKY_TAB = 999; // EQuickAccessTab.Decky
 let panelShown = false; // Content is mounted: our page is the one in the Decky tab
+
+// Steam's navigation nodes for the panel's elements, in the tree's order.
+const navNodes = (root: Element): any[] => {
+  const out: any[] = [];
+  const walk = (n: any) => {
+    for (const c of n?.m_rgChildren ?? []) {
+      if (c?.m_element && root.contains(c.m_element)) out.push(c);
+      walk(c);
+    }
+  };
+  const seen = new Set<any>();
+  const tree = (t: any) => {
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    if (t.m_Root?.m_element?.ownerDocument === root.ownerDocument) walk(t.m_Root);
+    (t.m_rgChildNavTrees ?? []).forEach(tree);
+  };
+  try {
+    (getGamepadNavigationTrees() ?? []).forEach(tree);
+  } catch {
+    // Steam changed its navigation internals: no highlight, nothing else breaks
+  }
+  return out;
+};
 
 // Same check as useQuickAccessVisible, outside React.
 const quickAccessOpen = () => {
