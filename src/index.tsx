@@ -1479,14 +1479,15 @@ const themeCss = (name: string, hasImage: boolean) => {
   `;
 };
 
-// Glass buttons: what's behind a button (the background picture) shows through it like through a magnifying
-// glass, sharp, not blurred: the middle a little magnified, the rim bent hard the other way (it shows what lies
-// beyond the edge, squeezed in), a cubic curve between, so it reads as a thick drop of glass. Chromium does it
+// Glass buttons: what's behind a button (the background picture) shows through it like through a fish-eye
+// lens, sharp, not blurred: the middle magnified most, less and less towards the edges, which are bent the
+// other way (they show what lies beyond, squeezed in), so it reads as a thick drop of glass. Chromium does it
 // with an SVG displacement map as the backdrop-filter; the map depends on the button's size, so each size gets
 // its own filter, in the document the panel is in (Steam's Quick Access window, or HHC Desktop's page).
 const GLASS_SEL = '[class*="DialogButton"], [class*="DropDownControlButton"], select';
-const GLASS_MAG = 1.12; // the middle's magnification
-const GLASS_BEND = 1.6; // how far the rim reaches out, in rim widths
+const GLASS_MAG = 1.25; // the middle's magnification
+const GLASS_REACH = 0.45; // how far beyond its edge it shows, in half its smaller side
+const GLASS_CURVE = 1.7; // how the magnification falls off from the middle (higher: flatter middle)
 const glassFilters = new WeakMap<Document, Map<string, string>>();
 
 const glassMap = (doc: Document, w: number, h: number, r: number) => {
@@ -1495,8 +1496,8 @@ const glassMap = (doc: Document, w: number, h: number, r: number) => {
   c.height = h;
   const ctx = c.getContext("2d")!;
   const img = ctx.createImageData(w, h);
-  const rim = Math.max(2, Math.min(h * 0.45, w * 0.45, 20)); // the curved side wall
-  const most = rim * GLASS_BEND;
+  const lens = Math.max(2, Math.min(w, h) / 2); // the bend runs across the whole button
+  const most = lens * GLASS_REACH;
   const zx = 1 / (1 + (2 * most) / w), zy = 1 / (1 + (2 * most) / h); // the rim's zoom
   const R = Math.min(r, w / 2, h / 2);
   const dx = new Float32Array(w * h), dy = new Float32Array(w * h);
@@ -1507,7 +1508,7 @@ const glassMap = (doc: Document, w: number, h: number, r: number) => {
       // distance from the rounded edge, inwards
       const qx = Math.abs(px) - (w / 2 - R), qy = Math.abs(py) - (h / 2 - R);
       const edge = R - (Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0));
-      const bend = Math.max(0, 1 - edge / rim) ** 3; // 1 at the rim, 0 inside
+      const bend = Math.max(0, 1 - edge / lens) ** GLASS_CURVE; // 1 at the edge, 0 in the middle
       const sx = GLASS_MAG + (zx - GLASS_MAG) * bend, sy = GLASS_MAG + (zy - GLASS_MAG) * bend;
       const k = j * w + i;
       dx[k] = px * (1 / sx - 1);
@@ -3480,7 +3481,7 @@ function Content() {
             <PanelSectionRow>
               <ToggleField
                 label="Glass buttons"
-                description="Buttons and dropdowns are thick, see-through glass: what's behind them shows sharp, the middle magnified, bent along the rounded sides. Best with a background picture. Off: plain tinted buttons"
+                description="Buttons and dropdowns are thick, see-through glass: what's behind them shows sharp, like through a fish-eye lens (magnified most in the middle, bent along the rounded sides). Best with a background picture. Off: plain tinted buttons"
                 checked={draft.ui?.glass ?? true}
                 onChange={(v) => change("ui", { glass: v }, 0)}
               />
