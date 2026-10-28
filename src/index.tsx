@@ -557,19 +557,98 @@ function runningGame(): { appid: number; name: string } | null {
   return app?.appid ? { appid: Number(app.appid), name: app.display_name ?? `App ${app.appid}` } : null;
 }
 
-function launchOptions(appid: number): Promise<string | null> {
+// The game the OptiScaler rows act on: the running one, else the one whose
+// library page is open, else the installed game played last.
+type TargetGame = { appid: number; name: string; running: boolean; why?: string };
+function targetGame(): TargetGame | null {
+  const run = runningGame();
+  if (run) return { ...run, running: true };
+  const W = window as any;
+  const overview = (id: number) => W.appStore?.GetAppOverviewByAppID?.(id);
+  const path: string = W.SteamUIStore?.WindowStore?.GamepadUIMainWindowInstance?.m_locationPathname ?? "";
+  const page = path.match(/\/library\/app\/(\d+)/);
+  const o = page ? overview(Number(page[1])) : null;
+  if (o?.appid) return { appid: Number(o.appid), name: o.display_name, running: false, why: "open in the library" };
+  let last: any = null;
+  try {
+    for (const a of W.collectionStore?.localGamesCollection?.allApps ?? [])
+      if ((a.rt_last_time_played ?? 0) > (last?.rt_last_time_played ?? 0)) last = a;
+  } catch {
+    last = null;
+  }
+  return last ? { appid: Number(last.appid), name: last.display_name, running: false, why: "played last" } : null;
+}
+
+// Launch options, compatibility tool and platforms of one game.
+type AppInfo = { opts: string; tool: string; toolLabel: string; linux: boolean };
+function appInfo(appid: number): Promise<AppInfo | null> {
   const apps = (window as any).SteamClient?.Apps;
   if (!apps?.RegisterForAppDetails) return Promise.resolve(null);
   return new Promise((resolve) => {
     let reg: { unregister: () => void } | null = null;
-    const done = (v: string | null) => {
+    const done = (v: AppInfo | null) => {
       clearTimeout(t);
       reg?.unregister();
       resolve(v);
     };
     const t = setTimeout(() => done(null), 3000);
-    reg = apps.RegisterForAppDetails(appid, (d: any) => done(d?.strLaunchOptions ?? ""));
+    reg = apps.RegisterForAppDetails(appid, (d: any) =>
+      done({
+        opts: d?.strLaunchOptions ?? "",
+        tool: d?.strCompatToolName ?? "",
+        toolLabel: d?.strCompatToolDisplayName || d?.strCompatToolName || "",
+        linux: (d?.vecPlatforms ?? []).includes("linux"),
+      }),
+    );
   });
+}
+
+// OptiScaler needs Proton-CachyOS: switched to it with OptiScaler on, and the
+// Proton the game had put back when OptiScaler goes off. What it had is kept in
+// the Steam UI's storage per game ("" = Steam's default).
+const PREV_TOOL = (appid: number) => `hhctl-prev-compat-${appid}`;
+const CACHYOS = /cachyos/i;
+const storeGet = (k: string): string | null => {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+};
+const storeSet = (k: string, v: string | null) => {
+  try {
+    if (v === null) localStorage.removeItem(k);
+    else localStorage.setItem(k, v);
+  } catch {
+    /* not kept: turning OptiScaler off then leaves Proton-CachyOS */
+  }
+};
+
+// Returns the tool the game is on now (name, label) and a note on what changed.
+async function matchProton(appid: number, info: AppInfo, opti: boolean): Promise<{ tool: string; toolLabel: string; note: string }> {
+  const apps = (window as any).SteamClient?.Apps;
+  const keep = { tool: info.tool, toolLabel: info.toolLabel };
+  if (!apps?.SpecifyCompatTool) return { ...keep, note: "" };
+  if (opti) {
+    if (CACHYOS.test(info.tool)) return { ...keep, note: "" };
+    if (!info.tool && info.linux)
+      return { ...keep, note: "Not switched to Proton-CachyOS: this is the native Linux version, which OptiScaler can't load into (switching would download the Windows version)." };
+    const tools: { strToolName: string; strDisplayName: string }[] = (await apps.GetAvailableCompatTools?.(appid).catch(() => [])) ?? [];
+    const pick = tools.filter((x) => CACHYOS.test(x.strToolName) || CACHYOS.test(x.strDisplayName)).sort((a, b) => b.strToolName.localeCompare(a.strToolName))[0];
+    if (!pick) return { ...keep, note: "Proton-CachyOS isn't installed, so the game stays on its Proton and OptiScaler won't load: install Proton-CachyOS (e.g. with ProtonUp-Qt), then turn this off and on." };
+    if (storeGet(PREV_TOOL(appid)) === null) storeSet(PREV_TOOL(appid), info.tool);
+    apps.SpecifyCompatTool(appid, pick.strToolName);
+    const was = info.toolLabel || "Steam's default Proton";
+    return { tool: pick.strToolName, toolLabel: pick.strDisplayName, note: `Switched the game from ${was} to ${pick.strDisplayName}; turning OptiScaler off puts ${was} back.` };
+  }
+  const prev = storeGet(PREV_TOOL(appid));
+  if (prev === null) return { ...keep, note: "" };
+  storeSet(PREV_TOOL(appid), null);
+  if (prev === info.tool) return { ...keep, note: "" };
+  apps.SpecifyCompatTool(appid, prev);
+  const tools: { strToolName: string; strDisplayName: string }[] = prev ? ((await apps.GetAvailableCompatTools?.(appid).catch(() => [])) ?? []) : [];
+  const label = tools.find((x) => x.strToolName === prev)?.strDisplayName ?? prev;
+  return { tool: prev, toolLabel: label, note: `Put the game back on ${label || "Steam's default Proton"}.` };
 }
 
 const OPTI_VAR = /(^|\s)PROTON_USE_OPTISCALER=\S+/;
@@ -626,13 +705,15 @@ function LsfgRow({ state, setState }: { state: State; setState: (s: State) => vo
 }
 
 function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; now: ReturnType<typeof useGameUpscale> }) {
-  const [game, setGame] = useState(runningGame());
-  const [opts, setOpts] = useState<string | null>(null);
+  const [game, setGame] = useState<TargetGame | null>(null);
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [note, setNote] = useState("");
   useEffect(() => {
-    const g = runningGame();
+    const g = targetGame();
     setGame(g);
-    if (g) launchOptions(g.appid).then(setOpts);
+    if (g) appInfo(g.appid).then(setInfo);
   }, []);
+  const opts = info?.opts ?? null;
   if (!(window as any).SteamClient?.Apps?.SetAppLaunchOptions) {
     // HHC Desktop: no Steam to set them in, so the launch options to paste by hand.
     const rows: [string, string | undefined][] = [
@@ -652,13 +733,13 @@ function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; 
       </PanelSectionRow>
     );
   }
-  const base = `Swaps the upscaler the game asks for (pick DLSS, FSR or XeSS in its settings) for ${u.opti_upscaler}. Needs Proton-CachyOS for the game. It loads into the game, so don't use it in online games with anti-cheat (ban risk). Applies when the game starts again.`;
-  if (!game || opts === null) {
+  const base = `Swaps the upscaler the game asks for (pick DLSS, FSR or XeSS in its settings) for ${u.opti_upscaler}. Needs Proton-CachyOS for the game: HHC switches the game to it and back. It loads into the game, so don't use it in online games with anti-cheat (ban risk).`;
+  if (!game || opts === null || !info) {
     return (
       <PanelSectionRow>
         <Field
           label="OptiScaler and frame generation"
-          description={`${base} Start the game, then open this panel to turn them on for that game.`}
+          description={`${base} ${game ? `Reading ${game.name}'s settings…` : "Start a game or open its page in the library, then open this panel to turn them on for that game."}`}
         />
       </PanelSectionRow>
     );
@@ -667,27 +748,37 @@ function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; 
   const ls = opts.match(LSFG_MULT)?.[2];
   const mode = ls ? `ls${ls}` : on && FG_ON.test(opts) ? "fsr" : "off";
   const lsReady = !!l?.installed && !!l?.dll;
-  const apply = (next: string) => {
+  const apply = async (next: string) => {
     (window as any).SteamClient.Apps.SetAppLaunchOptions(game.appid, next);
-    setOpts(next);
+    setInfo({ ...info, opts: next });
+    const want = OPTI_VAR.test(next);
+    if (want === on && !(want && !CACHYOS.test(info.tool))) return;
+    const r = await matchProton(game.appid, info, want);
+    setInfo({ ...info, opts: next, tool: r.tool, toolLabel: r.toolLabel });
+    setNote(r.note);
   };
   const setMode = (m: string) => {
     const opti = m === "fsr" ? u.optiscaler_fg : on ? u.optiscaler : null; // OptiScaler upscaling stays as it was
     const lsfg = m.startsWith("ls") ? l?.vars[m.slice(2)] ?? null : null;
     apply(withOptions(opts, opti, lsfg));
   };
+  const start = game.running ? "restart the game" : `start ${game.name}`;
+  const which = game.running ? "" : ` (not running: the game ${game.why})`;
+  const proton = ` Proton for it: ${info.toolLabel || (info.linux ? "none (native Linux version)" : "Steam's default")}.${note ? ` ${note}` : ""}`;
+  const nowFor = (kind: string, isOn: boolean) =>
+    game.running ? upscaleNow(kind, isOn, now.game, now.st) : isOn ? ` Now: set; takes effect when you ${start}.` : "";
   const howto: Record<string, string> = {
-    off: "How to: pick a mode, then restart the game.",
-    fsr: "How to: restart the game, then turn on an upscaler (DLSS, FSR or XeSS) in its settings; frame generation is fed from it. DirectX 12 games with Proton-CachyOS only; don't use it with anti-cheat. The HUD can smear a little.",
-    ls2: "How to: restart the game; nothing else to set. Works with any Proton. Steam's fps counter shows the rendered frames, not the generated ones.",
-    ls3: "How to: restart the game; nothing else to set. 3× needs a steady base fps (about 40+); otherwise use 2×.",
+    off: `How to: pick a mode, then ${start}.`,
+    fsr: `How to: ${start}, then turn on an upscaler (DLSS, FSR or XeSS) in its settings; frame generation is fed from it. DirectX 12 games with Proton-CachyOS only; don't use it with anti-cheat. The HUD can smear a little.`,
+    ls2: `How to: ${start}; nothing else to set. Works with any Proton. Steam's fps counter shows the rendered frames, not the generated ones.`,
+    ls3: `How to: ${start}; nothing else to set. 3× needs a steady base fps (about 40+); otherwise use 2×.`,
   };
   return (
     <>
       <PanelSectionRow>
         <ToggleField
           label={`OptiScaler for ${game.name}`}
-          description={`${base}${upscaleNow("optiscaler", on, now.game, now.st)}`}
+          description={`${base} Applies when you ${start}${which}.${proton}${nowFor("optiscaler", on)}`}
           checked={on}
           onChange={(v) => apply(withOptions(opts, v ? (mode === "fsr" ? u.optiscaler_fg : u.optiscaler) : null, ls ? l?.vars[ls] ?? null : null))}
         />
@@ -696,7 +787,7 @@ function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; 
         <DropdownItem
           label={`Frame generation for ${game.name}`}
           description={`More frames shown than rendered; best from about 40 fps (below that it feels laggy). ${howto[mode] ?? howto.off}${
-            mode === "fsr" ? upscaleNow("fsrfg", true, now.game, now.st) : mode.startsWith("ls") ? upscaleNow("lsfg", true, now.game, now.st) : ""
+            mode === "fsr" ? nowFor("fsrfg", true) : mode.startsWith("ls") ? nowFor("lsfg", true) : ""
           }`}
           rgOptions={[
             { data: "off", label: "Off" },
