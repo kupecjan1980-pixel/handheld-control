@@ -72,6 +72,7 @@ type Settings = {
     bg: string | null;
     bg_dim: number;
     bg_pos: BgPos;
+    glass?: boolean;
   };
   sdr_brightness: { enabled: boolean; nits: number };
 };
@@ -1478,6 +1479,124 @@ const themeCss = (name: string, hasImage: boolean) => {
   `;
 };
 
+// Glass buttons: what's behind a button (the background picture) shows through it like through a magnifying
+// glass, sharp, not blurred: the middle a little magnified, the rim bent hard the other way (it shows what lies
+// beyond the edge, squeezed in), a cubic curve between, so it reads as a thick drop of glass. Chromium does it
+// with an SVG displacement map as the backdrop-filter; the map depends on the button's size, so each size gets
+// its own filter, in the document the panel is in (Steam's Quick Access window, or HHC Desktop's page).
+const GLASS_SEL = '[class*="DialogButton"], [class*="DropDownControlButton"], select';
+const GLASS_MAG = 1.07; // the middle's magnification
+const GLASS_BEND = 1.8; // how far the rim reaches out, in rim widths
+const glassFilters = new WeakMap<Document, Map<string, string>>();
+
+const glassMap = (doc: Document, w: number, h: number, r: number) => {
+  const c = doc.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  const rim = Math.max(2, Math.min(h * 0.35, w * 0.35, 14));
+  const most = rim * GLASS_BEND;
+  const zx = 1 / (1 + (2 * most) / w), zy = 1 / (1 + (2 * most) / h); // the rim's zoom
+  const R = Math.min(r, w / 2, h / 2);
+  const dx = new Float32Array(w * h), dy = new Float32Array(w * h);
+  let top = 1;
+  for (let j = 0; j < h; j++)
+    for (let i = 0; i < w; i++) {
+      const px = i + 0.5 - w / 2, py = j + 0.5 - h / 2;
+      // distance from the rounded edge, inwards
+      const qx = Math.abs(px) - (w / 2 - R), qy = Math.abs(py) - (h / 2 - R);
+      const edge = R - (Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0));
+      const bend = Math.max(0, 1 - edge / rim) ** 3; // 1 at the rim, 0 inside
+      const sx = GLASS_MAG + (zx - GLASS_MAG) * bend, sy = GLASS_MAG + (zy - GLASS_MAG) * bend;
+      const k = j * w + i;
+      dx[k] = px * (1 / sx - 1);
+      dy[k] = py * (1 / sy - 1);
+      top = Math.max(top, Math.abs(dx[k]), Math.abs(dy[k]));
+    }
+  for (let k = 0; k < w * h; k++) {
+    img.data[k * 4] = 128 + (127 * dx[k]) / top;
+    img.data[k * 4 + 1] = 128 + (127 * dy[k]) / top;
+    img.data[k * 4 + 2] = 128;
+    img.data[k * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return { url: c.toDataURL(), scale: 2 * top };
+};
+
+const glassFilter = (doc: Document, w: number, h: number, r: number) => {
+  const key = `${w}x${h}r${r}`;
+  let have = glassFilters.get(doc);
+  let svg = doc.getElementById("hhctl-glass") as Element | null;
+  if (!have || !svg || have.size > 64) {
+    svg?.remove();
+    const NS = "http://www.w3.org/2000/svg";
+    svg = doc.createElementNS(NS, "svg");
+    svg.id = "hhctl-glass";
+    svg.setAttribute("width", "0");
+    svg.setAttribute("height", "0");
+    svg.setAttribute("style", "position:absolute;width:0;height:0;pointer-events:none");
+    doc.body.appendChild(svg);
+    have = new Map<string, string>();
+    glassFilters.set(doc, have);
+  }
+  const id = have.get(key);
+  if (id) return id;
+  const NS = "http://www.w3.org/2000/svg";
+  const next = `hhctl-glass-${have.size}`;
+  const { url, scale } = glassMap(doc, w, h, r);
+  const set = (el: Element, a: Record<string, string | number>) =>
+    Object.entries(a).forEach(([k, v]) => el.setAttribute(k, String(v)));
+  const f = doc.createElementNS(NS, "filter");
+  set(f, { id: next, x: 0, y: 0, width: w, height: h, filterUnits: "userSpaceOnUse",
+           primitiveUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB" });
+  const map = doc.createElementNS(NS, "feImage");
+  set(map, { x: 0, y: 0, width: w, height: h, preserveAspectRatio: "none", result: "map", href: url });
+  const move = doc.createElementNS(NS, "feDisplacementMap");
+  set(move, { in: "SourceGraphic", in2: "map", scale, xChannelSelector: "R", yChannelSelector: "G" });
+  f.append(map, move);
+  svg!.appendChild(f);
+  have.set(key, next);
+  return next;
+};
+
+// Gives each button its size's filter (or takes them off).
+const glassButtons = (root: HTMLElement, on: boolean) => {
+  root.querySelectorAll<HTMLElement>(GLASS_SEL).forEach((el) => {
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const want = on && w > 0 && h > 0
+      ? `url(#${glassFilter(root.ownerDocument, w, h, Math.round(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0))}) saturate(1.25) brightness(1.06)`
+      : "";
+    if (el.style.backdropFilter !== want) el.style.backdropFilter = want;
+  });
+};
+
+// The glass look itself: a faint tint of the theme's button color (or white), a bright top edge, a darker
+// bottom one and a soft drop shadow. The focused button keeps Steam's own highlight.
+const glassCss = (rgb?: [number, number, number]) => {
+  const [r, g, b] = rgb ?? [255, 255, 255];
+  const tint = rgb ? 0.22 : 0.08;
+  const btn = ["DialogButton", "DropDownControlButton"]
+    .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible)`)
+    .concat([".hhctl-root select"])
+    .join(", ");
+  const hover = ["DialogButton", "DropDownControlButton"]
+    .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible):hover:not(:disabled)`)
+    .concat([".hhctl-root select:hover"])
+    .join(", ");
+  return `
+    ${btn} {
+      background: rgba(${r}, ${g}, ${b}, ${tint}) !important;
+      border-radius: 12px !important;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 1px rgba(0, 0, 0, 0.35),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 3px 8px rgba(0, 0, 0, 0.35) !important;
+      color: #fff !important;
+      text-shadow: -1px 1px 1px rgba(0, 0, 0, 0.9), -1px 2px 4px rgba(0, 0, 0, 0.6); /* left and bottom */
+    }
+    ${hover} { background: rgba(${r}, ${g}, ${b}, ${tint + 0.1}) !important; }
+  `;
+};
+
 // zoom 100 is "cover"; above that the picture's shorter side (relative to the
 // panel) grows, so it needs the picture's size and the panel's.
 const imageStyle = (
@@ -1811,6 +1930,32 @@ function Content() {
     getFont(fontName).then(setFontFaces);
   }, [fontName]);
 
+  // Glass buttons: each button gets its size's filter, again whenever the panel's content or size changes.
+  const glassOn = state?.settings.ui?.glass ?? true;
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const win = root.ownerDocument.defaultView ?? window;
+    let frame = 0;
+    const run = () => {
+      frame = 0;
+      glassButtons(root, glassOn);
+    };
+    const later = () => {
+      if (!frame) frame = win.requestAnimationFrame(run);
+    };
+    run();
+    const mo = new MutationObserver(later);
+    mo.observe(root, { childList: true, subtree: true, characterData: true });
+    const ro = new ResizeObserver(later);
+    ro.observe(root);
+    return () => {
+      mo.disconnect();
+      ro.disconnect();
+      if (frame) win.cancelAnimationFrame(frame);
+    };
+  }, [glassOn, !!state]);
+
   // Make the trial's Keep prompt hard to miss, even outside this panel.
   const sbPending = !!state?.sdr_brightness.pending;
   useEffect(() => {
@@ -2001,6 +2146,7 @@ function Content() {
       <style>{READOUT_CSS}</style>
       <style>{themeCss(theme, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
+      {glassOn && <style>{glassCss(THEMES[theme]?.button)}</style>}
       <div className="hhctl-header">
         {splitName && (
           <div className="hhctl-device hhctl-name" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
@@ -3326,6 +3472,14 @@ function Content() {
                 }))}
                 selectedOption={draft.ui?.font ?? "default"}
                 onChange={(o) => change("ui", { font: o.data }, 0)}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ToggleField
+                label="Glass buttons"
+                description="Buttons and dropdowns show what's behind them like through a magnifying glass: sharp, the middle a little bigger, the rim bent like a drop's. Best with a background picture. Off: plain tinted buttons"
+                checked={draft.ui?.glass ?? true}
+                onChange={(v) => change("ui", { glass: v }, 0)}
               />
             </PanelSectionRow>
             <PanelSectionRow>

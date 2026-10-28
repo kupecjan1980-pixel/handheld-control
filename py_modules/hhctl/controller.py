@@ -52,7 +52,8 @@ DEFAULTS = {
                    # desktop_mouse: the controller as a mouse in Desktop Mode (desktoppad.py);
                    # None = on for the handhelds, off for PCs.
                    "desktop_mouse": None},
-    "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100}},
+    "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100},
+           "glass": True},
     # curve "custom": the speeds in "points", one per fan.CUSTOM_TEMPS.
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced", "points": None},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
