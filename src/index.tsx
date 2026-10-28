@@ -1548,7 +1548,11 @@ function Content() {
       }
       // While away the setting it left stays the one to come back to.
       if (cur && !away) lastNav.current = { node: cur, idx: nodes.indexOf(cur), out: false };
-      const el = away ? null : (cur?.m_element as Element | undefined) ?? null;
+      // Steam's focus is on the control (switch, slider, button); the frame
+      // goes around the whole setting it belongs to.
+      const ctl0 = away ? null : (cur?.m_element as Element | undefined) ?? null;
+      const el =
+        ctl0?.closest?.('[class*="gamepaddialog_Field_"], [class*="PanelSectionRow"]') ?? ctl0;
       ring(el);
       lit = el;
     }, 120);
