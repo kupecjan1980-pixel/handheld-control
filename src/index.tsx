@@ -3,7 +3,7 @@ import {
   getFocusNavController,
   getGamepadNavigationTrees,
   ButtonItem,
-  DropdownItem as SteamDropdownItem,
+  DropdownItem,
   Field,
   Focusable,
   Navigation,
@@ -1463,13 +1463,7 @@ function Content() {
   const bodyRef = useRef<HTMLDivElement>(null);
   const backTo = useRef<HTMLElement | null>(null);
   // Quick Access moves a focus of its own (Steam's navigation tree; no DOM
-  // focus events), so it's followed here: the setting it's on gets the
-  // highlight, and when it jumps from a setting back to the top of the panel
-  // (after a dropdown's list closes, or the setting was redrawn), it's put
-  // back on that setting.
-  const lastNav = useRef<{ node: any; idx: number; out: boolean } | null>(null);
-  const navLog = useRef("");
-  const [navCheck, setNavCheck] = useState("");
+  // focus events), so it's followed here and the setting it's on gets a frame.
   useEffect(() => {
     if (view !== "main") return;
     let lit: Element | null = null;
@@ -1516,41 +1510,8 @@ function Content() {
       const byDom = nodes.filter((n) => n.m_element === active);
       const one = (l: any[]) => (l.length === 1 ? l[0] : null);
       const cur = one(byClass) ?? one(byValue) ?? one(byDom) ?? focused;
-      const ctl = getFocusNavController();
-      const at = (l: any[]) => (l.length === 1 ? `#${nodes.indexOf(l[0])}` : `${l.length}`);
-      setNavCheck(
-        `nodes ${nodes.length}, on #${cur ? nodes.indexOf(cur) : "-"}, ` +
-          `class ${at(byClass)}, value ${at(byValue)}, dom ${at(byDom)}` +
-          `${active && !active.closest?.(".hhctl-root") ? ` (${String(active.className ?? active.tagName).slice(0, 20)})` : active && !root.contains(active) ? " (other copy)" : ""}, ` +
-          `tree ${focused ? `#${nodes.indexOf(focused)}` : "-"}, contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, ` +
-          `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}${navLog.current}${dropdownLog}`,
-      );
-      const last = lastNav.current;
       // Away: focus is outside the panel (a dropdown's list, the tabs, ...).
       const away = !cur || !root.ownerDocument.hasFocus() || !!(active && active !== root.ownerDocument.body && !active.closest?.(".hhctl-root"));
-      if (away) {
-        if (last && !last.out) navLog.current = `, left at #${last.idx}`;
-        if (last) last.out = true;
-      } else if (last && cur !== last.node) {
-        const idx = nodes.indexOf(cur);
-        const gone = !last.node.m_bMounted || !last.node.m_element?.isConnected;
-        // Back from away, or the setting was redrawn, and Steam put the focus
-        // somewhere above it (the top of the panel): back to the setting.
-        const back = gone ? nodes[last.idx] : last.node;
-        if (last.out || gone) navLog.current = `, back at #${idx} from #${last.idx}${last.out ? " (away)" : " (redrawn)"}`;
-        if (back && back !== cur && idx < last.idx && (last.out || gone)) {
-          try {
-            back.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
-            navLog.current += `, moved to #${nodes.indexOf(back)}`;
-            lastNav.current = { node: back, idx: nodes.indexOf(back), out: false };
-            return;
-          } catch (e) {
-            navLog.current += `, move failed: ${String(e).slice(0, 40)}`;
-          }
-        }
-      }
-      // While away the setting it left stays the one to come back to.
-      if (cur && !away) lastNav.current = { node: cur, idx: nodes.indexOf(cur), out: false };
       // Steam's focus is on the control (switch, slider, button); the frame
       // goes around the whole setting it belongs to.
       const ctl0 = away ? null : (cur?.m_element as Element | undefined) ?? null;
@@ -3183,12 +3144,6 @@ function Content() {
                 <Field description={n} />
               </PanelSectionRow>
             ))}
-            {navCheck && (
-              // Temporary: what the panel sees of Steam's controller focus.
-              <PanelSectionRow>
-                <Field description={`Focus check: ${navCheck}`} />
-              </PanelSectionRow>
-            )}
             {state.conflicts.length > 0 && (
               <PanelSectionRow>
                 <Field
@@ -3310,76 +3265,6 @@ function TitleView() {
 // Extra buttons (backend listener): runs while the plugin is loaded, panel open or not.
 const QAM_DECKY_TAB = 999; // EQuickAccessTab.Decky
 let panelShown = false; // Content is mounted: our page is the one in the Decky tab
-
-// Steam's dropdown, but the setting keeps the focus after its list closes:
-// Quick Access otherwise sends the focus back to the top of the panel. The
-// list opening notes the dropdown's navigation node; after a pick (or
-// closing the list) focus is put back on it for a moment.
-let dropdownBack: { node: any; tries: number } | null = null;
-let dropdownLog = "";
-const DropdownItem = (p: React.ComponentProps<typeof SteamDropdownItem>) => {
-  const box = useRef<HTMLDivElement>(null);
-  const opened = () => {
-    const el = box.current;
-    const node = el ? allNavNodes(el.ownerDocument).find((n) => el.contains(n.m_element) && n.m_rgChildren?.length === 0) ??
-      allNavNodes(el.ownerDocument).find((n) => el.contains(n.m_element)) : null;
-    dropdownBack = node ? { node, tries: 0 } : null;
-    dropdownLog = node ? ", dropdown opened" : ", dropdown opened (not found)";
-    p.onMenuOpened?.();
-  };
-  return (
-    <div ref={box} style={{ display: "contents" }}>
-      <SteamDropdownItem
-        {...p}
-        onMenuOpened={opened}
-        onChange={(o) => {
-          p.onChange?.(o);
-          const d = dropdownBack;
-          if (!d) return;
-          // Steam's focus marks stay on the dropdown even when its focus has
-          // gone to the top, so no checking: put it back a few times while
-          // the list closes and the panel redraws.
-          for (const ms of [60, 250, 600, 1100]) {
-            setTimeout(() => {
-              try {
-                d.node.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
-                d.tries++;
-                dropdownLog = `, dropdown: focus put back (${d.tries})`;
-              } catch (e) {
-                dropdownLog = `, dropdown: put back failed ${String(e).slice(0, 30)}`;
-              }
-            }, ms);
-          }
-        }}
-      />
-    </div>
-  );
-};
-
-// Every navigation node in a window, all trees and contexts.
-const allNavNodes = (doc: Document): any[] => {
-  const out: any[] = [];
-  const seen = new Set<any>();
-  const walk = (n: any) => {
-    for (const c of n?.m_rgChildren ?? []) {
-      if (c?.m_element) out.push(c);
-      walk(c);
-    }
-  };
-  const tree = (t: any) => {
-    if (!t || seen.has(t)) return;
-    seen.add(t);
-    if (t.m_Root?.m_element?.ownerDocument === doc) walk(t.m_Root);
-    (t.m_rgChildNavTrees ?? []).forEach(tree);
-  };
-  try {
-    for (const c of getFocusNavController()?.m_rgAllContexts ?? []) (c?.m_rgGamepadNavigationTrees ?? []).forEach(tree);
-    (getGamepadNavigationTrees() ?? []).forEach(tree);
-  } catch {
-    // Steam changed its navigation internals
-  }
-  return out;
-};
 
 // Steam's navigation nodes for the panel's elements, in the tree's order,
 // and the one Steam's focus is on (its tree's last focused node), if any.
