@@ -976,21 +976,24 @@ const reasons = (xs: string[]) => xs.map((r) => THROTTLE_LABELS[r] ?? r).join(",
 // Table header and cap rows are dimmer.
 const READOUT_CSS = `
   .hhctl-root { box-sizing: border-box; }
-  /* D-pad focus: a flash when it lands, then a slow pulse, so it's easy to follow. */
+  /* D-pad focus: a frame of our own over the setting (Steam's styles on the
+     setting itself win over anything put there), a flash when it lands, then
+     a slow pulse. */
+  .hhctl-root { position: relative; }
+  .hhctl-ring {
+    position: absolute; pointer-events: none; z-index: 20; display: none;
+    border: 2px solid rgba(255, 255, 255, 0.9); border-radius: 6px; box-sizing: border-box;
+    box-shadow: 0 0 10px 2px rgba(255, 255, 255, 0.3), inset 0 0 8px 1px rgba(255, 255, 255, 0.15);
+    animation: hhctl-pulse 1.6s ease-in-out infinite;
+  }
+  .hhctl-ring.hhctl-flash { animation: hhctl-flash 0.35s ease-out, hhctl-pulse 1.6s ease-in-out 0.35s infinite; }
   @keyframes hhctl-flash {
-    0% { box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.95), inset 0 0 18px 4px rgba(255, 255, 255, 0.45); }
-    100% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6), inset 0 0 8px 1px rgba(255, 255, 255, 0.15); }
+    0% { border-color: #fff; box-shadow: 0 0 18px 5px rgba(255, 255, 255, 0.7), inset 0 0 16px 4px rgba(255, 255, 255, 0.4); }
+    100% { border-color: rgba(255, 255, 255, 0.9); box-shadow: 0 0 10px 2px rgba(255, 255, 255, 0.3), inset 0 0 8px 1px rgba(255, 255, 255, 0.15); }
   }
   @keyframes hhctl-pulse {
-    0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6), inset 0 0 8px 1px rgba(255, 255, 255, 0.15); }
-    50% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.25), inset 0 0 0 0 rgba(255, 255, 255, 0); }
-  }
-  .hhctl-root .hhctl-navfocus {
-    /* The frame itself doesn't depend on the animation (Steam can turn those off). */
-    outline: 2px solid rgba(255, 255, 255, 0.85) !important;
-    outline-offset: -2px !important;
-    border-radius: 4px;
-    animation: hhctl-flash 0.35s ease-out, hhctl-pulse 1.6s ease-in-out 0.35s infinite !important;
+    0%, 100% { border-color: rgba(255, 255, 255, 0.9); }
+    50% { border-color: rgba(255, 255, 255, 0.45); }
   }
   .hhctl-fit { display: flex; flex-direction: column; }
   .hhctl-header {
@@ -1465,10 +1468,37 @@ function Content() {
   // (after a dropdown's list closes, or the setting was redrawn), it's put
   // back on that setting.
   const lastNav = useRef<{ node: any; idx: number; out: boolean } | null>(null);
+  const ringRef = useRef<HTMLDivElement>(null);
+  const navLog = useRef("");
   const [navCheck, setNavCheck] = useState("");
   useEffect(() => {
     if (view !== "main") return;
     let lit: Element | null = null;
+    const ring = (el: Element | null) => {
+      const r = ringRef.current;
+      const root = rootRef.current;
+      if (!r || !root) return;
+      const box = el?.getBoundingClientRect();
+      const area = (bodyRef.current ?? root).getBoundingClientRect();
+      if (!el || !box || box.height < 4 || box.bottom < area.top || box.top > area.bottom) {
+        r.style.display = "none";
+        return;
+      }
+      const at = root.getBoundingClientRect();
+      const top = Math.max(box.top, area.top);
+      Object.assign(r.style, {
+        display: "block",
+        left: `${box.left - at.left}px`,
+        top: `${top - at.top}px`,
+        width: `${box.width}px`,
+        height: `${Math.min(box.bottom, area.bottom) - top}px`,
+      });
+      if (el !== lit) {
+        r.classList.remove("hhctl-flash");
+        void r.offsetWidth; // start the flash again
+        r.classList.add("hhctl-flash");
+      }
+    };
     const id = setInterval(() => {
       const root = rootRef.current;
       if (!root || !qamVisible()) return;
@@ -1490,12 +1520,13 @@ function Content() {
           `class ${at(byClass)}, value ${at(byValue)}, dom ${at(byDom)}` +
           `${active && !root.contains(active) ? ` (${String(active.className ?? active.tagName).slice(0, 20)})` : ""}, ` +
           `tree ${focused ? `#${nodes.indexOf(focused)}` : "-"}, contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, ` +
-          `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}`,
+          `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}${navLog.current}`,
       );
       const last = lastNav.current;
       // Away: focus is outside the panel (a dropdown's list, the tabs, ...).
       const away = !cur || !root.ownerDocument.hasFocus() || !!(active && active !== root.ownerDocument.body && !root.contains(active));
       if (away) {
+        if (last && !last.out) navLog.current = `, left at #${last.idx}`;
         if (last) last.out = true;
       } else if (last && cur !== last.node) {
         const idx = nodes.indexOf(cur);
@@ -1503,28 +1534,31 @@ function Content() {
         // Back from away, or the setting was redrawn, and Steam put the focus
         // somewhere above it (the top of the panel): back to the setting.
         const back = gone ? nodes[last.idx] : last.node;
+        if (last.out || gone) navLog.current = `, back at #${idx} from #${last.idx}${last.out ? " (away)" : " (redrawn)"}`;
         if (back && back !== cur && idx < last.idx && (last.out || gone)) {
           try {
             back.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
+            navLog.current += `, moved to #${nodes.indexOf(back)}`;
             lastNav.current = { node: back, idx: nodes.indexOf(back), out: false };
             return;
-          } catch {
-            // not ours to move: leave it where Steam put it
+          } catch (e) {
+            navLog.current += `, move failed: ${String(e).slice(0, 40)}`;
           }
         }
       }
-      if (cur) lastNav.current = { node: cur, idx: nodes.indexOf(cur), out: away && !!last?.out };
+      // While away the setting it left stays the one to come back to.
+      if (cur && !away) lastNav.current = { node: cur, idx: nodes.indexOf(cur), out: false };
       const el = away ? null : (cur?.m_element as Element | undefined) ?? null;
-      if (el !== lit) {
-        lit?.classList.remove("hhctl-navfocus");
-        lit = el;
-      }
-      // Steam redraws the setting with its own classes: mark it again.
-      if (el && !el.classList.contains("hhctl-navfocus")) el.classList.add("hhctl-navfocus");
+      ring(el);
+      lit = el;
     }, 120);
+    // Keep the frame on the setting while the panel scrolls.
+    const onScroll = () => lit && ring(lit);
+    const body = bodyRef.current;
+    body?.addEventListener("scroll", onScroll);
     return () => {
       clearInterval(id);
-      lit?.classList.remove("hhctl-navfocus");
+      body?.removeEventListener("scroll", onScroll);
     };
   }, [view]);
   // Leaving the settings remembers the spot (and the focused button); coming
@@ -1771,6 +1805,7 @@ function Content() {
         ...(fitHeight ? { height: fitHeight } : {}),
       }}
     >
+      <div ref={ringRef} className="hhctl-ring" />
       <style>{READOUT_CSS}</style>
       <style>{themeCss(theme, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
