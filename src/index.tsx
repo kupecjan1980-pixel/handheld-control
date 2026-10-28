@@ -1,5 +1,6 @@
 import { addEventListener, callable, definePlugin, removeEventListener, toaster, useQuickAccessVisible } from "@decky/api";
 import {
+  getFocusNavController,
   getGamepadNavigationTrees,
   ButtonItem,
   DropdownItem,
@@ -1461,14 +1462,22 @@ function Content() {
   // (after a dropdown's list closes, or the setting was redrawn), it's put
   // back on that setting.
   const lastNav = useRef<{ node: any; idx: number; out: boolean } | null>(null);
+  const [navCheck, setNavCheck] = useState("");
   useEffect(() => {
     if (view !== "main") return;
     let lit: Element | null = null;
     const id = setInterval(() => {
       const root = rootRef.current;
-      if (!root || root.ownerDocument.hidden) return;
+      if (!root || !qamVisible()) return;
       const nodes = navNodes(root);
       const cur = nodes.filter((n) => n.BHasFocus?.()).pop();
+      const ctl = getFocusNavController();
+      setNavCheck(
+        `contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, nodes ${nodes.length}, ` +
+          `on #${cur ? nodes.indexOf(cur) : "-"}${cur ? ` (${String(cur.m_element?.className ?? "").slice(0, 24)})` : ""}, ` +
+          `last #${lastNav.current?.idx ?? "-"}${lastNav.current?.out ? " out" : ""}, ` +
+          `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}`,
+      );
       const last = lastNav.current;
       const away = !cur || !root.ownerDocument.hasFocus();
       if (away) {
@@ -3115,6 +3124,12 @@ function Content() {
                 <Field description={n} />
               </PanelSectionRow>
             ))}
+            {navCheck && (
+              // Temporary: what the panel sees of Steam's controller focus.
+              <PanelSectionRow>
+                <Field description={`Focus check: ${navCheck}`} />
+              </PanelSectionRow>
+            )}
             {state.conflicts.length > 0 && (
               <PanelSectionRow>
                 <Field
@@ -3254,6 +3269,10 @@ const navNodes = (root: Element): any[] => {
     (t.m_rgChildNavTrees ?? []).forEach(tree);
   };
   try {
+    // Quick Access is a window of its own with its own navigation context, so
+    // every context's trees, not just the active one's.
+    const ctl = getFocusNavController();
+    for (const c of ctl?.m_rgAllContexts ?? []) (c?.m_rgGamepadNavigationTrees ?? []).forEach(tree);
     (getGamepadNavigationTrees() ?? []).forEach(tree);
   } catch {
     // Steam changed its navigation internals: no highlight, nothing else breaks
