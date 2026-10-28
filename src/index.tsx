@@ -393,6 +393,7 @@ type Drive = {
   mountpoint: string | null;
   permanent: boolean;
   ours: boolean;
+  forced: boolean;
   can_mount: boolean;
   auto: boolean;
   empty: boolean;
@@ -499,6 +500,19 @@ function DriveRows() {
                   checked={v.permanent}
                   disabled={off || (v.permanent && !v.ours)}
                   onChange={(on) => act(on ? "mount" : "unmount", v.path)}
+                />
+              </PanelSectionRow>
+            )}
+            {v.fstype === "ntfs" && v.can_mount && !(v.permanent && !v.ours) && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Also when Windows left it hibernated"
+                  description={`For data drives Windows hibernated (Fast Startup) or didn't close: mounts them read-write anyway and at every start, readable in Linux and Windows afterwards. Only for drives without Windows on them: never a Windows system drive (HHC refuses one with a Windows/System32 folder). Risk: if a Windows that hibernated with this drive attached resumes later, what Linux changed can be lost or the drive damaged, so turn off Fast Startup in that Windows. It clears the hibernation (ntfs-3g remove_hiberfile, else ntfs3 force).${
+                    v.forced ? " On." : ""
+                  }${busy === v.path ? " Working…" : ""}`}
+                  checked={v.forced}
+                  disabled={off}
+                  onChange={(on) => act(on ? "mount_force" : "mount", v.path)}
                 />
               </PanelSectionRow>
             )}

@@ -78,6 +78,35 @@ except storage.StorageError as e:
 assert "AB12CD34" not in open(storage.FSTAB).read()
 mount_ok[0] = True
 
+# hibernated by Windows: ntfs-3g comes up read-only, so ntfs3 with force is kept
+storage.shutil.which = lambda *a, **k: "/usr/bin/ntfs-3g"
+storage._has_ntfs3 = lambda: True
+import shutil as _sh; _sh.rmtree(f"{mnt}/Hry", ignore_errors=True)
+ro = [True]
+real_ro = storage._read_only
+storage._read_only = lambda dev, w: ro.pop(0) if ro else False
+calls.clear()
+storage.mount("/dev/nvme1n1p2", home, force=True)
+fst = open(storage.FSTAB).read()
+assert f"{mnt}/Hry ntfs3 defaults,nofail,x-systemd.device-timeout=10s,force," in fst and "remove_hiberfile" not in fst, fst
+assert ["umount", f"{mnt}/Hry"] in calls and storage.drives()[0]["forced"]
+storage.mount("/dev/nvme1n1p2", home)  # option off: back to the plain line, same place
+fst = open(storage.FSTAB).read()
+assert f"{mnt}/Hry ntfs3 defaults,nofail" in fst and ",force" not in fst and not storage.drives()[0]["forced"], fst
+storage.unmount("/dev/nvme1n1p2")
+# never a Windows system drive
+os.makedirs(f"{mnt}/Hry/Windows/System32")
+real_dir = storage._mount_dir
+storage._mount_dir = lambda d, keep=None: f"{mnt}/Hry"  # the drive's own files show up there
+try:
+    storage.mount("/dev/nvme1n1p2", home, force=True); raise SystemExit("Windows system drive must be refused")
+except storage.StorageError as e:
+    assert "Windows system drive" in str(e)
+assert "AB12CD34" not in open(storage.FSTAB).read()
+_sh.rmtree(f"{mnt}/Hry/Windows")
+storage._mount_dir = real_dir
+storage._read_only = real_ro
+
 # someone else's fstab line: left alone
 open(storage.FSTAB, "a").write("UUID=AB12CD34 /data ntfs3 defaults 0 0\n")
 for fn in (lambda: storage.mount("/dev/nvme1n1p2", home), lambda: storage.unmount("/dev/nvme1n1p2"),

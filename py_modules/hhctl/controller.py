@@ -1105,8 +1105,8 @@ class Controller:
     def drives(self, action: str | None = None, path: str | None = None) -> dict:
         out: dict = {"error": None, "done": None}
         try:
-            if action == "mount":
-                out["done"] = storage.mount(path, self._home())
+            if action in ("mount", "mount_force"):
+                out["done"] = storage.mount(path, self._home(), force=action == "mount_force")
             elif action == "unmount":
                 storage.unmount(path)
             elif action == "format":

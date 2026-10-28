@@ -88,8 +88,24 @@ def _ours() -> dict[str, str]:
         if line.startswith(TAG):
             f = lines[i + 1].split()
             if len(f) >= 2 and f[0].startswith("UUID="):
-                out[f[0][5:]] = f[1]
+                out[f[0][5:]] = f[1].replace("\\040", " ")
     return out
+
+
+def _our_line(uuid: str) -> str:
+    lines = _fstab_lines()
+    for i, line in enumerate(lines[:-1]):
+        if line.startswith(TAG) and lines[i + 1].startswith(f"UUID={uuid} "):
+            return lines[i + 1]
+    return ""
+
+
+FORCE_OPTS = ("force", "remove_hiberfile")
+
+
+def _forced(line: str) -> bool:
+    f = line.split()
+    return len(f) >= 4 and any(o in FORCE_OPTS for o in f[3].split(","))
 
 
 def _listed(uuid: str) -> bool:
@@ -176,6 +192,7 @@ def _entry(v: dict, model: str, ours: dict, removable: bool = False, empty: bool
         "mountpoint": mounts[0] if mounts else None,
         "permanent": listed,
         "ours": bool(uuid) and uuid in ours,
+        "forced": bool(uuid) and uuid in ours and _forced(_our_line(uuid)),
         "can_mount": bool(uuid) and fs in MOUNTABLE,
         "auto": auto,
         "empty": empty,
@@ -227,11 +244,12 @@ def _ntfs_type() -> str:
     raise StorageError("No NTFS driver: the kernel has no ntfs3 and ntfs-3g isn't installed")
 
 
-def _fstab_line(d: dict, where: str, uid: int, gid: int) -> str:
+def _fstab_line(d: dict, where: str, uid: int, gid: int, kind: str | None = None, extra: str = "") -> str:
     fs = d["fstype"]
-    common = "nofail,x-systemd.device-timeout=10s"
+    common = "nofail,x-systemd.device-timeout=10s" + (f",{extra}" if extra else "")
+    where = where.replace(" ", "\\040")
     if fs == "ntfs":
-        kind = _ntfs_type()
+        kind = kind or _ntfs_type()
         # No windows_names: it refuses names like "c:", and every Proton prefix has them.
         return f"UUID={d['uuid']} {where} {kind} defaults,{common},uid={uid},gid={gid},umask=022 0 0"
     if fs in NO_PROTON:
@@ -239,7 +257,36 @@ def _fstab_line(d: dict, where: str, uid: int, gid: int) -> str:
     return f"UUID={d['uuid']} {where} {fs} defaults,noatime,{common} 0 {2 if fs == 'ext4' else 0}"
 
 
+def _has_ntfs3() -> bool:
+    proc.run(["modprobe", "ntfs3"], timeout=10)
+    try:
+        with open("/proc/filesystems") as f:
+            return "ntfs3" in f.read().split()
+    except OSError:
+        return False
+
+
+def _lines_to_try(d: dict, where: str, uid: int, gid: int, force: bool) -> list[str]:
+    """The fstab line, or with force (NTFS a hibernated Windows left behind) one
+    per way past it: ntfs-3g removing the hibernation, then ntfs3 replaying the
+    journal Windows left (force: also when marked dirty)."""
+    if not force or d["fstype"] != "ntfs":
+        return [_fstab_line(d, where, uid, gid)]
+    out = []
+    if shutil.which("ntfs-3g", path=proc.SYSTEM_PATH):
+        out.append(_fstab_line(d, where, uid, gid, "ntfs-3g", "remove_hiberfile"))
+    if _has_ntfs3():
+        out.append(_fstab_line(d, where, uid, gid, "ntfs3", "force"))
+    if not out:
+        raise StorageError("No NTFS driver: the kernel has no ntfs3 and ntfs-3g isn't installed")
+    return out
+
+
 MOUNTS = "/proc/self/mounts"
+
+
+def _read_only(dev: str, where: str) -> bool:
+    return any(t == where and "ro" in o.split(",") for t, _, o in _current_mounts(dev))
 
 
 def _current_mounts(dev: str) -> list[tuple[str, str, str]]:
@@ -296,42 +343,64 @@ def _steam_dir(where: str, uid: int, gid: int) -> str:
     return lib
 
 
-def mount(path: str, home: str) -> dict:
-    """Mount now and at every boot. Returns {"mountpoint", "library"}."""
+def mount(path: str, home: str, force: bool = False) -> dict:
+    """Mount now and at every boot. Returns {"mountpoint", "library"}.
+
+    force (NTFS): also when Windows hibernated it (Fast Startup); never on a
+    Windows system drive."""
     d = _find(path)
     if not d["can_mount"]:
         raise StorageError(d["note"] or "This drive can't be mounted")
     if d["permanent"] and not d["ours"]:
         raise StorageError("This drive already has its own line in /etc/fstab; change it there")
     uid, gid = _owner(home)
+    keep = None
+    if d["ours"] and d["fstype"] == "ntfs" and force != d["forced"]:
+        keep = _ours()[d["uuid"]]  # switching the hibernation option: same place, new line
+        unmount(path)
+        d = _find(path)
     was = []
     if d["ours"]:
         where = _ours()[d["uuid"]]
+        lines = [None]  # the line that's there
     else:
-        keep = next((m for m in _mounts_of(d) if m.startswith("/run/media/")), None)
+        keep = keep or next((m for m in _mounts_of(d) if m.startswith("/run/media/")), None)
         was = _unmount_all(d)  # e.g. mounted by the desktop under /run/media
         where = _mount_dir(d, keep)
-        line = _fstab_line(d, where, uid, gid)
-        _write_fstab(_fstab_lines() + [f"{TAG} {d['model']} {d['path']}", line])
-        log.info("storage: fstab + %s", line)
-    os.makedirs(where, exist_ok=True)
-    _reload()
-    if not os.path.ismount(where):
+        lines = _lines_to_try(d, where, uid, gid, force)
+    errors = []
+    for line in lines:
+        if line:
+            _write_fstab(_fstab_lines() + [f"{TAG} {d['model']} {d['path']}", line])
+            log.info("storage: fstab + %s", line)
+        os.makedirs(where, exist_ok=True)
+        _reload()
+        if os.path.ismount(where):
+            break
         r = proc.run(["mount", where], text=True, timeout=60)
+        if not r.returncode and not _read_only(d["path"], where):
+            break
         if r.returncode:
-            _remove_entry(d["uuid"])
-            _reload()
-            _remount(d["path"], was)
-            msg = (r.stderr or "").strip() or f"mount exited with {r.returncode}"
-            if d["fstype"] == "ntfs":
-                k = proc.run(["dmesg"], text=True, timeout=10)
-                if "dirty" in "\n".join((k.stdout or "").splitlines()[-30:]):
-                    msg += (". Windows didn't close it cleanly (it was pulled out or Windows hibernated): "
-                            "eject it properly in Windows, or run chkdsk there, then try again")
-                else:
-                    msg += (". If Windows uses this drive, turn off Fast Startup there and shut Windows down "
-                            "fully (or run chkdsk), then try again")
-            raise StorageError(f"Couldn't mount it, nothing was changed: {msg}")
+            errors.append((r.stderr or "").strip() or f"mount exited with {r.returncode}")
+        else:
+            proc.run(["umount", where], timeout=60)
+            errors.append("it came up read-only (Windows left it hibernated or with unsaved changes)")
+        _remove_entry(d["uuid"])
+        _reload()
+    else:
+        _remount(d["path"], was)
+        msg = "; ".join(dict.fromkeys(errors))
+        if d["fstype"] == "ntfs" and not force:
+            msg += (". Windows left it hibernated or not closed cleanly (Fast Startup, or pulled out): "
+                    "turn on \"Also when Windows left it hibernated\" for this drive, or turn off Fast Startup "
+                    "in Windows and shut it down fully, then try again")
+        raise StorageError(f"Couldn't mount it, nothing was changed: {msg}")
+    if force and os.path.isdir(os.path.join(where, "Windows", "System32")):
+        unmount(path)
+        _remount(d["path"], was)
+        raise StorageError("This is a Windows system drive (it has Windows/System32): forcing it would break "
+                           "that hibernated Windows, so it's left alone. Turn off Fast Startup in that Windows "
+                           "and shut it down fully instead")
     if d["fstype"] in ("ext4", "btrfs", "xfs") and os.stat(where).st_uid == 0 \
             and set(os.listdir(where)) <= {"lost+found"}:
         os.chown(where, uid, gid)  # a fresh filesystem: the user's, so Steam can write to it
