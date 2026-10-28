@@ -1485,8 +1485,8 @@ const themeCss = (name: string, hasImage: boolean) => {
 // with an SVG displacement map as the backdrop-filter; the map depends on the button's size, so each size gets
 // its own filter, in the document the panel is in (Steam's Quick Access window, or HHC Desktop's page).
 const GLASS_SEL = '[class*="DialogButton"], [class*="DropDownControlButton"], select';
-const GLASS_MAG = 1.07; // the middle's magnification
-const GLASS_BEND = 1.8; // how far the rim reaches out, in rim widths
+const GLASS_MAG = 1.12; // the middle's magnification
+const GLASS_BEND = 1.6; // how far the rim reaches out, in rim widths
 const glassFilters = new WeakMap<Document, Map<string, string>>();
 
 const glassMap = (doc: Document, w: number, h: number, r: number) => {
@@ -1495,7 +1495,7 @@ const glassMap = (doc: Document, w: number, h: number, r: number) => {
   c.height = h;
   const ctx = c.getContext("2d")!;
   const img = ctx.createImageData(w, h);
-  const rim = Math.max(2, Math.min(h * 0.35, w * 0.35, 14));
+  const rim = Math.max(2, Math.min(h * 0.45, w * 0.45, 20)); // the curved side wall
   const most = rim * GLASS_BEND;
   const zx = 1 / (1 + (2 * most) / w), zy = 1 / (1 + (2 * most) / h); // the rim's zoom
   const R = Math.min(r, w / 2, h / 2);
@@ -1571,11 +1571,12 @@ const glassButtons = (root: HTMLElement, on: boolean) => {
   });
 };
 
-// The glass look itself: a faint tint of the theme's button color (or white), a bright top edge, a darker
-// bottom one and a soft drop shadow. The focused button keeps Steam's own highlight.
+// The glass look itself: thick and see-through. Barely tinted (the theme's button color, or none), its curved
+// side wall shaded, light catching the top edge (a bright line) and coming out at the bottom one (a fainter
+// line), a shadow below it. The focused button keeps Steam's own highlight.
 const glassCss = (rgb?: [number, number, number]) => {
   const [r, g, b] = rgb ?? [255, 255, 255];
-  const tint = rgb ? 0.22 : 0.08;
+  const tint = rgb ? 0.12 : 0.03;
   const btn = ["DialogButton", "DropDownControlButton"]
     .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible)`)
     .concat([".hhctl-root select"])
@@ -1588,12 +1589,14 @@ const glassCss = (rgb?: [number, number, number]) => {
     ${btn} {
       background: rgba(${r}, ${g}, ${b}, ${tint}) !important;
       border-radius: 12px !important;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 1px rgba(0, 0, 0, 0.35),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 3px 8px rgba(0, 0, 0, 0.35) !important;
+      box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.32), inset -2px -3px 6px rgba(0, 0, 0, 0.35),
+        inset 0 1.5px 1px rgba(255, 255, 255, 0.85), inset 1px 2px 4px rgba(255, 255, 255, 0.14),
+        inset 0 -1.5px 1.5px rgba(255, 255, 255, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+        0 4px 10px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35) !important;
       color: #fff !important;
       text-shadow: -1px 1px 1px rgba(0, 0, 0, 0.9), -1px 2px 4px rgba(0, 0, 0, 0.6); /* left and bottom */
     }
-    ${hover} { background: rgba(${r}, ${g}, ${b}, ${tint + 0.1}) !important; }
+    ${hover} { background: rgba(${r}, ${g}, ${b}, ${tint + 0.08}) !important; }
   `;
 };
 
@@ -3477,7 +3480,7 @@ function Content() {
             <PanelSectionRow>
               <ToggleField
                 label="Glass buttons"
-                description="Buttons and dropdowns show what's behind them like through a magnifying glass: sharp, the middle a little bigger, the rim bent like a drop's. Best with a background picture. Off: plain tinted buttons"
+                description="Buttons and dropdowns are thick, see-through glass: what's behind them shows sharp, the middle magnified, bent along the rounded sides. Best with a background picture. Off: plain tinted buttons"
                 checked={draft.ui?.glass ?? true}
                 onChange={(v) => change("ui", { glass: v }, 0)}
               />
