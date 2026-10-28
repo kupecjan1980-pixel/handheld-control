@@ -394,6 +394,7 @@ type Drive = {
   permanent: boolean;
   ours: boolean;
   forced: boolean;
+  in_steam?: boolean;
   can_mount: boolean;
   auto: boolean;
   empty: boolean;
@@ -459,7 +460,8 @@ function DriveRows() {
     refreshLibs();
   }, []);
   if (!d || (d.drives.length === 0 && !d.error)) return null;
-  const inSteam = (mp: string | null) => !!mp && !!libs?.some((l) => l === mp || l.startsWith(`${mp}/`));
+  const inSteam = (mp: string | null) =>
+    !!mp && (!!libs?.some((l) => l === mp || l.startsWith(`${mp}/`)) || !!d?.drives.some((v) => v.mountpoint === mp && v.in_steam));
   const act = async (action: string, path: string) => {
     setBusy(path);
     setErase(null);
@@ -470,6 +472,7 @@ function DriveRows() {
       if (r.done) {
         setMsg(`${r.done.mountpoint} mounts at every start. ${await addToSteam(r.done.library)}`);
         refreshLibs();
+        getDrives().then(setD).catch(() => undefined);
       }
       else if (!r.error && action === "unmount") setMsg("Unmounted; it no longer mounts at start (the data is still there)");
     } finally {
@@ -543,6 +546,7 @@ function DriveRows() {
                   onClick={async () => {
                     setMsg(await addToSteam(`${v.mountpoint}/SteamLibrary`));
                     refreshLibs();
+                    getDrives().then(setD).catch(() => undefined);
                   }}
                 >
                   Add to Steam as a library

@@ -1121,6 +1121,8 @@ class Controller:
         out["nag"] = storage.nag_state()
         try:
             out["drives"] = storage.drives()
+            for v in out["drives"]:
+                v["in_steam"] = bool(v["mountpoint"]) and steamlib.is_library(self._home(), v["mountpoint"])
         except (OSError, ValueError) as e:
             out["drives"], out["error"] = [], out["error"] or str(e)
         return out

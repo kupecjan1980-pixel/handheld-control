@@ -229,3 +229,22 @@ def tick() -> None:
         except OSError as e:
             log.warning("steamlib: %s: %s", i.get("path"), e)
     _save_pending(left)
+
+
+def is_library(home: str, mountpoint: str) -> bool:
+    """A Steam library on this drive: in libraryfolders.vdf, or waiting to go in."""
+    mp = os.path.realpath(mountpoint)
+    under = lambda p: os.path.realpath(p) == mp or os.path.realpath(p).startswith(mp + "/")
+    if any(under(i["path"]) for i in _pending()):
+        return True
+    root = _steam_root(home)
+    if not root:
+        return False
+    for f in (os.path.join(root, "config", "libraryfolders.vdf"), os.path.join(root, "steamapps", "libraryfolders.vdf")):
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                if any(under(p.replace("\\\\", "\\")) for p in re.findall(r'"path"\s+"([^"]+)"', fh.read())):
+                    return True
+        except OSError:
+            continue
+    return False
