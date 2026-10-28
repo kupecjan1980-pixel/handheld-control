@@ -32,6 +32,7 @@ export const Navigation = {
 };
 
 export const getGamepadNavigationTrees = (): any[] => [];
+export const getFocusNavController = (): any => null;
 
 export function PanelSection({ title, children }: { title?: string; children?: ReactNode }) {
   return (
