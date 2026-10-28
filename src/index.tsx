@@ -1525,21 +1525,6 @@ function Content() {
           `tree ${focused ? `#${nodes.indexOf(focused)}` : "-"}, contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, ` +
           `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}${navLog.current}${dropdownLog}`,
       );
-      if (dropdownBack?.until && Date.now() < dropdownBack.until) {
-        const d = dropdownBack;
-        const has = d.node.m_element?.classList?.contains("gpfocus") || d.node.m_element === active;
-        if (!has && d.tries < 10) {
-          d.tries++;
-          try {
-            d.node.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
-            dropdownLog = `, dropdown: focus put back (${d.tries})`;
-          } catch (e) {
-            dropdownLog = `, dropdown: put back failed ${String(e).slice(0, 30)}`;
-          }
-        }
-      } else if (dropdownBack?.until) {
-        dropdownBack = null;
-      }
       const last = lastNav.current;
       // Away: focus is outside the panel (a dropdown's list, the tabs, ...).
       const away = !cur || !root.ownerDocument.hasFocus() || !!(active && active !== root.ownerDocument.body && !active.closest?.(".hhctl-root"));
@@ -3330,7 +3315,7 @@ let panelShown = false; // Content is mounted: our page is the one in the Decky 
 // Quick Access otherwise sends the focus back to the top of the panel. The
 // list opening notes the dropdown's navigation node; after a pick (or
 // closing the list) focus is put back on it for a moment.
-let dropdownBack: { node: any; until: number; tries: number } | null = null;
+let dropdownBack: { node: any; tries: number } | null = null;
 let dropdownLog = "";
 const DropdownItem = (p: React.ComponentProps<typeof SteamDropdownItem>) => {
   const box = useRef<HTMLDivElement>(null);
@@ -3338,7 +3323,7 @@ const DropdownItem = (p: React.ComponentProps<typeof SteamDropdownItem>) => {
     const el = box.current;
     const node = el ? allNavNodes(el.ownerDocument).find((n) => el.contains(n.m_element) && n.m_rgChildren?.length === 0) ??
       allNavNodes(el.ownerDocument).find((n) => el.contains(n.m_element)) : null;
-    dropdownBack = node ? { node, until: 0, tries: 0 } : null;
+    dropdownBack = node ? { node, tries: 0 } : null;
     dropdownLog = node ? ", dropdown opened" : ", dropdown opened (not found)";
     p.onMenuOpened?.();
   };
@@ -3348,8 +3333,23 @@ const DropdownItem = (p: React.ComponentProps<typeof SteamDropdownItem>) => {
         {...p}
         onMenuOpened={opened}
         onChange={(o) => {
-          if (dropdownBack) dropdownBack.until = Date.now() + 1500;
           p.onChange?.(o);
+          const d = dropdownBack;
+          if (!d) return;
+          // Steam's focus marks stay on the dropdown even when its focus has
+          // gone to the top, so no checking: put it back a few times while
+          // the list closes and the panel redraws.
+          for (const ms of [60, 250, 600, 1100]) {
+            setTimeout(() => {
+              try {
+                d.node.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
+                d.tries++;
+                dropdownLog = `, dropdown: focus put back (${d.tries})`;
+              } catch (e) {
+                dropdownLog = `, dropdown: put back failed ${String(e).slice(0, 30)}`;
+              }
+            }, ms);
+          }
         }}
       />
     </div>
