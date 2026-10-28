@@ -131,6 +131,15 @@ def _sleep_offset() -> float:
     return time.clock_gettime(time.CLOCK_BOOTTIME) - time.clock_gettime(time.CLOCK_MONOTONIC)
 
 
+
+def _shutting_down() -> bool:
+    """The system is powering off or rebooting (not just the plugin stopping)."""
+    try:
+        r = proc.run(["systemctl", "is-system-running"], text=True, timeout=3)
+        return r.stdout.strip() == "stopping"
+    except Exception:
+        return False
+
 class Controller:
     def __init__(self, settings_path: str, user_home: str | None = None, version: str | None = None):
         self.settings_path = settings_path
@@ -1685,6 +1694,17 @@ class Controller:
                 # Leave the watchdog armed: it restores auto once we stop beating.
                 log.exception("could not return fan to auto")
         self.fan_pct = None
+        if unload and _shutting_down():
+            # Powering off: nothing runs while it's off, so the charge limit is
+            # held like for sleep (else it charged to full while off; NEXT 2,
+            # 2026-10-28), and the lights go off like for sleep (else the
+            # stick rings lit up while it charged off).
+            b = self.settings["battery"]
+            self._guard("battery", lambda: self.bat.hold_for_sleep(int(b["limit"]), b["bypass"]))
+            if self.settings["sleep"].get("rgb_off") and self.rgb and self.settings["rgb"]["enabled"]:
+                self._guard("rgb", lambda: self.rgb.apply("off", 0, 0, 0, None))
+            log.info("shutdown: charge limit held, lights off")
+            return
         if self.bat.limit_mode() == "emulated" and self.bat.inhibited and self.settings["battery"]["bypass"] == "off":
             self._guard("battery", lambda: self.bat.set_behaviour("auto"))
 
