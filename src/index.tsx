@@ -3,7 +3,7 @@ import {
   getFocusNavController,
   getGamepadNavigationTrees,
   ButtonItem,
-  DropdownItem,
+  DropdownItem as SteamDropdownItem,
   Field,
   Focusable,
   Navigation,
@@ -1468,23 +1468,26 @@ function Content() {
   // (after a dropdown's list closes, or the setting was redrawn), it's put
   // back on that setting.
   const lastNav = useRef<{ node: any; idx: number; out: boolean } | null>(null);
-  const ringRef = useRef<HTMLDivElement>(null);
   const navLog = useRef("");
   const [navCheck, setNavCheck] = useState("");
   useEffect(() => {
     if (view !== "main") return;
     let lit: Element | null = null;
+    // The frame is made here (not by React) so it can go into whichever copy
+    // of the panel the setting is in.
+    const r = document.createElement("div");
+    r.className = "hhctl-ring";
     const ring = (el: Element | null) => {
-      const r = ringRef.current;
-      const root = rootRef.current;
-      if (!r || !root) return;
+      const host = (el?.closest?.(".hhctl-root") as HTMLElement | null) ?? rootRef.current;
+      if (!host) return;
+      if (r.ownerDocument !== host.ownerDocument || r.parentElement !== host) host.appendChild(host.ownerDocument.adoptNode(r));
       const box = el?.getBoundingClientRect();
-      const area = (bodyRef.current ?? root).getBoundingClientRect();
+      const area = ((host.querySelector(".hhctl-body") as HTMLElement | null) ?? host).getBoundingClientRect();
       if (!el || !box || box.height < 4 || box.bottom < area.top || box.top > area.bottom) {
         r.style.display = "none";
         return;
       }
-      const at = root.getBoundingClientRect();
+      const at = host.getBoundingClientRect();
       const top = Math.max(box.top, area.top);
       Object.assign(r.style, {
         display: "block",
@@ -1518,19 +1521,34 @@ function Content() {
       setNavCheck(
         `nodes ${nodes.length}, on #${cur ? nodes.indexOf(cur) : "-"}, ` +
           `class ${at(byClass)}, value ${at(byValue)}, dom ${at(byDom)}` +
-          `${active && !root.contains(active) ? ` (${String(active.className ?? active.tagName).slice(0, 20)})` : ""}, ` +
+          `${active && !active.closest?.(".hhctl-root") ? ` (${String(active.className ?? active.tagName).slice(0, 20)})` : active && !root.contains(active) ? " (other copy)" : ""}, ` +
           `tree ${focused ? `#${nodes.indexOf(focused)}` : "-"}, contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, ` +
-          `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}${navLog.current}`,
+          `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}${navLog.current}${dropdownLog}`,
       );
+      if (dropdownBack?.until && Date.now() < dropdownBack.until) {
+        const d = dropdownBack;
+        const has = d.node.m_element?.classList?.contains("gpfocus") || d.node.m_element === active;
+        if (!has && d.tries < 10) {
+          d.tries++;
+          try {
+            d.node.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
+            dropdownLog = `, dropdown: focus put back (${d.tries})`;
+          } catch (e) {
+            dropdownLog = `, dropdown: put back failed ${String(e).slice(0, 30)}`;
+          }
+        }
+      } else if (dropdownBack?.until) {
+        dropdownBack = null;
+      }
       const last = lastNav.current;
       // Away: focus is outside the panel (a dropdown's list, the tabs, ...).
-      const away = !cur || !root.ownerDocument.hasFocus() || !!(active && active !== root.ownerDocument.body && !root.contains(active));
+      const away = !cur || !root.ownerDocument.hasFocus() || !!(active && active !== root.ownerDocument.body && !active.closest?.(".hhctl-root"));
       if (away) {
         if (last && !last.out) navLog.current = `, left at #${last.idx}`;
         if (last) last.out = true;
       } else if (last && cur !== last.node) {
         const idx = nodes.indexOf(cur);
-        const gone = !last.node.m_bMounted || !root.contains(last.node.m_element);
+        const gone = !last.node.m_bMounted || !last.node.m_element?.isConnected;
         // Back from away, or the setting was redrawn, and Steam put the focus
         // somewhere above it (the top of the panel): back to the setting.
         const back = gone ? nodes[last.idx] : last.node;
@@ -1563,6 +1581,7 @@ function Content() {
     return () => {
       clearInterval(id);
       body?.removeEventListener("scroll", onScroll);
+      r.remove();
     };
   }, [view]);
   // Leaving the settings remembers the spot (and the focused button); coming
@@ -1809,7 +1828,6 @@ function Content() {
         ...(fitHeight ? { height: fitHeight } : {}),
       }}
     >
-      <div ref={ringRef} className="hhctl-ring" />
       <style>{READOUT_CSS}</style>
       <style>{themeCss(theme, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
@@ -3308,6 +3326,61 @@ function TitleView() {
 const QAM_DECKY_TAB = 999; // EQuickAccessTab.Decky
 let panelShown = false; // Content is mounted: our page is the one in the Decky tab
 
+// Steam's dropdown, but the setting keeps the focus after its list closes:
+// Quick Access otherwise sends the focus back to the top of the panel. The
+// list opening notes the dropdown's navigation node; after a pick (or
+// closing the list) focus is put back on it for a moment.
+let dropdownBack: { node: any; until: number; tries: number } | null = null;
+let dropdownLog = "";
+const DropdownItem = (p: React.ComponentProps<typeof SteamDropdownItem>) => {
+  const box = useRef<HTMLDivElement>(null);
+  const opened = () => {
+    const el = box.current;
+    const node = el ? allNavNodes(el.ownerDocument).find((n) => el.contains(n.m_element) && n.m_rgChildren?.length === 0) ??
+      allNavNodes(el.ownerDocument).find((n) => el.contains(n.m_element)) : null;
+    dropdownBack = node ? { node, until: 0, tries: 0 } : null;
+    dropdownLog = node ? ", dropdown opened" : ", dropdown opened (not found)";
+    p.onMenuOpened?.();
+  };
+  return (
+    <div ref={box} style={{ display: "contents" }}>
+      <SteamDropdownItem
+        {...p}
+        onMenuOpened={opened}
+        onChange={(o) => {
+          if (dropdownBack) dropdownBack.until = Date.now() + 1500;
+          p.onChange?.(o);
+        }}
+      />
+    </div>
+  );
+};
+
+// Every navigation node in a window, all trees and contexts.
+const allNavNodes = (doc: Document): any[] => {
+  const out: any[] = [];
+  const seen = new Set<any>();
+  const walk = (n: any) => {
+    for (const c of n?.m_rgChildren ?? []) {
+      if (c?.m_element) out.push(c);
+      walk(c);
+    }
+  };
+  const tree = (t: any) => {
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    if (t.m_Root?.m_element?.ownerDocument === doc) walk(t.m_Root);
+    (t.m_rgChildNavTrees ?? []).forEach(tree);
+  };
+  try {
+    for (const c of getFocusNavController()?.m_rgAllContexts ?? []) (c?.m_rgGamepadNavigationTrees ?? []).forEach(tree);
+    (getGamepadNavigationTrees() ?? []).forEach(tree);
+  } catch {
+    // Steam changed its navigation internals
+  }
+  return out;
+};
+
 // Steam's navigation nodes for the panel's elements, in the tree's order,
 // and the one Steam's focus is on (its tree's last focused node), if any.
 const navNodes = (root: Element): { nodes: any[]; focused: any } => {
@@ -3315,7 +3388,7 @@ const navNodes = (root: Element): { nodes: any[]; focused: any } => {
   let focused: any = null;
   const walk = (n: any) => {
     for (const c of n?.m_rgChildren ?? []) {
-      if (c?.m_element && root.contains(c.m_element)) out.push(c);
+      if (c?.m_element && (root.contains(c.m_element) || c.m_element.closest?.(".hhctl-root"))) out.push(c);
       walk(c);
     }
   };
@@ -3326,7 +3399,7 @@ const navNodes = (root: Element): { nodes: any[]; focused: any } => {
     if (t.m_Root?.m_element?.ownerDocument === root.ownerDocument) {
       walk(t.m_Root);
       const f = t.m_lastFocusNode;
-      if (f?.m_element && root.contains(f.m_element) && f.m_Focused?.Value !== false) focused = f;
+      if (f?.m_element?.closest?.(".hhctl-root") && f.m_Focused?.Value !== false) focused = f;
     }
     (t.m_rgChildNavTrees ?? []).forEach(tree);
   };
