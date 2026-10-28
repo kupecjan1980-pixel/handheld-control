@@ -1469,8 +1469,7 @@ function Content() {
     const id = setInterval(() => {
       const root = rootRef.current;
       if (!root || !qamVisible()) return;
-      const nodes = navNodes(root);
-      const cur = nodes.filter((n) => n.BHasFocus?.()).pop();
+      const { nodes, focused: cur } = navNodes(root);
       const ctl = getFocusNavController();
       setNavCheck(
         `contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, nodes ${nodes.length}, ` +
@@ -3252,9 +3251,11 @@ function TitleView() {
 const QAM_DECKY_TAB = 999; // EQuickAccessTab.Decky
 let panelShown = false; // Content is mounted: our page is the one in the Decky tab
 
-// Steam's navigation nodes for the panel's elements, in the tree's order.
-const navNodes = (root: Element): any[] => {
+// Steam's navigation nodes for the panel's elements, in the tree's order,
+// and the one Steam's focus is on (its tree's last focused node), if any.
+const navNodes = (root: Element): { nodes: any[]; focused: any } => {
   const out: any[] = [];
+  let focused: any = null;
   const walk = (n: any) => {
     for (const c of n?.m_rgChildren ?? []) {
       if (c?.m_element && root.contains(c.m_element)) out.push(c);
@@ -3265,7 +3266,11 @@ const navNodes = (root: Element): any[] => {
   const tree = (t: any) => {
     if (!t || seen.has(t)) return;
     seen.add(t);
-    if (t.m_Root?.m_element?.ownerDocument === root.ownerDocument) walk(t.m_Root);
+    if (t.m_Root?.m_element?.ownerDocument === root.ownerDocument) {
+      walk(t.m_Root);
+      const f = t.m_lastFocusNode;
+      if (f?.m_element && root.contains(f.m_element) && f.m_Focused?.Value !== false) focused = f;
+    }
     (t.m_rgChildNavTrees ?? []).forEach(tree);
   };
   try {
@@ -3277,7 +3282,7 @@ const navNodes = (root: Element): any[] => {
   } catch {
     // Steam changed its navigation internals: no highlight, nothing else breaks
   }
-  return out;
+  return { nodes: out, focused };
 };
 
 // Same check as useQuickAccessVisible, outside React.
