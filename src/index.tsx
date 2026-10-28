@@ -1469,12 +1469,24 @@ function Content() {
     const id = setInterval(() => {
       const root = rootRef.current;
       if (!root || !qamVisible()) return;
-      const { nodes, focused: cur } = navNodes(root);
+      const { nodes, focused } = navNodes(root);
+      // Which node Steam's focus is on, by whichever of these Steam keeps up:
+      // its focus class on the element, the node's focused value, DOM focus,
+      // the tree's last focused node.
+      const val = (v: any) => (v && typeof v === "object" ? v.Value ?? v.m_currentValue : v);
+      const byClass = nodes.filter((n) => n.m_element?.classList?.contains("gpfocus"));
+      const byValue = nodes.filter((n) => val(n.m_Focused) === true);
+      const active = root.ownerDocument.activeElement;
+      const byDom = nodes.filter((n) => n.m_element === active);
+      const one = (l: any[]) => (l.length === 1 ? l[0] : null);
+      const cur = one(byClass) ?? one(byValue) ?? one(byDom) ?? focused;
       const ctl = getFocusNavController();
+      const at = (l: any[]) => (l.length === 1 ? `#${nodes.indexOf(l[0])}` : `${l.length}`);
       setNavCheck(
-        `contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, nodes ${nodes.length}, ` +
-          `on #${cur ? nodes.indexOf(cur) : "-"}${cur ? ` (${String(cur.m_element?.className ?? "").slice(0, 24)})` : ""}, ` +
-          `last #${lastNav.current?.idx ?? "-"}${lastNav.current?.out ? " out" : ""}, ` +
+        `nodes ${nodes.length}, on #${cur ? nodes.indexOf(cur) : "-"}, ` +
+          `class ${at(byClass)}, value ${at(byValue)}, dom ${at(byDom)}` +
+          `${active && !root.contains(active) ? ` (${String(active.className ?? active.tagName).slice(0, 20)})` : ""}, ` +
+          `tree ${focused ? `#${nodes.indexOf(focused)}` : "-"}, contexts ${ctl?.m_rgAllContexts?.length ?? "?"}, ` +
           `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}`,
       );
       const last = lastNav.current;
