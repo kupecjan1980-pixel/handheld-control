@@ -986,6 +986,9 @@ const READOUT_CSS = `
     50% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.25), inset 0 0 0 0 rgba(255, 255, 255, 0); }
   }
   .hhctl-root .hhctl-navfocus {
+    /* The frame itself doesn't depend on the animation (Steam can turn those off). */
+    outline: 2px solid rgba(255, 255, 255, 0.85) !important;
+    outline-offset: -2px !important;
     border-radius: 4px;
     animation: hhctl-flash 0.35s ease-out, hhctl-pulse 1.6s ease-in-out 0.35s infinite !important;
   }
@@ -1490,15 +1493,17 @@ function Content() {
           `window ${root.ownerDocument.hasFocus() ? "focused" : "not focused"}`,
       );
       const last = lastNav.current;
-      const away = !cur || !root.ownerDocument.hasFocus();
+      // Away: focus is outside the panel (a dropdown's list, the tabs, ...).
+      const away = !cur || !root.ownerDocument.hasFocus() || !!(active && active !== root.ownerDocument.body && !root.contains(active));
       if (away) {
         if (last) last.out = true;
       } else if (last && cur !== last.node) {
         const idx = nodes.indexOf(cur);
         const gone = !last.node.m_bMounted || !root.contains(last.node.m_element);
-        const toTop = idx <= 2 && last.idx > idx + 3;
+        // Back from away, or the setting was redrawn, and Steam put the focus
+        // somewhere above it (the top of the panel): back to the setting.
         const back = gone ? nodes[last.idx] : last.node;
-        if (back && back !== cur && idx < last.idx && (last.out || gone || toTop)) {
+        if (back && back !== cur && idx < last.idx && (last.out || gone)) {
           try {
             back.BTakeFocus(0, 0); // EFocusSource.GAMEPAD, GamepadButton.INVALID
             lastNav.current = { node: back, idx: nodes.indexOf(back), out: false };
@@ -1512,9 +1517,10 @@ function Content() {
       const el = away ? null : (cur?.m_element as Element | undefined) ?? null;
       if (el !== lit) {
         lit?.classList.remove("hhctl-navfocus");
-        el?.classList.add("hhctl-navfocus");
         lit = el;
       }
+      // Steam redraws the setting with its own classes: mark it again.
+      if (el && !el.classList.contains("hhctl-navfocus")) el.classList.add("hhctl-navfocus");
     }, 120);
     return () => {
       clearInterval(id);
