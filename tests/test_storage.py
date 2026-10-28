@@ -86,21 +86,34 @@ for fn in (lambda: storage.mount("/dev/nvme1n1p2", home), lambda: storage.unmoun
         fn(); raise SystemExit("someone else's entry must be left alone")
     except storage.StorageError:
         pass
-# an SD card the system mounted itself: left alone
+# an SD card the system mounted itself: can be made permanent, at the same place
 tree["blockdevices"].append({"name": "mmcblk0", "path": "/dev/mmcblk0", "type": "disk", "size": 128 << 30, "mountpoints": [None],
     "children": [{"name": "mmcblk0p1", "path": "/dev/mmcblk0p1", "type": "part", "fstype": "ntfs", "uuid": "SD1",
                   "size": 128 << 30, "mountpoints": ["/run/media/deck/SD"]}]})
 sd = [x for x in storage.drives() if x["path"] == "/dev/mmcblk0p1"][0]
-assert sd["auto"] and not sd["can_mount"] and sd["model"] == "SD card" and "by itself" in sd["note"]
+assert sd["auto"] and sd["can_mount"] and sd["model"] == "SD card" and "every start" in sd["note"]
+storage.MOUNTS = f"{tmp}/mounts"
+open(storage.MOUNTS, "w").write("/dev/mmcblk0p1 /run/media/deck/SD fuseblk rw,uid=1000 0 0\n")
+real2 = storage.os.path.realpath
+storage.os.path.realpath = lambda p: p if p.startswith("/dev/") else real2(p)
+mk, ism = storage.os.makedirs, storage.os.path.ismount
+storage.os.makedirs = lambda p, exist_ok=False: None if p.startswith("/run/media/") else mk(p, exist_ok=exist_ok)
+storage.os.path.ismount = lambda p: False if p.startswith("/run/media/") else ism(p)
+calls.clear()
 try:
-    storage.mount("/dev/mmcblk0p1", home); raise SystemExit("automounted card must be left alone")
-except storage.StorageError:
-    pass
+    storage.mount("/dev/mmcblk0p1", home)
+except OSError:
+    pass  # SteamLibrary folder under /run/media can't be made here
+assert ["umount", "/run/media/deck/SD"] in calls, calls
+assert "UUID=SD1 /run/media/deck/SD ntfs3 " in open(storage.FSTAB).read()
+storage.unmount("/dev/mmcblk0p1")
+assert "SD1" not in open(storage.FSTAB).read()
 # an internal drive the desktop mounted: unmounted, and put back if our mount fails
 tree["blockdevices"][-1]["name"] = "sdb"; tree["blockdevices"][-1]["tran"] = "sata"
 storage.MOUNTS = f"{tmp}/mounts"
 open(storage.MOUNTS, "w").write("/dev/mmcblk0p1 /run/media/deck/SD ntfs3 rw,uid=1000 0 0\n")
 storage.os.path.realpath = lambda p: mnt if p == "/mnt" else p
+tree["blockdevices"][-1]["children"][0]["mountpoints"] = ["/run/media/deck/SD"]
 mount_ok[0] = False; calls.clear()
 try:
     storage.mount("/dev/mmcblk0p1", home); raise SystemExit("should fail")
@@ -110,6 +123,7 @@ assert ["umount", "/run/media/deck/SD"] in calls
 assert ["mount", "-t", "ntfs3", "-o", "rw,uid=1000", "/dev/mmcblk0p1", "/run/media/deck/SD"] in calls, calls
 mount_ok[0] = True
 tree["blockdevices"].pop()
+storage.os.makedirs, storage.os.path.ismount = mk, ism
 
 # an empty disk: partitioned, ext4, mounted for Steam
 r = storage.format_ext4("/dev/sda", home)

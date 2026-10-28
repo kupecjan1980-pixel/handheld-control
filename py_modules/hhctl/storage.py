@@ -155,7 +155,7 @@ def _entry(v: dict, model: str, ours: dict, removable: bool = False, empty: bool
     auto = removable and bool(mounts) and not listed
     note = None
     if auto:
-        note = "The system mounts it by itself when inserted, no password needed"
+        note = "The system mounted it this time; if it asks for a password or fails after a start, turn on mounting at every start"
     elif empty:
         note = "Empty drive: format it to use it"
     elif not fs:
@@ -176,7 +176,7 @@ def _entry(v: dict, model: str, ours: dict, removable: bool = False, empty: bool
         "mountpoint": mounts[0] if mounts else None,
         "permanent": listed,
         "ours": bool(uuid) and uuid in ours,
-        "can_mount": bool(uuid) and fs in MOUNTABLE and not auto,
+        "can_mount": bool(uuid) and fs in MOUNTABLE,
         "auto": auto,
         "empty": empty,
         "note": note,
@@ -197,7 +197,11 @@ def _owner(home: str) -> tuple[int, int]:
     return st.st_uid, st.st_gid
 
 
-def _mount_dir(d: dict) -> str:
+def _mount_dir(d: dict, keep: str | None = None) -> str:
+    """keep: where the system mounted it (/run/media/<user>/<label>): stays
+    there, so a Steam library on it is found where Steam knows it."""
+    if keep:
+        return keep
     base = os.path.realpath("/mnt")  # /var/mnt on Bazzite and other image-based systems
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", d["label"] or "").strip("-.") or f"drive-{d['uuid'][:8]}"
     path = os.path.join(base, name)
@@ -209,6 +213,10 @@ def _mount_dir(d: dict) -> str:
 
 
 def _ntfs_type() -> str:
+    """ntfs-3g first: it mounts a drive Windows didn't close cleanly (pulled out,
+    Fast Startup), where ntfs3 refuses; the desktop's password mount uses it too."""
+    if shutil.which("ntfs-3g", path=proc.SYSTEM_PATH):
+        return "ntfs-3g"
     proc.run(["modprobe", "ntfs3"], timeout=10)
     try:
         with open("/proc/filesystems") as f:
@@ -216,8 +224,6 @@ def _ntfs_type() -> str:
                 return "ntfs3"
     except OSError:
         pass
-    if shutil.which("ntfs-3g", path=proc.SYSTEM_PATH):
-        return "ntfs-3g"
     raise StorageError("No NTFS driver: the kernel has no ntfs3 and ntfs-3g isn't installed")
 
 
@@ -249,6 +255,10 @@ def _current_mounts(dev: str) -> list[tuple[str, str, str]]:
     except OSError:
         pass
     return out
+
+
+def _mounts_of(d: dict) -> list[str]:
+    return [t for t, _, _ in _current_mounts(d["path"])]
 
 
 def _unmount_all(d: dict) -> list[tuple[str, str, str]]:
@@ -298,8 +308,9 @@ def mount(path: str, home: str) -> dict:
     if d["ours"]:
         where = _ours()[d["uuid"]]
     else:
+        keep = next((m for m in _mounts_of(d) if m.startswith("/run/media/")), None)
         was = _unmount_all(d)  # e.g. mounted by the desktop under /run/media
-        where = _mount_dir(d)
+        where = _mount_dir(d, keep)
         line = _fstab_line(d, where, uid, gid)
         _write_fstab(_fstab_lines() + [f"{TAG} {d['model']} {d['path']}", line])
         log.info("storage: fstab + %s", line)

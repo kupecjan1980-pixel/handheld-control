@@ -485,10 +485,27 @@ function DriveRows() {
                   .join(" · ")}
               />
             </PanelSectionRow>
-            {v.can_mount && !(v.permanent && !v.ours) && !(v.ours && v.mountpoint) && (
+            {(v.can_mount || v.permanent) && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Mount at every start (no password)"
+                  description={
+                    v.permanent && !v.ours
+                      ? "Already in /etc/fstab, set up outside HHC: change it there."
+                      : `${v.ours ? "On: the system mounts it while starting, before Steam, so no password prompt or mount error." : "Turn on if it asks for a password or fails to mount after a start."} Done once, here; NTFS uses ntfs-3g, which also mounts a drive Windows didn't close cleanly. Turning it off unmounts it now and stops mounting it at start (the data stays).${
+                          busy === v.path ? " Working…" : ""
+                        }`
+                  }
+                  checked={v.permanent}
+                  disabled={off || (v.permanent && !v.ours)}
+                  onChange={(on) => act(on ? "mount" : "unmount", v.path)}
+                />
+              </PanelSectionRow>
+            )}
+            {v.ours && !v.mountpoint && (
               <PanelSectionRow>
                 <ButtonItem layout="below" disabled={off} onClick={() => act("mount", v.path)}>
-                  {busy === v.path ? "Working…" : "Mount at every start (no password)"}
+                  {busy === v.path ? "Working…" : "Mount now (it didn't mount at start)"}
                 </ButtonItem>
               </PanelSectionRow>
             )}
@@ -503,13 +520,6 @@ function DriveRows() {
                   }}
                 >
                   Add to Steam as a library
-                </ButtonItem>
-              </PanelSectionRow>
-            )}
-            {v.ours && (
-              <PanelSectionRow>
-                <ButtonItem layout="below" disabled={off} onClick={() => act("unmount", v.path)}>
-                  Unmount, don't mount at start
                 </ButtonItem>
               </PanelSectionRow>
             )}
