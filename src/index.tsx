@@ -399,13 +399,20 @@ type Drive = {
   empty: boolean;
   note: string | null;
 };
-type Drives = { drives: Drive[]; error: string | null; done: { mountpoint: string; library: string } | null };
+type Drives = {
+  drives: Drive[];
+  error: string | null;
+  done: { mountpoint: string; library: string } | null;
+  msg?: string;
+  nag?: { available: boolean; hidden: boolean };
+};
 const getDrives = callable<[], Drives>("get_drives");
 const driveAction = callable<[string, string], Drives>("drive_action");
 
 const driveSize = (b: number) => (b >= 1e12 ? `${(b / 1e12).toFixed(1)} TB` : `${Math.round(b / 1e9)} GB`);
 
-// Steam's own call when it's there (Game Mode); else the path to add by hand.
+// Steam's own call when it's there (Game Mode); else the backend adds it
+// (through Steam's debugger, or into libraryfolders.vdf while Steam is closed).
 async function addToSteam(library: string): Promise<string> {
   const sc = (window as any).SteamClient;
   try {
@@ -416,7 +423,12 @@ async function addToSteam(library: string): Promise<string> {
   } catch (e) {
     console.warn("hhctl: AddInstallFolder", e);
   }
-  return `In Steam, open Settings › Storage › Add drive and pick ${library}`;
+  try {
+    const r = await driveAction("library", library);
+    return r.msg ?? r.error ?? `In Steam, open Settings › Storage › Add drive and pick ${library}`;
+  } catch {
+    return `In Steam, open Settings › Storage › Add drive and pick ${library}`;
+  }
 }
 
 // Steam's library folders (Game Mode); null where Steam can't be asked (HHC Desktop).
@@ -564,6 +576,24 @@ function DriveRows() {
           </Fragment>
         );
       })}
+      {d.nag?.available && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Hide Bazzite's NTFS warning"
+            description="Bazzite pops up a warning each time an NTFS or exFAT drive is mounted. On: it doesn't (the same as Bazzite's ujust _disable-ntfs-service); the drives work the same either way. Off: the warning is back."
+            checked={d.nag.hidden}
+            disabled={busy !== null}
+            onChange={async (on) => {
+              setBusy("nag");
+              try {
+                setD(await driveAction(on ? "nag_hide" : "nag_show", ""));
+              } finally {
+                setBusy(null);
+              }
+            }}
+          />
+        </PanelSectionRow>
+      )}
       {msg && (
         <PanelSectionRow>
           <Field description={msg} />

@@ -454,3 +454,30 @@ def format_ext4(path: str, home: str) -> dict:
         raise StorageError(f"Formatting failed: {(r.stderr or '').strip()[-300:]}")
     _settle()
     return mount(target, home)
+
+
+# --- Bazzite's NTFS warning -------------------------------------------------------
+# Bazzite's ntfs-nag user service pops up a warning whenever an NTFS or exFAT
+# drive is mounted. Hidden the way Bazzite's own "ujust _disable-ntfs-service"
+# does it (masked), for every user; shown again by unmasking.
+
+NAG = "ntfs-nag.service"
+NAG_UNIT = "/usr/lib/systemd/user/ntfs-nag.service"
+NAG_MASK = "/etc/systemd/user/ntfs-nag.service"
+
+
+def nag_state() -> dict:
+    return {"available": os.path.exists(NAG_UNIT),
+            "hidden": os.path.islink(NAG_MASK) and os.readlink(NAG_MASK) == "/dev/null"}
+
+
+def set_nag(hidden: bool, home: str) -> None:
+    if not os.path.exists(NAG_UNIT):
+        raise StorageError("This system has no NTFS warning service")
+    import pwd
+    user = pwd.getpwuid(os.stat(home).st_uid).pw_name
+    r = proc.run(["systemctl", "--global", "mask" if hidden else "unmask", NAG], text=True, timeout=30)
+    if r.returncode:
+        raise StorageError(f"Couldn't change the NTFS warning: {r.stderr.strip()}")
+    proc.run(["systemctl", "--user", "-M", f"{user}@", "daemon-reload"], timeout=30)
+    proc.run(["systemctl", "--user", "-M", f"{user}@", "stop" if hidden else "start", NAG], timeout=30)

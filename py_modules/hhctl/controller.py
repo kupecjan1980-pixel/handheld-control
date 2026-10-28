@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, autotune, background, desktoppad, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, autotune, background, desktoppad, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, steamlib, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -1111,9 +1111,14 @@ class Controller:
                 storage.unmount(path)
             elif action == "format":
                 out["done"] = storage.format_ext4(path, self._home())
+            elif action == "library":
+                out["msg"] = steamlib.add(self._home(), path)
+            elif action in ("nag_hide", "nag_show"):
+                storage.set_nag(action == "nag_hide", self._home())
         except (OSError, ValueError) as e:
             log.error("storage: %s %s: %s", action, path, e)
             out["error"] = str(e)
+        out["nag"] = storage.nag_state()
         try:
             out["drives"] = storage.drives()
         except (OSError, ValueError) as e:
@@ -1620,6 +1625,7 @@ class Controller:
         self.tick_desktop_game()
         self.tick_autotune()
         self.tick_gamescope()
+        self._guard("storage", steamlib.tick)
         offset = _sleep_offset()
         resumed = offset - self.sleep_offset > 2
         self.sleep_offset = offset
