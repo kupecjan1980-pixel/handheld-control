@@ -159,4 +159,28 @@ r = storage.format_ext4("/dev/sda", home)
 assert ["sfdisk", "--label", "gpt", "/dev/sda"] in calls
 assert ["mkfs.ext4", "-F", "-m", "0", "-L", "Games", "/dev/sda1"] in calls
 assert r["mountpoint"] == f"{mnt}/Games" and "UUID=NEW1 " + f"{mnt}/Games ext4 defaults,noatime" in open(storage.FSTAB).read()
+# every extra internal drive at once: USB drives left to the system, a Windows system drive left alone
+open(storage.FSTAB, "w").write("UUID=sys / btrfs subvol=root 0 0\n")
+tree["blockdevices"][2]["tran"] = "usb"
+msg = storage.mount_all(home)
+fst = open(storage.FSTAB).read()
+assert "UUID=AB12CD34 " in fst and "NEW1" not in fst, fst
+assert "Hry" in msg and "Mount at every start now" in msg, msg
+assert "already" in storage.mount_all(home)
+storage.unmount("/dev/nvme1n1p2")
+os.makedirs(f"{mnt}/Hry/Windows/System32", exist_ok=True)
+storage._mount_dir = lambda d, keep=None: f"{mnt}/Hry"
+msg = storage.mount_all(home)
+assert "Windows system drive" in msg and "AB12CD34" not in open(storage.FSTAB).read(), msg
+storage._mount_dir = real_dir
+
+# no password for the desktop's mounting: a polkit rule, on and off
+storage.POLKIT_RULE = f"{tmp}/rules.d/49-hhc.rules"
+assert not storage.nopass_state()["available"]
+os.makedirs(f"{tmp}/rules.d")
+storage.set_nopass(True)
+assert storage.nopass_state() == {"available": True, "on": True}
+assert "filesystem-mount-system" in open(storage.POLKIT_RULE).read() and "isInGroup(\"wheel\")" in open(storage.POLKIT_RULE).read()
+storage.set_nopass(False)
+assert not storage.nopass_state()["on"]
 print("all storage tests passed")

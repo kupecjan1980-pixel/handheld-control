@@ -195,6 +195,7 @@ def _entry(v: dict, model: str, ours: dict, removable: bool = False, empty: bool
         "forced": bool(uuid) and uuid in ours and _forced(_our_line(uuid)),
         "can_mount": bool(uuid) and fs in MOUNTABLE,
         "auto": auto,
+        "removable": removable,
         "empty": empty,
         "note": note,
     }
@@ -343,11 +344,11 @@ def _steam_dir(where: str, uid: int, gid: int) -> str:
     return lib
 
 
-def mount(path: str, home: str, force: bool = False) -> dict:
+def mount(path: str, home: str, force: bool = False, library: bool = True) -> dict:
     """Mount now and at every boot. Returns {"mountpoint", "library"}.
 
     force (NTFS): also when Windows hibernated it (Fast Startup); never on a
-    Windows system drive."""
+    Windows system drive. library: a SteamLibrary folder made on it."""
     d = _find(path)
     if not d["can_mount"]:
         raise StorageError(d["note"] or "This drive can't be mounted")
@@ -404,7 +405,71 @@ def mount(path: str, home: str, force: bool = False) -> dict:
     if d["fstype"] in ("ext4", "btrfs", "xfs") and os.stat(where).st_uid == 0 \
             and set(os.listdir(where)) <= {"lost+found"}:
         os.chown(where, uid, gid)  # a fresh filesystem: the user's, so Steam can write to it
-    return {"mountpoint": where, "library": _steam_dir(where, uid, gid)}
+    return {"mountpoint": where, "library": _steam_dir(where, uid, gid) if library else None}
+
+
+def mount_all(home: str) -> str:
+    """Every extra internal drive (SATA, NVMe: not SD cards or USB drives, which the system mounts by itself)
+    that can be mounted and isn't yet: mounted now and at every start. A Windows system drive is left alone;
+    one that doesn't mount is said and skipped. Returns what happened, for the panel."""
+    done, skipped = [], []
+    for d in drives():
+        if d["removable"] or d["permanent"] or not d["can_mount"]:
+            continue
+        name = d["label"] or f"{d['model']} {d['path']}"
+        try:
+            where = mount(d["path"], home, library=False)["mountpoint"]
+        except StorageError as e:
+            skipped.append(f"{name}: {e}")
+            continue
+        if os.path.isdir(os.path.join(where, "Windows", "System32")):
+            unmount(d["path"])  # Windows' own drive: Windows' business, not mounted at start
+            skipped.append(f"{name}: a Windows system drive, left alone")
+            continue
+        done.append(f"{name} at {where}")
+    if not done and not skipped:
+        return "Every extra drive already mounts at start (or there's none that can)"
+    return " · ".join(([f"Mount at every start now: {', '.join(done)}"] if done else [])
+                      + ([f"Not mounted: {'; '.join(skipped)}"] if skipped else []))
+
+
+# --- no password for the desktop's own mounting -------------------------------------
+# KDE / GNOME mount a drive through udisks, which asks for the administrator's password for internal drives
+# (polkit: filesystem-mount-system). This rule lets the user at the computer (local, active, an administrator:
+# in the wheel group) mount and unmount them without it. Only those two actions: formatting, encryption and the
+# rest still ask.
+
+POLKIT_RULE = "/etc/polkit-1/rules.d/49-handheld-control-drives.rules"
+POLKIT_TEXT = """// Handheld Control: the user at the computer mounts internal drives without a password
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.udisks2.filesystem-mount-system" ||
+         action.id == "org.freedesktop.udisks2.filesystem-mount" ||
+         action.id == "org.freedesktop.udisks2.filesystem-unmount-others") &&
+        subject.local && subject.active && subject.isInGroup("wheel")) {
+        return polkit.Result.YES;
+    }
+});
+"""
+
+
+def nopass_state() -> dict:
+    return {"available": os.path.isdir(os.path.dirname(POLKIT_RULE)), "on": os.path.exists(POLKIT_RULE)}
+
+
+def set_nopass(on: bool) -> None:
+    if not os.path.isdir(os.path.dirname(POLKIT_RULE)):
+        raise StorageError("This system has no polkit rules folder (/etc/polkit-1/rules.d)")
+    if on:
+        tmp = POLKIT_RULE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(POLKIT_TEXT)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, POLKIT_RULE)  # polkit reads it at once, no restart
+    else:
+        try:
+            os.remove(POLKIT_RULE)
+        except FileNotFoundError:
+            pass
 
 
 def unmount(path: str) -> None:

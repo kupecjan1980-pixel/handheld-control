@@ -1116,10 +1116,15 @@ class Controller:
                 out["msg"] = steamlib.add(self._home(), path)
             elif action in ("nag_hide", "nag_show"):
                 storage.set_nag(action == "nag_hide", self._home())
+            elif action == "mount_all":
+                out["msg"] = storage.mount_all(self._home())
+            elif action in ("nopass_on", "nopass_off"):
+                storage.set_nopass(action == "nopass_on")
         except (OSError, ValueError) as e:
             log.error("storage: %s %s: %s", action, path, e)
             out["error"] = str(e)
         out["nag"] = storage.nag_state()
+        out["nopass"] = storage.nopass_state()
         try:
             out["drives"] = storage.drives()
             for v in out["drives"]:

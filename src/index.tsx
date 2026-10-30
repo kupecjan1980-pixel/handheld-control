@@ -398,6 +398,7 @@ type Drive = {
   in_steam?: boolean;
   can_mount: boolean;
   auto: boolean;
+  removable?: boolean;
   empty: boolean;
   note: string | null;
 };
@@ -407,6 +408,7 @@ type Drives = {
   done: { mountpoint: string; library: string } | null;
   msg?: string;
   nag?: { available: boolean; hidden: boolean };
+  nopass?: { available: boolean; on: boolean };
 };
 const getDrives = callable<[], Drives>("get_drives");
 const driveAction = callable<[string, string], Drives>("drive_action");
@@ -470,6 +472,7 @@ function DriveRows() {
     try {
       const r = await driveAction(action, path);
       setD(r);
+      if (r.msg) setMsg(r.msg);
       if (r.done) {
         setMsg(`${r.done.mountpoint} mounts at every start. ${await addToSteam(r.done.library)}`);
         refreshLibs();
@@ -480,8 +483,44 @@ function DriveRows() {
       setBusy(null);
     }
   };
+  // internal drives not mounting at start yet (SD cards and USB drives the system mounts by itself)
+  const pending = d.drives.filter((v) => !v.removable && !v.permanent && v.can_mount);
   return (
     <PanelSection title="Drives">
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={busy !== null || pending.length === 0}
+          description={
+            pending.length === 0
+              ? "Nothing to do: every extra internal drive that can be mounted already mounts at every start."
+              : `Mounts ${pending.map((v) => v.label ?? v.model).join(", ")} now and at every start from now on, ` +
+                "while the system starts (before the desktop and Steam), so nothing asks for a password. Done once: " +
+                "HHC already runs as administrator. SD cards and USB drives are left to the system; a Windows " +
+                "system drive is left alone; each drive can be turned off below."
+          }
+          onClick={() => act("mount_all", "")}
+        >
+          {busy === "" ? "Working…" : "Mount every extra drive at every start"}
+        </ButtonItem>
+      </PanelSectionRow>
+      {d.nopass && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Open drives without a password"
+            description={
+              d.nopass.available
+                ? "On: the desktop (Dolphin, the drive icon) mounts and unmounts internal drives without asking for " +
+                  "the administrator's password, for you at the computer (an administrator, in the wheel group). " +
+                  "Formatting and encryption still ask. A polkit rule in /etc/polkit-1/rules.d; off removes it."
+                : "Not available: this system has no polkit rules folder."
+            }
+            checked={d.nopass.on}
+            disabled={busy !== null || !d.nopass.available}
+            onChange={(on) => act(on ? "nopass_on" : "nopass_off", "")}
+          />
+        </PanelSectionRow>
+      )}
       {d.drives.map((v) => {
         const name = `${v.label ?? v.model} · ${driveSize(v.size)}${v.fstype ? ` · ${v.fstype}` : ""}`;
         const where = v.mountpoint
