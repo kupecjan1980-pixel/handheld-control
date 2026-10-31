@@ -1267,12 +1267,9 @@ const READOUT_CSS = `
   }
   .hhctl-sticky .hhctl-header { background: rgba(14, 20, 27, 0.94); backdrop-filter: blur(6px); }
   /* Scrolls smoothly (the stick's and the D-pad's steps glide instead of jumping), on its own layer, not
-     handing a scroll past its end to Steam's panel. While it scrolls, the glass buttons are plain (their lens
-     is redrawn every frame otherwise): back once it stops. */
+     handing a scroll past its end to Steam's panel. */
   .hhctl-body { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; overscroll-behavior: contain;
                 will-change: scroll-position; }
-  .hhctl-scrolling [class*="DialogButton"], .hhctl-scrolling [class*="DropDownControlButton"],
-  .hhctl-scrolling select { backdrop-filter: none !important; }
   .hhctl-body::-webkit-scrollbar { display: none; }
   .hhctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; }
   .hhctl-device { font-size: 14px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; }
@@ -2065,16 +2062,6 @@ function Content() {
     };
   }, []);
 
-  // Glass off while it scrolls, back 150 ms after the last step.
-  const scrollIdle = useRef(0);
-  const scrolling = () => {
-    const root = rootRef.current;
-    if (!root) return;
-    root.classList.add("hhctl-scrolling");
-    clearTimeout(scrollIdle.current);
-    scrollIdle.current = window.setTimeout(() => root.classList.remove("hhctl-scrolling"), 150);
-  };
-
   const refresh = async () => {
     // Nothing to show while HHC Desktop's window is hidden (minimized, another workspace): no work.
     if ((window as any).HHC_DESKTOP && document.hidden) return;
@@ -2388,7 +2375,6 @@ function Content() {
         className="hhctl-body"
         onScroll={(ev) => {
           if (view === "main") savedScroll = (ev.target as HTMLElement).scrollTop;
-          scrolling();
         }}
         // D-pad focus: keep the focused setting inside the scroll area (gliding there, not jumping).
         onFocus={(ev) =>
