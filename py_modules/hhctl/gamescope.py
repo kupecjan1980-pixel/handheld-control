@@ -27,6 +27,7 @@ import re
 import shutil
 import stat
 import struct
+import time
 from collections import Counter
 
 from . import proc, sysfs
@@ -50,12 +51,32 @@ MODES = {
 }
 
 
+_pid_seen: list = [None, 0.0]  # the gamescope found last, and when the processes were last read for it
+
+
+def _is_gamescope(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/comm") as f:
+            return f.read().strip() in ("gamescope", "gamescope-wl")
+    except OSError:
+        return False
+
+
 def _gamescope_pid() -> int | None:
+    """Gamescope's process: the one found before while it still runs (one file read); otherwise every process
+    read, at most every 5 s (asked every 2 s and more, a full read was much of HHC's own CPU use)."""
+    pid, at = _pid_seen
+    if pid and _is_gamescope(pid):
+        return pid
+    if not pid and time.monotonic() - at < 5:
+        return None
+    _pid_seen[:] = [None, time.monotonic()]
     for comm in glob.glob("/proc/[0-9]*/comm"):
         try:
             with open(comm) as f:
                 if f.read().strip() in ("gamescope", "gamescope-wl"):
-                    return int(comm.split("/")[2])
+                    _pid_seen[0] = int(comm.split("/")[2])
+                    return _pid_seen[0]
         except (OSError, ValueError):
             continue
     return None

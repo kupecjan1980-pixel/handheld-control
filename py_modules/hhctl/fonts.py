@@ -10,6 +10,7 @@ next to it:
 - doom: Metal Mania
 - quake: Grenze Gotisch
 - fraktur: UnifrakturMaguntia (German blackletter)
+- beat: Oswald (Rádio Beat's lettering)
 
 The frontend can't load plugin files directly, so it gets @font-face rules
 with the fonts inlined as data URLs.
@@ -36,8 +37,10 @@ def css(name: str, folder: str | None = None) -> str | None:
     for face in font["faces"]:
         with open(os.path.join(folder or DIR, face["file"]), "rb") as f:
             data = base64.b64encode(f.read()).decode()
+        fmt = face.get("format", "woff2")  # woff2, or a TrueType file as it comes (Oswald)
+        mime = "font/ttf" if fmt == "truetype" else f"font/{fmt}"
         rules.append(
             f"@font-face {{ font-family: '{font['family']}'; font-weight: {face['weight']}; "
-            f"src: url(data:font/woff2;base64,{data}) format('woff2'); unicode-range: {face['range']}; }}"
+            f"src: url(data:{mime};base64,{data}) format('{fmt}'); unicode-range: {face['range']}; }}"
         )
     return "\n".join(rules)

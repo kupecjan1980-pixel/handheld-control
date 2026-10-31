@@ -103,7 +103,21 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+_services_at = 0.0
+_services: list[str] = []
+
+
 def running_services() -> list[str]:
+    """The conflicting services running, looked for at most every 30 s (it reads every process: the panel
+    asks every 2 s, which made it HHC's biggest cost)."""
+    global _services_at, _services
+    if time.monotonic() - _services_at < 30:
+        return _services
+    _services, _services_at = _running_services(), time.monotonic()
+    return _services
+
+
+def _running_services() -> list[str]:
     found = set()
     for comm in glob.glob("/proc/[0-9]*/comm"):
         try:
@@ -427,7 +441,8 @@ class Controller:
 
     # (hue, saturation) the lights take with "Match theme color"; the default
     # theme has no color, so the RGB section's own hue stays.
-    THEME_RGB = {"red": (0, 100), "redgold": (0, 100), "redyellow": (0, 100), "blue": (215, 100), "green": (130, 100), "gold": (42, 100)}
+    THEME_RGB = {"red": (0, 100), "redgold": (0, 100), "redyellow": (0, 100), "blue": (215, 100), "green": (130, 100), "gold": (42, 100),
+                 "beat": (0, 100), "yellowred": (50, 100), "orange": (28, 100), "purple": (280, 100)}
 
     def apply_ui(self) -> None:
         # The panel itself reads ui from settings; only the lights follow it.

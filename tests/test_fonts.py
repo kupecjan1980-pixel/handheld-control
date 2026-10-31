@@ -1,22 +1,23 @@
-"""Bundled fonts: manifest, @font-face CSS with inlined woff2, licenses, missing file."""
+"""Bundled fonts: manifest, @font-face CSS with inlined woff2 (TrueType for beat), licenses, missing file."""
 import base64, os, sys, tempfile, shutil
 sys.path.insert(0, sys.argv[1] + "/py_modules")
 from hhctl import fonts
 
 m = fonts.manifest()
-assert set(m) == {"diablo", "matrix", "doom", "quake", "fraktur"}
+assert set(m) == {"diablo", "matrix", "doom", "quake", "fraktur", "beat"}
 families = set()
 for name, font in m.items():
     css = fonts.css(name)
     assert css.count("@font-face") == len(font["faces"]) >= 1 and f"font-family: '{font['family']}'" in css
-    assert "unicode-range: U+0000-00FF" in css, f"{name}: basic Latin subset"
-    for chunk in css.split("base64,")[1:]:
-        assert base64.b64decode(chunk.split(")", 1)[0])[:4] == b"wOF2", f"{name}: inlined data is woff2"
+    assert "unicode-range: U+0000-" in css, f"{name}: basic Latin subset"
+    for chunk, face in zip(css.split("base64,")[1:], font["faces"]):
+        magic = b"\x00\x01\x00\x00" if face.get("format") == "truetype" else b"wOF2"
+        assert base64.b64decode(chunk.split(")", 1)[0])[:4] == magic, f"{name}: inlined data is its format"
     assert os.path.exists(os.path.join(fonts.DIR, font["license"])), f"{name}: OFL license ships with the font"
     families.add(font["family"])
 assert len(families) == len(m)
 assert fonts.css("default") is None and fonts.css("nope") is None
-print("fonts: diablo / matrix / doom / quake / fraktur inlined as woff2, licenses present")
+print("fonts: diablo / matrix / doom / quake / fraktur / beat inlined, licenses present")
 
 # the frontend's font list must match the manifest
 src = open(os.path.join(sys.argv[1], "src", "index.tsx")).read()

@@ -39,6 +39,12 @@ class Plugin:
             await asyncio.sleep(TICK)
 
     async def _main(self):
+        # Low priority (CPU and, through it, disk): a game keeps the CPU first. The fan and power loops run every
+        # 2 s and take milliseconds, so they're never late.
+        try:
+            os.nice(10)
+        except OSError:
+            pass
         settings = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
         self.ctl = await asyncio.to_thread(Controller, settings, decky.DECKY_USER_HOME, _version())
         self.ctl.install_exit_hooks()

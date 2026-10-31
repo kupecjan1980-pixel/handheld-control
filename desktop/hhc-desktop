@@ -51,6 +51,7 @@ if [ ${#APP[@]} = 0 ]; then
     [ -n "${SERVER:-}" ] && kill "$SERVER" 2>/dev/null
     exit 1
 fi
-"${APP[@]}" --app="$URL/?token=$TOKEN" >/dev/null 2>&1 || true
+# At low priority: a game running beside it keeps the CPU first.
+nice -n 10 "${APP[@]}" --app="$URL/?token=$TOKEN" >/dev/null 2>&1 || true
 curl -s -m 10 -X POST -H "X-HHC-Token: $TOKEN" "$URL/quit" >/dev/null || true
 [ -n "${SERVER:-}" ] && wait "$SERVER" || true

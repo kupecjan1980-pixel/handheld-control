@@ -73,6 +73,7 @@ type Settings = {
     bg_dim: number;
     bg_pos: BgPos;
     glass?: boolean;
+    colors?: Colors;
   };
   sdr_brightness: { enabled: boolean; nits: number };
 };
@@ -1265,7 +1266,13 @@ const READOUT_CSS = `
     position: sticky; top: 0; z-index: 10;
   }
   .hhctl-sticky .hhctl-header { background: rgba(14, 20, 27, 0.94); backdrop-filter: blur(6px); }
-  .hhctl-body { flex: 1; min-height: 0; overflow-y: auto; }
+  /* Scrolls smoothly (the stick's and the D-pad's steps glide instead of jumping), on its own layer, not
+     handing a scroll past its end to Steam's panel. While it scrolls, the glass buttons are plain (their lens
+     is redrawn every frame otherwise): back once it stops. */
+  .hhctl-body { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; overscroll-behavior: contain;
+                will-change: scroll-position; }
+  .hhctl-scrolling [class*="DialogButton"], .hhctl-scrolling [class*="DropDownControlButton"],
+  .hhctl-scrolling select { backdrop-filter: none !important; }
   .hhctl-body::-webkit-scrollbar { display: none; }
   .hhctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; }
   .hhctl-device { font-size: 14px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; }
@@ -1395,6 +1402,116 @@ const THEMES: Record<string, Theme> = {
     font: "quake",
     button: [150, 110, 20],
   },
+  // Rádio Beat's look: near black, its red, white text, its font (Oswald).
+  beat: {
+    label: "Beat (black + red)",
+    bg: "linear-gradient(180deg, rgba(22, 22, 24, 0.86) 0%, rgba(8, 8, 10, 0.76) 100%)",
+    title: "#ff3b3b",
+    label2: "#ffffff",
+    text: "#f2f2f2",
+    desc: "#b4b4b4",
+    filter: "hue-rotate(150deg) saturate(1.6) brightness(0.94)",
+    font: "beat",
+    button: [227, 5, 26],
+  },
+  // Red + Yellow the other way round: bright yellow panel, red headlines, toggles and buttons, dark text.
+  yellowred: {
+    label: "Yellow + Red",
+    bg: "linear-gradient(180deg, rgba(255, 215, 0, 0.66) 0%, rgba(215, 160, 0, 0.5) 100%)",
+    title: "#c4000e",
+    label2: "#3a0800",
+    text: "#2a0505",
+    desc: "#5e3a0c",
+    filter: "hue-rotate(150deg) saturate(1.6) brightness(0.94)",
+    font: "beat",
+    button: [227, 5, 26],
+  },
+  orange: {
+    label: "Orange",
+    bg: "linear-gradient(180deg, rgba(240, 120, 20, 0.45) 0%, rgba(110, 45, 5, 0.3) 100%)",
+    title: "#ffae5c",
+    label2: "#ffc894",
+    text: "#fff0e0",
+    desc: "#d9a77a",
+    filter: "hue-rotate(-175deg) saturate(1.1) brightness(1.15)",
+    font: "default",
+    button: [200, 95, 20],
+  },
+  purple: {
+    label: "Purple",
+    bg: "linear-gradient(180deg, rgba(130, 40, 200, 0.42) 0%, rgba(50, 15, 80, 0.28) 100%)",
+    title: "#c58cff",
+    label2: "#d8b4ff",
+    text: "#f0e4ff",
+    desc: "#ab93c9",
+    filter: "hue-rotate(75deg)",
+    font: "default",
+    button: [110, 45, 170],
+  },
+};
+
+// Colors picked by hand over the theme's (ui.colors): the panel's background, the boxes (buttons and
+// dropdowns), toggles and sliders, the text. A list rather than a color wheel: easy with a controller.
+const PALETTE: Record<string, string> = {
+  "": "Theme's",
+  "#ffffff": "White",
+  "#b0b0b0": "Light gray",
+  "#606060": "Gray",
+  "#000000": "Black",
+  "#e3051a": "Red",
+  "#8b0000": "Dark red",
+  "#ff7a00": "Orange",
+  "#ffe600": "Yellow",
+  "#ffc940": "Gold",
+  "#2ecc40": "Green",
+  "#0b6623": "Dark green",
+  "#00b3a4": "Teal",
+  "#1e90ff": "Blue",
+  "#1a237e": "Navy",
+  "#8e44ad": "Purple",
+  "#ff4fa3": "Pink",
+};
+type Colors = { bg?: string; box?: string; toggle?: string; text?: string };
+
+const rgbOf = (hex: string): [number, number, number] => {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const lumOf = ([r, g, b]: [number, number, number]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+
+// Steam's toggles and sliders are blue (#1a9fff, hue 205): a filter turning that into `hex`. Fitted like the
+// themes' own (yellow: -148deg, 1.3, 1.4; red: 150deg, 1.6, 0.94); gray shades lose the color.
+const toggleFilter = (hex: string) => {
+  const [r, g, b] = rgbOf(hex).map((c) => c / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  const lum = lumOf(rgbOf(hex));
+  if (d < 0.08) return `saturate(0) brightness(${(0.35 + 1.5 * lum).toFixed(2)})`;
+  const h = (max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60;
+  const sat = d / (1 - Math.abs(max + min - 1));
+  return `hue-rotate(${Math.round(h - 205)}deg) saturate(${(0.4 + 1.1 * sat).toFixed(2)}) brightness(${(0.75 + 0.7 * lum).toFixed(2)})`;
+};
+
+// The theme with the hand-picked colors over it.
+const withColors = (name: string, c?: Colors): Theme | undefined => {
+  const base = THEMES[name];
+  if (!c || !Object.values(c).some(Boolean)) return base;
+  const t: Theme = { ...(base ?? { label: "" }) };
+  if (c.bg) {
+    const [r, g, b] = rgbOf(c.bg);
+    const dark = [r, g, b].map((x) => Math.round(x * 0.55)).join(", ");
+    t.bg = `linear-gradient(180deg, rgba(${r}, ${g}, ${b}, 0.62) 0%, rgba(${dark}, 0.46) 100%)`;
+  }
+  if (c.box) {
+    t.button = rgbOf(c.box);
+    t.buttonText = lumOf(t.button) > 0.6 ? "#1a1a1a" : undefined;
+  }
+  if (c.toggle) t.filter = toggleFilter(c.toggle);
+  if (c.text) {
+    const [r, g, b] = rgbOf(c.text);
+    t.title = t.label2 = t.text = c.text;
+    t.desc = `rgba(${r}, ${g}, ${b}, 0.72)`;
+  }
+  return t;
 };
 
 // Light color for RGB "Match theme color"; mirrors THEME_RGB in controller.py.
@@ -1405,6 +1522,10 @@ const THEME_RGB: Record<string, [number, number]> = {
   blue: [215, 100],
   green: [130, 100],
   gold: [42, 100],
+  beat: [0, 100],
+  yellowred: [50, 100],
+  orange: [28, 100],
+  purple: [280, 100],
 };
 
 // Free (OFL) fonts in the style of each game; the originals can't be bundled.
@@ -1439,6 +1560,12 @@ const FONTS: Record<string, { label: string; family?: string; fallback?: string;
     family: "HHGrenzeGotisch",
     fallback: "serif",
     about: "Grenze Gotisch, a gothic style",
+  },
+  beat: {
+    label: "Beat",
+    family: "HHOswald",
+    fallback: "sans-serif",
+    about: "Oswald, Rádio Beat's lettering",
   },
 };
 
@@ -1480,9 +1607,8 @@ const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
   `;
 };
 
-const themeCss = (name: string, hasImage: boolean) => {
-  const t = THEMES[name];
-  if (!t?.bg) return "";
+const themeCss = (t: Theme | undefined, hasImage: boolean) => {
+  if (!t || !(t.bg || t.text || t.filter || t.button)) return "";
   // With a background picture, keep the picture and only color the titles.
   const dlg = gamepadDialogClasses;
   const sl = gamepadSliderClasses;
@@ -1507,12 +1633,12 @@ const themeCss = (name: string, hasImage: boolean) => {
     `.hhctl-root [class*="gamepadslider_SliderControl_"]`,
   ].join(", ");
   return `
-    ${hasImage ? "" : `.hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }`}
-    ${texts} { color: ${t.text}; }
-    ${descs}, .hhctl-root .hhctl-readout > span:nth-child(-n + 6), .hhctl-root .hhctl-readout .hhctl-free { color: ${t.desc}; }
-    ${labels} { color: ${t.label2}; }
-    .hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel,
-    .hhctl-root .hhctl-readout b, .hhctl-root .hhctl-readout .hhctl-capped:not(.hhctl-free) { color: ${t.title}; }
+    ${hasImage || !t.bg ? "" : `.hhctl-root { background: ${t.bg}; border-radius: 8px; padding-bottom: 4px; }`}
+    ${t.text ? `${texts} { color: ${t.text}; }` : ""}
+    ${t.desc ? `${descs}, .hhctl-root .hhctl-readout > span:nth-child(-n + 6), .hhctl-root .hhctl-readout .hhctl-free { color: ${t.desc}; }` : ""}
+    ${t.label2 ? `${labels} { color: ${t.label2}; }` : ""}
+    ${t.title ? `.hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel,
+    .hhctl-root .hhctl-readout b, .hhctl-root .hhctl-readout .hhctl-capped:not(.hhctl-free) { color: ${t.title}; }` : ""}
     ${t.filter ? `${controls} { filter: ${t.filter}; }` : ""}
     ${t.button ? buttonCss(t.button, t.buttonText) : ""}
   `;
@@ -1601,9 +1727,13 @@ const glassFilter = (doc: Document, w: number, h: number, r: number) => {
 };
 
 // Gives each button its size's filter (or takes them off).
+const glassSized = new WeakMap<HTMLElement, string>();
 const glassButtons = (root: HTMLElement, on: boolean) => {
   root.querySelectorAll<HTMLElement>(GLASS_SEL).forEach((el) => {
     const w = el.offsetWidth, h = el.offsetHeight;
+    const was = `${on}${w}x${h}`;
+    if (glassSized.get(el) === was) return; // (the 2 s refresh: nothing changed, no style read)
+    glassSized.set(el, was);
     const want = on && w > 0 && h > 0
       ? `url(#${glassFilter(root.ownerDocument, w, h, Math.round(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0))}) saturate(1.25) brightness(1.06)`
       : "";
@@ -1614,9 +1744,9 @@ const glassButtons = (root: HTMLElement, on: boolean) => {
 // The glass look itself: thick and see-through. Barely tinted (the theme's button color, or none), its curved
 // side wall shaded, light catching the top edge (a bright line) and coming out at the bottom one (a fainter
 // line), a shadow below it. The focused button keeps Steam's own highlight.
-const glassCss = (rgb?: [number, number, number]) => {
+const glassCss = (rgb?: [number, number, number], strong = false, text?: string) => {
   const [r, g, b] = rgb ?? [255, 255, 255];
-  const tint = rgb ? 0.12 : 0.03;
+  const tint = strong ? 0.7 : rgb ? 0.12 : 0.03; // (a boxes color picked by hand: clearly that color)
   const btn = ["DialogButton", "DropDownControlButton"]
     .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible)`)
     .concat([".hhctl-root select"])
@@ -1633,8 +1763,8 @@ const glassCss = (rgb?: [number, number, number]) => {
         inset 0 1.5px 1px rgba(255, 255, 255, 0.85), inset 1px 2px 4px rgba(255, 255, 255, 0.14),
         inset 0 -1.5px 1.5px rgba(255, 255, 255, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.12),
         0 4px 10px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35) !important;
-      color: #fff !important;
-      text-shadow: -1px 1px 1px rgba(0, 0, 0, 0.9), -1px 2px 4px rgba(0, 0, 0, 0.6); /* left and bottom */
+      color: ${strong && text ? text : "#fff"} !important;
+      text-shadow: ${strong && text ? "none" : "-1px 1px 1px rgba(0, 0, 0, 0.9), -1px 2px 4px rgba(0, 0, 0, 0.6)"}; /* left and bottom */
     }
     ${hover} { background: rgba(${r}, ${g}, ${b}, ${tint + 0.08}) !important; }
   `;
@@ -1685,7 +1815,7 @@ function ErrorRow({ msg }: { msg?: string }) {
 const DEFAULT_POS: BgPos = { x: 50, y: 50, zoom: 100 };
 
 // The title bar lives outside the panel; it follows the theme through this.
-let themeNow = "gold";
+let themeTitle: string | undefined = THEMES.gold.title;
 const themeListeners = new Set<() => void>();
 
 // Where the settings were scrolled to: kept while picking a picture and
@@ -1923,7 +2053,7 @@ function Content() {
     setViewRaw(v);
     if (v === "main")
       requestAnimationFrame(() => {
-        if (bodyRef.current) bodyRef.current.scrollTop = savedScroll;
+        bodyRef.current?.scrollTo({ top: savedScroll, behavior: "instant" });
         backTo.current?.focus?.();
       });
   };
@@ -1935,7 +2065,19 @@ function Content() {
     };
   }, []);
 
+  // Glass off while it scrolls, back 150 ms after the last step.
+  const scrollIdle = useRef(0);
+  const scrolling = () => {
+    const root = rootRef.current;
+    if (!root) return;
+    root.classList.add("hhctl-scrolling");
+    clearTimeout(scrollIdle.current);
+    scrollIdle.current = window.setTimeout(() => root.classList.remove("hhctl-scrolling"), 150);
+  };
+
   const refresh = async () => {
+    // Nothing to show while HHC Desktop's window is hidden (minimized, another workspace): no work.
+    if ((window as any).HHC_DESKTOP && document.hidden) return;
     const s = await getState();
     setState(s);
     // Don't clobber a slider the user is still dragging.
@@ -2012,10 +2154,11 @@ function Content() {
   // Size the panel to the QAM's visible area: the header stays put and only
   // the settings below it scroll.
   const themeName = state?.settings.ui?.theme ?? "default";
+  const titleNow = withColors(themeName, state?.settings.ui?.colors)?.title;
   useEffect(() => {
-    themeNow = themeName;
+    themeTitle = titleNow;
     themeListeners.forEach((f) => f());
-  }, [themeName]);
+  }, [titleNow]);
 
   const loaded = !!state;
   useEffect(() => {
@@ -2048,7 +2191,7 @@ function Content() {
     };
     fit();
     fitRef.current = fit;
-    if (bodyRef.current) bodyRef.current.scrollTop = savedScroll; // reopened: back where it was
+    bodyRef.current?.scrollTo({ top: savedScroll, behavior: "instant" }); // reopened: back where it was
     const ro = new ResizeObserver(fit);
     ro.observe(sc);
     // On the first open Decky's previous page is still sliding out, so the
@@ -2165,6 +2308,8 @@ function Content() {
   const r = draft.rgb;
 
   const theme = draft.ui?.theme ?? "default";
+  const colors: Colors = draft.ui?.colors ?? {};
+  const look = withColors(theme, colors);
   // The device's (firmware) name on its own row on top, so long names
   // ("ONEXPLAYER F1 EVA-02") fit whole; the CPU model next to the TDP below. When the name
   // is the CPU (BIOS placeholders), it stays a single row.
@@ -2187,12 +2332,12 @@ function Content() {
       }}
     >
       <style>{READOUT_CSS}</style>
-      <style>{themeCss(theme, !!bgUrl)}</style>
+      <style>{themeCss(look, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
-      {glassOn && <style>{glassCss(THEMES[theme]?.button)}</style>}
+      {glassOn && <style>{glassCss(look?.button, !!colors.box, look?.buttonText)}</style>}
       <div className="hhctl-header">
         {splitName && (
-          <div className="hhctl-device hhctl-name" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
+          <div className="hhctl-device hhctl-name" style={{ color: look?.title ?? "#ffffff" }}>
             {deviceName}
           </div>
         )}
@@ -2200,7 +2345,7 @@ function Content() {
           {splitName ? (
             <span className="hhctl-cpu">{cpuLine}</span>
           ) : (
-            <span className="hhctl-device" style={{ color: THEMES[theme]?.title ?? "#ffffff" }}>
+            <span className="hhctl-device" style={{ color: look?.title ?? "#ffffff" }}>
               {deviceName}
             </span>
           )}
@@ -2243,9 +2388,12 @@ function Content() {
         className="hhctl-body"
         onScroll={(ev) => {
           if (view === "main") savedScroll = (ev.target as HTMLElement).scrollTop;
+          scrolling();
         }}
-        // D-pad focus: keep the focused setting inside the scroll area.
-        onFocus={(ev) => fitHeight && (ev.target as HTMLElement).scrollIntoView?.({ block: "nearest" })}
+        // D-pad focus: keep the focused setting inside the scroll area (gliding there, not jumping).
+        onFocus={(ev) =>
+          fitHeight && (ev.target as HTMLElement).scrollIntoView?.({ block: "nearest", behavior: "smooth" })
+        }
       >
         {view === "pick" && (
           <PicturePicker
@@ -3517,6 +3665,24 @@ function Content() {
                 onChange={(o) => change("ui", { font: o.data }, 0)}
               />
             </PanelSectionRow>
+            {(
+              [
+                ["bg", "Background color", "The panel's color (under a background picture it doesn't show)"],
+                ["box", "Boxes color", "Buttons and dropdowns"],
+                ["toggle", "Toggles color", "Toggles and sliders"],
+                ["text", "Font color", "Headlines, setting names, values and descriptions (a little dimmer)"],
+              ] as [keyof Colors, string, string][]
+            ).map(([key, label, about]) => (
+              <PanelSectionRow key={key}>
+                <DropdownItem
+                  label={label}
+                  description={`${about}. Theme's: as the theme has it`}
+                  rgOptions={Object.entries(PALETTE).map(([data, name]) => ({ data, label: name }))}
+                  selectedOption={colors[key] ?? ""}
+                  onChange={(o) => change("ui", { colors: { ...colors, [key]: o.data || undefined } }, 0)}
+                />
+              </PanelSectionRow>
+            ))}
             <PanelSectionRow>
               <ToggleField
                 label="Glass buttons"
@@ -3649,9 +3815,9 @@ function Content() {
 // Decky keeps the title bar fixed above the panel; the version sits next to the name.
 function TitleView() {
   const [version, setVersion] = useState<string | null>(null);
-  const [color, setColor] = useState(THEMES[themeNow]?.title);
+  const [color, setColor] = useState(themeTitle);
   useEffect(() => {
-    const on = () => setColor(THEMES[themeNow]?.title);
+    const on = () => setColor(themeTitle);
     themeListeners.add(on);
     return () => {
       themeListeners.delete(on);
