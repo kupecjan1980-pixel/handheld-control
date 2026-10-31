@@ -1854,11 +1854,11 @@ const imageStyle = (
 
 const titleCase = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-function Unavailable({ why }: { why: string }) {
+function Unavailable({ why, what }: { why: string; what?: string }) {
   return (
     <PanelSectionRow>
       <div className="hhctl-unavail">
-        <Field label="Unavailable" description={why} />
+        <Field label={what ? `${what} unavailable` : "Unavailable"} description={why} />
       </div>
     </PanelSectionRow>
   );
@@ -2540,7 +2540,7 @@ function Content() {
           <GameProfileRows state={state} setState={setState} />
           <PanelSection>
             {!tdp.backend ? (
-              <Unavailable why="No TDP interface found (firmware-attributes, RAPL, ryzenadj or the AMD SMU)." />
+              <Unavailable what="TDP" why="No TDP interface found (firmware-attributes, RAPL, ryzenadj or the AMD SMU)." />
             ) : (
               <>
                 <PanelSectionRow>
@@ -2958,10 +2958,11 @@ function Content() {
           <PanelSection>
             {!fan.backend ? (
               <Unavailable
+                what="FAN"
                 why={
                   fan.restarting
                     ? `Fan control stopped (${fan.unavailable}); the firmware runs the fan and the plugin takes it up again in a moment`
-                    : `Fan: ${fan.unavailable ?? "no fan control"}`
+                    : (fan.unavailable ?? "no fan control").replace(/^Fan: /, "")
                 }
               />
             ) : (
@@ -3061,6 +3062,11 @@ function Content() {
           </PanelSection>
 
           <PanelSection>
+            {/* No battery and nothing to control: one row, "BATT unavailable" with the reason. */}
+            {battery.unavailable && !battery.limit_mode && battery.capacity == null ? (
+              <Unavailable what="BATT" why="No battery found." />
+            ) : (
+            <>
             <PanelSectionRow>
               {/* A plain full-width row: in a Field the values only get the right-hand
                   part and the watts were cut off. Kept 3 characters in from the edge. */}
@@ -3078,7 +3084,7 @@ function Content() {
               </div>
             </PanelSectionRow>
             {battery.unavailable && !battery.limit_mode ? (
-              <Unavailable why={battery.unavailable} />
+              <Unavailable what="Charge control" why={battery.unavailable} />
             ) : (
               <>
                 {battery.limit_mode && (
@@ -3114,12 +3120,14 @@ function Content() {
                 )}
               </>
             )}
+            </>
+            )}
             <ErrorRow msg={state.errors.battery} />
           </PanelSection>
 
           <PanelSection>
             {!rgb.backend ? (
-              <Unavailable why="No RGB controller found." />
+              <Unavailable what="RGB" why="No RGB controller found." />
             ) : (
               <>
                 <PanelSectionRow>
