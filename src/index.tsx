@@ -1575,7 +1575,7 @@ const fontCss = (name: string, faces: string | null) => {
 
 // Buttons (Check for updates, ...) and dropdowns in a shade of the theme.
 // The focused one keeps Steam's own highlight, so gamepad focus stays obvious.
-const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
+const buttonCss = ([r, g, b]: [number, number, number], text?: string, themeText?: string) => {
   const btn = ["DialogButton", "DropDownControlButton"]
     .map((c) => `.hhctl-root [class*="${c}"]:not(.gpfocus):not(:focus-visible)`)
     .join(", ");
@@ -1589,9 +1589,9 @@ const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
   // instead of the system blue.
   const a = text ? 0.9 : 0.55;
   const solid = [r, g, b].map((c) => Math.round(c * a + 24 * (1 - a))).join(", ");
-  const fg = text ?? "#fff";
+  const fg = text ?? themeText ?? "#fff";
   return `
-    ${btn}, .hhctl-root select { background: rgba(${r}, ${g}, ${b}, ${a}) !important;${text ? ` color: ${text} !important;` : ""} }
+    ${btn}, .hhctl-root select { background: rgba(${r}, ${g}, ${b}, ${a}) !important; color: ${fg} !important; }
     ${hover}, .hhctl-root select:hover { background: rgba(${r}, ${g}, ${b}, ${text ? 1 : 0.8}) !important; }
     .hhctl-root [class*="DropDownControlButton"]:disabled, .hhctl-root select:disabled { opacity: 0.5; cursor: default; }
     .hhctl-root .hhctl-off { opacity: 0.5; pointer-events: none; }
@@ -1620,6 +1620,17 @@ const SHADOW_CSS = `
   .hhctl-root .hhctl-tile span { text-shadow: none; }
   .hhctl-root [class*="DialogButton"] *, .hhctl-root [class*="DropDownControlButton"] *, .hhctl-root select *
     { text-shadow: inherit; } /* buttons keep their own (none on light buttons with dark text) */
+`;
+
+// Dropdown lists with no theme shade (the default theme): black with white text, never the system's white
+// (white names on white). A theme's own shade (buttonCss, later) replaces it.
+const SELECT_CSS = `
+  .hhctl-root select option { background: #000; color: #fff; }
+  @supports (appearance: base-select) {
+    .hhctl-root select, .hhctl-root select::picker(select) { appearance: base-select; }
+    .hhctl-root select::picker(select) { background: #000; color: #fff; border: 0; border-radius: 3px; }
+    .hhctl-root select option:is(:hover, :focus, :checked) { background: #3d4450; color: #fff; outline: none; }
+  }
 `;
 
 const themeCss = (t: Theme | undefined, hasImage: boolean) => {
@@ -1655,7 +1666,7 @@ const themeCss = (t: Theme | undefined, hasImage: boolean) => {
     ${t.title ? `.hhctl-root .${staticClasses.PanelSectionTitle}, .hhctl-root .hhctl-headlabel,
     .hhctl-root .hhctl-readout b, .hhctl-root .hhctl-readout .hhctl-capped:not(.hhctl-free) { color: ${t.title}; }` : ""}
     ${t.filter ? `${controls} { filter: ${t.filter}; }` : ""}
-    ${t.button ? buttonCss(t.button, t.buttonText) : ""}
+    ${t.button ? buttonCss(t.button, t.buttonText, t.text) : ""}
   `;
 };
 
@@ -1664,7 +1675,8 @@ const themeCss = (t: Theme | undefined, hasImage: boolean) => {
 // other way (they show what lies beyond, squeezed in), so it reads as a thick drop of glass. Chromium does it
 // with an SVG displacement map as the backdrop-filter; the map depends on the button's size, so each size gets
 // its own filter, in the document the panel is in (Steam's Quick Access window, or HHC Desktop's page).
-const GLASS_SEL = '[class*="DialogButton"], [class*="DropDownControlButton"], select';
+const GLASS_SEL = '[class*="DialogButton"], [class*="DropDownControlButton"], select, ' +
+  '[class*="gamepaddialog_ToggleRail_"], [class*="gamepaddialog_ToggleSwitch_"], [class*="gamepadslider_SliderHandle_"]';
 const GLASS_MAG = 1.25; // the middle's magnification
 const GLASS_REACH = 0.45; // how far beyond its edge it shows, in half its smaller side
 const GLASS_CURVE = 1.7; // how the magnification falls off from the middle (higher: flatter middle)
@@ -1756,10 +1768,15 @@ const glassButtons = (root: HTMLElement, on: boolean) => {
   });
 };
 
+// A glass edge: the curved wall shaded, light along the top edge and out through the bottom one.
+const GLASS_EDGE = "inset 0 0 6px rgba(0, 0, 0, 0.3), inset -1px -2px 4px rgba(0, 0, 0, 0.3), " +
+  "inset 0 1.5px 1px rgba(255, 255, 255, 0.85), inset 0 -1px 1px rgba(255, 255, 255, 0.35), " +
+  "inset 0 0 0 1px rgba(255, 255, 255, 0.12)";
+
 // The glass look itself: thick and see-through. Barely tinted (the theme's button color, or none), its curved
 // side wall shaded, light catching the top edge (a bright line) and coming out at the bottom one (a fainter
 // line), a shadow below it. The focused button keeps Steam's own highlight.
-const glassCss = (rgb?: [number, number, number], strong = false, text?: string) => {
+const glassCss = (rgb?: [number, number, number], strong = false, text?: string, themeText?: string) => {
   const [r, g, b] = rgb ?? [255, 255, 255];
   const tint = strong ? 0.7 : rgb ? 0.12 : 0.03; // (a boxes color picked by hand: clearly that color)
   const btn = ["DialogButton", "DropDownControlButton"]
@@ -1778,10 +1795,24 @@ const glassCss = (rgb?: [number, number, number], strong = false, text?: string)
         inset 0 1.5px 1px rgba(255, 255, 255, 0.85), inset 1px 2px 4px rgba(255, 255, 255, 0.14),
         inset 0 -1.5px 1.5px rgba(255, 255, 255, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.12),
         0 4px 10px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35) !important;
-      color: ${strong && text ? text : "#fff"} !important;
-      text-shadow: ${strong && text ? "none" : "-1px 1px 1px rgba(0, 0, 0, 0.9), -1px 2px 4px rgba(0, 0, 0, 0.6)"}; /* left and bottom */
+      color: ${text ?? themeText ?? "#fff"} !important;
+      text-shadow: ${text ? "none" : "-1px 1px 1px rgba(0, 0, 0, 0.9), -1px 2px 4px rgba(0, 0, 0, 0.6)"}; /* left and bottom */
     }
     ${hover} { background: rgba(${r}, ${g}, ${b}, ${tint + 0.08}) !important; }
+    /* Toggles and sliders in the same glass: see-through rails and knobs, the bevelled edge, the shadow */
+    .hhctl-root [class*="gamepaddialog_ToggleRail_"] {
+      background: rgba(255, 255, 255, 0.08) !important; box-shadow: ${GLASS_EDGE}, ${SHADOW} !important;
+    }
+    .hhctl-root [class*="gamepaddialog_On_"] [class*="gamepaddialog_ToggleRail_"] {
+      background: rgba(26, 159, 255, 0.6) !important; /* Steam's blue, see-through (the theme filter recolors it) */
+    }
+    .hhctl-root [class*="gamepaddialog_ToggleSwitch_"], .hhctl-root [class*="gamepadslider_SliderHandle_"] {
+      background: rgba(255, 255, 255, 0.55) !important; box-shadow: ${GLASS_EDGE}, ${SHADOW} !important;
+    }
+    .hhctl-root input[type="range"]::-webkit-slider-thumb {
+      background: rgba(255, 255, 255, 0.55) !important; box-shadow: ${GLASS_EDGE}, ${SHADOW} !important;
+    }
+    .hhctl-root [class*="gamepadslider_SliderTrack_"] { box-shadow: ${GLASS_EDGE}, ${SHADOW} !important; }
   `;
 };
 
@@ -2338,9 +2369,10 @@ function Content() {
     >
       <style>{READOUT_CSS}</style>
       <style>{SHADOW_CSS}</style>
+      <style>{SELECT_CSS}</style>
       <style>{themeCss(look, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
-      {glassOn && <style>{glassCss(look?.button, !!colors.box, look?.buttonText)}</style>}
+      {glassOn && <style>{glassCss(look?.button, !!colors.box, look?.buttonText, look?.text)}</style>}
       <div className="hhctl-header">
         {splitName && (
           <div className="hhctl-device hhctl-name" style={{ color: look?.title ?? "#ffffff" }}>
