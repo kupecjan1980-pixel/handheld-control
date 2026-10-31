@@ -1604,6 +1604,24 @@ const buttonCss = ([r, g, b]: [number, number, number], text?: string) => {
   `;
 };
 
+// The letters' shadow (down and left: a tight dark one and a soft one) on all text, toggles and sliders, as on
+// Rádio Beat: they stand out from the picture in 3D. Steam's class names, plus HHC Desktop's stand-ins.
+const SHADOW = "-1px 2px 1px rgba(0, 0, 0, 0.9), -2px 3px 5px rgba(0, 0, 0, 0.65)";
+const SHADOW_CSS = `
+  .hhctl-root [class*="gamepaddialog_FieldLabel_"], .hhctl-root [class*="gamepaddialog_FieldDescription_"],
+  .hhctl-root [class*="gamepaddialog_FieldChildren_"], .hhctl-root [class*="gamepadslider_"],
+  .hhctl-root [class*="PanelSectionTitle"], .hhctl-root .hhctl-readout, .hhctl-root .hhctl-tdp,
+  .hhctl-root .hhctl-cpu, .hhctl-root .hhctl-headlabel, .hhctl-root .hhctl-statusrow,
+  .hhctl-root label, .hhctl-root span, .hhctl-root b, .hhctl-root div { text-shadow: ${SHADOW}; }
+  .hhctl-root [class*="gamepaddialog_ToggleRail_"], .hhctl-root [class*="gamepaddialog_ToggleSwitch_"],
+  .hhctl-root [class*="gamepadslider_SliderTrack_"], .hhctl-root [class*="gamepadslider_SliderHandle_"],
+  .hhctl-root [class*="gamepadslider_SliderNotch_"] { box-shadow: ${SHADOW}; }
+  .hhctl-root input[type="range"]::-webkit-slider-thumb { box-shadow: ${SHADOW}; }
+  .hhctl-root .hhctl-tile span { text-shadow: none; }
+  .hhctl-root [class*="DialogButton"] *, .hhctl-root [class*="DropDownControlButton"] *, .hhctl-root select *
+    { text-shadow: inherit; } /* buttons keep their own (none on light buttons with dark text) */
+`;
+
 const themeCss = (t: Theme | undefined, hasImage: boolean) => {
   if (!t || !(t.bg || t.text || t.filter || t.button)) return "";
   // With a background picture, keep the picture and only color the titles.
@@ -2319,6 +2337,7 @@ function Content() {
       }}
     >
       <style>{READOUT_CSS}</style>
+      <style>{SHADOW_CSS}</style>
       <style>{themeCss(look, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
       {glassOn && <style>{glassCss(look?.button, !!colors.box, look?.buttonText)}</style>}
