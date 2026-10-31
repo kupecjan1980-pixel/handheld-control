@@ -1622,6 +1622,19 @@ const SHADOW_CSS = `
     { text-shadow: inherit; } /* buttons keep their own (none on light buttons with dark text) */
 `;
 
+// What's grayed out (unavailable, or waiting for another switch) stays flat: no shadow, no glass edge, no lens.
+// The id in the selector outranks the shadow and glass rules, whatever their own weight.
+const FLAT = ".hhctl-root:not(#hhctl-flat)";
+const FLAT_CSS = `
+  ${[".hhctl-off", ".hhctl-unavail", '[class*="gamepaddialog_Disabled_"]', ":disabled", '[aria-disabled="true"]',
+     '[class*="gamepaddialog_Field_"]:has(:disabled)', '[class*="gamepaddialog_Field_"]:has([aria-disabled="true"])']
+    .flatMap((x) => [`${FLAT} ${x}`, `${FLAT} ${x} *`]).join(", ")} {
+    text-shadow: none !important; box-shadow: none !important; backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  ${FLAT} input:disabled::-webkit-slider-thumb { box-shadow: none !important; }
+`;
+
 // Dropdown lists with no theme shade (the default theme): black with white text, never the system's white
 // (white names on white). A theme's own shade (buttonCss, later) replaces it.
 const SELECT_CSS = `
@@ -1844,7 +1857,9 @@ const titleCase = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.
 function Unavailable({ why }: { why: string }) {
   return (
     <PanelSectionRow>
-      <Field label="Unavailable" description={why} />
+      <div className="hhctl-unavail">
+        <Field label="Unavailable" description={why} />
+      </div>
     </PanelSectionRow>
   );
 }
@@ -2373,6 +2388,7 @@ function Content() {
       <style>{themeCss(look, !!bgUrl)}</style>
       <style>{fontCss(fontName, fontFaces)}</style>
       {glassOn && <style>{glassCss(look?.button, !!colors.box, look?.buttonText, look?.text)}</style>}
+      <style>{FLAT_CSS}</style>
       <div className="hhctl-header">
         {splitName && (
           <div className="hhctl-device hhctl-name" style={{ color: look?.title ?? "#ffffff" }}>
