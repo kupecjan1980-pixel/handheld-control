@@ -57,8 +57,11 @@ FRAMEGEN = "FrameGen.Enabled=true;FrameGen.FGInput=upscaler;FrameGen.FGOutput=fs
 
 def optiscaler_vars(gpu_driver: str | None, gc: int | None, framegen: bool = False) -> str:
     """Launch-option prefix: XeSS on Intel, else FSR 3.1 (FSR 4 on RDNA 3+)."""
-    up = "xess" if gpu_driver in ("xe", "i915") else "fsr31"
+    intel = gpu_driver in ("xe", "i915")
+    up = "xess" if intel else "fsr31"
     conf = f"Upscalers.Dx11Upscaler={up};Upscalers.Dx12Upscaler={up}" + (f";{FRAMEGEN}" if framegen else "")
+    if intel:  # Arc posing as Nvidia (for DLSS) flickers with rainbow artifacts: the game's XeSS / FSR feed it instead
+        conf += ";Spoofing.Dxgi=false"
     out = f'PROTON_USE_OPTISCALER=1 PROTON_OPTISCALER_CONFIG="{conf}"'
     if up == "fsr31" and gc is not None and gc >= 11:
         out += " PROTON_FSR4_UPGRADE=1"
@@ -79,6 +82,7 @@ class Upscale:
         self.rdna3 = gc == 11
         self.optiscaler = optiscaler_vars(gpu_driver, gc)
         self.optiscaler_fg = optiscaler_vars(gpu_driver, gc, framegen=True)
+        self.intel = gpu_driver in ("xe", "i915")
         self.opti_upscaler = "XeSS" if gpu_driver in ("xe", "i915") else ("FSR 4" if gc is not None and gc >= 11 else "FSR 3.1")
 
     def current(self) -> dict[str, bool]:
@@ -113,7 +117,7 @@ class Upscale:
     def state(self) -> dict:
         return {"options": self.options, "on": self.current(), "rdna3": self.rdna3, "fsr4_why": self.fsr4_why,
                 "tools": proton_tools(self.home), "optiscaler": self.optiscaler, "optiscaler_fg": self.optiscaler_fg,
-                "opti_upscaler": self.opti_upscaler}
+                "opti_upscaler": self.opti_upscaler, "intel": self.intel}
 
 
 # What the running game actually got, from its processes: which Proton runs

@@ -213,6 +213,7 @@ type State = {
     optiscaler: string;
     optiscaler_fg: string;
     opti_upscaler: string;
+    intel?: boolean;
   };
   lsfg?: { installed: boolean; ours: boolean; dll: string | null; branch: boolean; vars: Record<string, string>; busy: boolean };
   vram: {
@@ -730,15 +731,15 @@ async function matchProton(appid: number, info: AppInfo, opti: boolean): Promise
   if (!apps?.SpecifyCompatTool) return { ...keep, note: "" };
   if (opti) {
     if (CACHYOS.test(info.tool)) return { ...keep, note: "" };
-    if (!info.tool && info.linux)
-      return { ...keep, note: "Not switched to Proton-CachyOS: this is the native Linux version, which OptiScaler can't load into (switching would download the Windows version)." };
+    const native = !info.tool && info.linux; // OptiScaler only loads into the Windows version: Steam fetches it
     const tools: { strToolName: string; strDisplayName: string }[] = (await apps.GetAvailableCompatTools?.(appid).catch(() => [])) ?? [];
     const pick = tools.filter((x) => CACHYOS.test(x.strToolName) || CACHYOS.test(x.strDisplayName)).sort((a, b) => b.strToolName.localeCompare(a.strToolName))[0];
     if (!pick) return { ...keep, note: "Proton-CachyOS isn't installed, so the game stays on its Proton and OptiScaler won't load: install Proton-CachyOS (e.g. with ProtonUp-Qt), then turn this off and on." };
     if (storeGet(PREV_TOOL(appid)) === null) storeSet(PREV_TOOL(appid), info.tool);
     apps.SpecifyCompatTool(appid, pick.strToolName);
-    const was = info.toolLabel || "Steam's default Proton";
-    return { tool: pick.strToolName, toolLabel: pick.strDisplayName, note: `Switched the game from ${was} to ${pick.strDisplayName}; turning OptiScaler off puts ${was} back.` };
+    const was = native ? "its native Linux version" : info.toolLabel || "Steam's default Proton";
+    const fetch = native ? " Steam downloads the Windows version first (OptiScaler can't load into the Linux one)." : "";
+    return { tool: pick.strToolName, toolLabel: pick.strDisplayName, note: `Switched the game from ${was} to ${pick.strDisplayName};${fetch} turning OptiScaler off puts ${was} back.` };
   }
   const prev = storeGet(PREV_TOOL(appid));
   if (prev === null) return { ...keep, note: "" };
@@ -810,7 +811,21 @@ function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; 
   useEffect(() => {
     const g = targetGame();
     setGame(g);
-    if (g) appInfo(g.appid).then(setInfo);
+    if (g)
+      appInfo(g.appid).then((i) => {
+        // OptiScaler set by an older HHC: brought up to today's settings (e.g. no Nvidia spoofing on Intel)
+        if (i && OPTI_VAR.test(i.opts)) {
+          const want = FG_ON.test(i.opts) ? u.optiscaler_fg : u.optiscaler;
+          const ls = i.opts.match(LSFG_MULT)?.[2];
+          const next = withOptions(i.opts, want, ls ? l?.vars[ls] ?? null : null);
+          if (!i.opts.includes(want) && (window as any).SteamClient?.Apps?.SetAppLaunchOptions) {
+            (window as any).SteamClient.Apps.SetAppLaunchOptions(g.appid, next);
+            i = { ...i, opts: next };
+            setNote(g.running ? "OptiScaler settings updated: restart the game." : "OptiScaler settings updated.");
+          }
+        }
+        setInfo(i);
+      });
   }, []);
   const opts = info?.opts ?? null;
   if (!(window as any).SteamClient?.Apps?.SetAppLaunchOptions) {
@@ -832,7 +847,8 @@ function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; 
       </PanelSectionRow>
     );
   }
-  const base = `Swaps the upscaler the game asks for (pick DLSS, FSR or XeSS in its settings) for ${u.opti_upscaler}. Needs Proton-CachyOS for the game: HHC switches the game to it and back. It loads into the game, so don't use it in online games with anti-cheat (ban risk).`;
+  const pickIn = u.intel ? "pick XeSS or FSR in its settings: DLSS isn't offered on Intel, since posing as Nvidia makes Arc flicker" : "pick DLSS, FSR or XeSS in its settings";
+  const base = `Swaps the upscaler the game asks for (${pickIn}) for ${u.opti_upscaler}. Needs Proton-CachyOS for the game: HHC switches the game to it and back. It loads into the game, so don't use it in online games with anti-cheat (ban risk).`;
   if (!game || opts === null || !info) {
     return (
       <PanelSectionRow>
@@ -868,7 +884,7 @@ function OptiscalerRow({ u, l, now }: { u: State["upscale"]; l?: State["lsfg"]; 
     game.running ? upscaleNow(kind, isOn, now.game, now.st) : isOn ? ` Now: set; takes effect when you ${start}.` : "";
   const howto: Record<string, string> = {
     off: `How to: pick a mode, then ${start}.`,
-    fsr: `How to: ${start}, then turn on an upscaler (DLSS, FSR or XeSS) in its settings; frame generation is fed from it. DirectX 12 games with Proton-CachyOS only; don't use it with anti-cheat. The HUD can smear a little.`,
+    fsr: `How to: ${start}, then turn on an upscaler (${u.intel ? "XeSS or FSR" : "DLSS, FSR or XeSS"}) in its settings; frame generation is fed from it. DirectX 12 games with Proton-CachyOS only; don't use it with anti-cheat. The HUD can smear a little.`,
     ls2: `How to: ${start}; nothing else to set. Works with any Proton. Steam's fps counter shows the rendered frames, not the generated ones.`,
     ls3: `How to: ${start}; nothing else to set. 3× needs a steady base fps (about 40+); otherwise use 2×.`,
   };
