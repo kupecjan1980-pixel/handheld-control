@@ -100,7 +100,9 @@ def main() -> None:
     plugin = plugin_main.Plugin()
 
     def own_settings():
-        # Root writes the settings; keep them the desktop user's.
+        # Root writes the settings; keep them the desktop user's (not the plugin's, shared: Decky's own as they are).
+        if getattr(decky, "SHARED_WITH_PLUGIN", False):
+            return
         for d, _, files in os.walk(decky.DECKY_PLUGIN_SETTINGS_DIR):
             for p in [d, *(os.path.join(d, f) for f in files)]:
                 try:

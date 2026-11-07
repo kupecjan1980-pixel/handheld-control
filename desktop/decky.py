@@ -11,9 +11,20 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DECKY_PLUGIN_DIR = ROOT
 DECKY_USER_HOME = os.environ.get("HHC_USER_HOME") or os.path.expanduser("~")
-DECKY_PLUGIN_SETTINGS_DIR = os.environ.get("HHC_SETTINGS_DIR") or os.path.join(
-    DECKY_USER_HOME, ".config", "handheld-control-desktop"
-)
+def _settings_dir() -> str:
+    """The Steam plugin's own settings when it's installed here (one file for both: what's changed in one is in
+    the other), else HHC Desktop's."""
+    if os.environ.get("HHC_SETTINGS_DIR"):
+        return os.environ["HHC_SETTINGS_DIR"]
+    for name in ("handheld-control", "Handheld Control"):
+        d = os.path.join(DECKY_USER_HOME, "homebrew", "settings", name)
+        if os.path.isfile(os.path.join(d, "settings.json")):
+            return d
+    return os.path.join(DECKY_USER_HOME, ".config", "handheld-control-desktop")
+
+
+DECKY_PLUGIN_SETTINGS_DIR = _settings_dir()
+SHARED_WITH_PLUGIN = "homebrew" in DECKY_PLUGIN_SETTINGS_DIR.split(os.sep)
 with open(os.path.join(ROOT, "package.json")) as f:
     DECKY_PLUGIN_VERSION = json.load(f).get("version")
 

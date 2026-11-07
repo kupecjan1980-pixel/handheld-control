@@ -177,6 +177,7 @@ class Controller:
         self.dev = detect()
         self.cpu_model = cpu_model()
         self.settings = self._load()
+        self._settings_mtime = self._file_mtime()
         self.game: tuple[str, str] | None = None  # running Steam game: (appid, name)
         self.pre_game: dict | None = None  # settings when a game without a profile started
         for prof in self.settings["games"]["profiles"].values():
@@ -312,12 +313,39 @@ class Controller:
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
-        tmp = self.settings_path + ".tmp"
+        tmp = self.settings_path + f".tmp{os.getpid()}"  # (two writers, the plugin and HHC Desktop: each its own)
         with open(tmp, "w") as f:
             json.dump(self.settings, f, indent=2)
         os.replace(tmp, self.settings_path)
+        self._settings_mtime = self._file_mtime()
+
+    def _file_mtime(self) -> float:
+        try:
+            return os.stat(self.settings_path).st_mtime_ns
+        except (OSError, AttributeError):  # (no file: a test's bare controller)
+            return 0
+
+    def sync_settings(self) -> None:
+        """The Steam plugin and HHC Desktop share one settings file: what the other changed is taken here too, and
+        put into effect (the sections that changed), instead of each putting back its own (they fought over the
+        hardware, the last one to apply winning)."""
+        now = self._file_mtime()
+        if not now or now == getattr(self, "_settings_mtime", now):
+            return
+        self._settings_mtime = now
+        new = self._load()
+        changed = [k for k in new if new.get(k) != self.settings.get(k)]
+        if not changed:
+            return
+        log.info("settings changed by the other HHC (plugin / desktop): %s", ", ".join(changed))
+        self.settings = new
+        for section in changed:
+            fn = getattr(self, f"apply_{section}", None)
+            if fn:
+                self._guard(section, fn)
 
     def update(self, section: str, values: dict) -> dict:
+        self.sync_settings()  # (the other HHC's latest first: its changes aren't written over)
         if section == "fan" and not self.fan and self.fan_why:
             self.fan_restarts, self.fan_retry_at = [], time.monotonic()  # picked again: try now
         if section == "controller" and "ip_target" in values:
@@ -1641,6 +1669,7 @@ class Controller:
         self.fan_note = f"Fan control restarted by itself at {time.strftime('%H:%M')} after: {last}"
 
     def tick(self) -> None:
+        self.sync_settings()
         self.tick_fan_restart()
         self.tick_wake()
         self.gpu.sample()
