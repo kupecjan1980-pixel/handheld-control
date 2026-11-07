@@ -46,6 +46,16 @@ else
     TOKEN=$(cat "$TOKEN_FILE")
 fi
 
+# Its own window (WebKitGTK) when that's here: closing it minimises it to its taskbar icon (a browser window
+# can't be kept from closing). Quit: Ctrl+Q.
+SHELL_PY="$DIR/shell.py"
+[ -f "$SHELL_PY" ] || SHELL_PY=/opt/handheld-control-desktop/desktop/shell.py  # (this launcher is a copy in /usr/local/bin)
+if [ -f "$SHELL_PY" ] && python3 -c 'import gi; gi.require_version("WebKit2", "4.1")' 2>/dev/null; then
+    nice -n 10 python3 "$SHELL_PY" "$URL/?token=$TOKEN" >/dev/null 2>&1 || true
+    curl -s -m 10 -X POST -H "X-HHC-Token: $TOKEN" "$URL/quit" >/dev/null || true
+    [ -n "${SERVER:-}" ] && wait "$SERVER" || true
+    exit 0
+fi
 if [ ${#APP[@]} = 0 ]; then
     say "No Chromium-based browser found. Install one, e.g.  flatpak install flathub org.chromium.Chromium"
     [ -n "${SERVER:-}" ] && kill "$SERVER" 2>/dev/null

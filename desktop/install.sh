@@ -49,7 +49,7 @@ systemctl stop hhc-desktop.service 2>/dev/null || true
 rm -rf "$DEST.new"
 mkdir -p "$DEST.new/desktop"
 cp -r "$REPO/plugin.json" "$REPO/main.py" "$REPO/package.json" "$REPO/py_modules" "$REPO/fonts" "$DEST.new/"
-cp -r "$DIR/server.py" "$DIR/decky.py" "$DIR/menu_entry.py" "$DIR/dist" "$DEST.new/desktop/"
+cp -r "$DIR/server.py" "$DIR/decky.py" "$DIR/menu_entry.py" "$DIR/shell.py" "$DIR/hhc-desktop" "$DIR/dist" "$DEST.new/desktop/"
 find "$DEST.new" -name __pycache__ -prune -exec rm -rf {} +
 chown -R root:root "$DEST.new"
 chmod -R go-w "$DEST.new"

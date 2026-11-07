@@ -41,7 +41,13 @@ def browser_prefix() -> str:
 
 
 def wm_class(prefix: str) -> str:
-    return f"{prefix}-127.0.0.1__-Default"
+    return APP_ID if prefix == "own" else f"{prefix}-127.0.0.1__-Default"
+
+
+def own_window() -> bool:
+    """WebKitGTK (WebKit2 4.1) here: the launcher opens HHC Desktop's own window (app id hhc-desktop)."""
+    return subprocess.run([sys.executable, "-c", 'import gi; gi.require_version("WebKit2", "4.1")'],
+                          capture_output=True).returncode == 0
 
 
 def entry(launcher: str, wm: str) -> str:
@@ -78,10 +84,10 @@ def install(home: str, icon_svg: str, icon_png: str | None, launcher: str) -> bo
         with open(icon_png, "rb") as f:
             changed |= _write(os.path.join(icons, "256x256/apps", APP_ID + ".png"), f.read())
     apps = os.path.join(home, ".local/share/applications")
-    wm = wm_class(browser_prefix())
+    wm = wm_class("own" if own_window() else browser_prefix())
     changed |= _write(os.path.join(apps, wm + ".desktop"), entry(launcher, wm).encode())
     # Ours under another name: older versions, or another browser picked before.
-    for name in [OLD_ENTRY] + [wm_class(p) + ".desktop" for p in PREFIXES if wm_class(p) != wm]:
+    for name in [OLD_ENTRY] + [wm_class(p) + ".desktop" for p in PREFIXES + ["own"] if wm_class(p) != wm]:
         old = os.path.join(apps, name)
         try:
             with open(old) as f:

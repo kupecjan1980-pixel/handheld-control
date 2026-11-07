@@ -39,6 +39,25 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
 LAUNCHER = "/usr/local/bin/hhc-desktop"
 
 
+def refresh_launcher() -> None:
+    """/usr/local/bin/hhc-desktop is a copy made by install.sh; a self-update replaces only /opt: the copy brought
+    up to date here (as root), or it would keep starting the old way (the browser window, not the own one)."""
+    dest, src = "/usr/local/bin/hhc-desktop", os.path.join(HERE, "hhc-desktop")
+    try:
+        with open(src, "rb") as f:
+            new = f.read()
+        with open(dest, "rb") as f:
+            if f.read() == new:
+                return
+        tmp = dest + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(new)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, dest)
+    except OSError:
+        pass  # (not installed system-wide, or not root: --user)
+
+
 def refresh_menu_entry(home: str, uid: int) -> None:
     """Icon + launcher entry in the user's home, written as that user (an
     update only swaps this folder, so a new icon arrives this way)."""
@@ -81,6 +100,7 @@ def main() -> None:
         args.token = args.token or secrets.token_hex(16)
 
     os.environ["HHC_USER_HOME"] = args.home
+    refresh_launcher()
     threading.Thread(target=refresh_menu_entry, args=(args.home, args.uid), daemon=True).start()
     sys.path[:0] = [HERE, ROOT, os.path.join(ROOT, "py_modules")]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
