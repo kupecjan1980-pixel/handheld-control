@@ -31,6 +31,9 @@ log = logging.getLogger("hhctl")
 SYS_INPUT = "/sys/class/input"
 MATCH = ("type='signal',sender='org.freedesktop.login1',"
          "interface='org.freedesktop.login1.Manager',member='PrepareForSleep'")
+# Power-off too: logind sends PrepareForShutdown(true) before the shutdown starts stopping services and waits
+# for "delay" inhibitors, so the charge limit is held before Decky stops (or kills) the plugin.
+MATCH_OFF = MATCH.replace("PrepareForSleep", "PrepareForShutdown")
 
 
 def boottime() -> float:
@@ -39,8 +42,9 @@ def boottime() -> float:
 
 
 class SleepWatch:
-    def __init__(self, before_sleep, after_wake=None):
+    def __init__(self, before_sleep, after_wake=None, before_shutdown=None):
         self.before_sleep = before_sleep  # called in this thread, quickly
+        self.before_shutdown = before_shutdown  # called in this thread, quickly, before a power-off or reboot
         self.after_wake = after_wake  # called in this thread; just note it, the tick acts
         self._inhibit: subprocess.Popen | None = None
         self._monitor: subprocess.Popen | None = None
@@ -52,8 +56,9 @@ class SleepWatch:
             return
         try:
             self._inhibit = proc.popen(
-                ["systemd-inhibit", "--what=sleep", "--mode=delay", "--who=Handheld Control",
-                 "--why=Lights off and charge limit first", "sleep", "infinity"],
+                ["systemd-inhibit", "--what=sleep:shutdown" if self.before_shutdown else "--what=sleep",
+                 "--mode=delay", "--who=Handheld Control", "--why=Lights off and charge limit first",
+                 "sleep", "infinity"],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError as e:
             log.warning("sleep: no inhibitor (%s)", e)
@@ -84,7 +89,8 @@ class SleepWatch:
     def _run(self) -> None:
         while self.enabled:
             try:
-                self._monitor = proc.popen(["busctl", "--system", "--json=short", "monitor", "--match", MATCH],
+                self._monitor = proc.popen(["busctl", "--system", "--json=short", "monitor", "--match", MATCH]
+                                           + (["--match", MATCH_OFF] if self.before_shutdown else []),
                                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                            text=True)
             except OSError as e:
@@ -101,9 +107,21 @@ class SleepWatch:
             msg = json.loads(line)
         except ValueError:
             return
-        if msg.get("member") != "PrepareForSleep":
-            return
+        member = msg.get("member")
         going = bool((msg.get("payload") or {}).get("data", [False])[0])
+        if member == "PrepareForShutdown" and self.before_shutdown:
+            if going:
+                log.info("sleep: powering off")
+                try:
+                    self.before_shutdown()
+                except Exception:
+                    log.exception("sleep: before-shutdown failed")
+                self._release()
+            else:  # cancelled
+                self._take()
+            return
+        if member != "PrepareForSleep":
+            return
         if going:
             log.info("sleep: going to sleep")
             try:

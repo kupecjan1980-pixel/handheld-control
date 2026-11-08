@@ -242,7 +242,9 @@ class Controller:
         self.desktoppad = desktoppad.DesktopPad(self._home(), self.desktop_mouse_active)
         self.ip = inputplumber.InputPlumber(os.path.join(os.path.dirname(settings_path), "inputplumber-profile.yaml"))
         self.ipconf = inputplumber.Configs(self.buttons.key)
-        self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake)
+        self.sleeper = sleep.SleepWatch(self._before_sleep, self._after_wake, self._before_shutdown)
+        self.off_done = False  # the power-off hold already done (logind's signal), not again on unload
+        self.last_off: str | None = None  # what the last power-off held, and what the battery did since
         self.slept_at: float | None = None  # boot time when it went to sleep
         self.sleep_bat: tuple[int | None, bool, bool] = (None, False, False)  # capacity, on AC, charging paused
         self.woke: float | None = None  # set by the wake signal; tick() acts on it
@@ -301,6 +303,9 @@ class Controller:
         allow_ec = bool(self.settings["ec"]["enabled"])
         self.fan, self.fan_why = fan.find_backend(self.dev, allow_ec)
         self.bat = battery.Battery(self.dev, allow_ec)
+        if not getattr(self, "last_off_read", False):  # (once: the record is gone after it's read)
+            self.last_off_read = True
+            self.last_off = self._last_off_report()
 
     # --- settings ---------------------------------------------------------
 
@@ -681,6 +686,62 @@ class Controller:
 
     def _after_wake(self) -> None:
         self.woke = sleep.boottime()
+
+    OFF_FILE = "last-poweroff.json"
+
+    def _before_shutdown(self) -> None:
+        """From the sleep watcher's thread, while logind waits before a power-off or reboot: nothing runs while
+        it's off, so the charge limit is held like for sleep (else it charged to full while off; NEXT 2), and the
+        lights go off like for sleep. What was done is kept for the next start's report."""
+        if self.off_done:
+            return
+        self.off_done = True
+        b = self.settings["battery"]
+        cap, ac, held, raw = self.bat.capacity(), battery.ac_online(), False, None
+        try:
+            held = self.bat.hold_for_sleep(int(b["limit"]), b["bypass"])
+            raw = self.bat.raw_behaviour()
+        except Exception:
+            log.exception("shutdown: couldn't pause charging")
+        if self.settings["sleep"].get("rgb_off") and self.rgb and self.settings["rgb"]["enabled"]:
+            self._guard("rgb", lambda: self.rgb.apply("off", 0, 0, 0, None))
+        log.info("shutdown: battery %s %%, charger %s, charging %s%s", cap, "in" if ac else "out",
+                 "paused" if held else "on", f" (EC 0x{raw:02X})" if raw is not None else "")
+        if self.bat.limit_mode() != "emulated":
+            return
+        try:
+            path = os.path.join(os.path.dirname(self.settings_path), self.OFF_FILE)
+            with open(path + ".tmp", "w") as f:
+                json.dump({"at": time.time(), "cap": cap, "ac": ac, "held": held, "raw": raw,
+                           "limit": int(b["limit"])}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(path + ".tmp", path)
+        except OSError:
+            pass
+
+    def _last_off_report(self) -> str | None:
+        """'Last power-off (8. 11. 22:40): 86 % → 99 % at start, charging was paused (EC 0x55): the firmware
+        charged while off anyway' — once, from the record the power-off left."""
+        path = os.path.join(os.path.dirname(self.settings_path), self.OFF_FILE)
+        try:
+            with open(path) as f:
+                rec = json.load(f)
+            os.unlink(path)
+        except (OSError, ValueError):
+            return None
+        cap0, cap1 = rec.get("cap"), self.bat.capacity()
+        if cap0 is None or cap1 is None:
+            return None
+        raw = rec.get("raw")
+        text = (f"Last power-off ({time.strftime('%d. %m. %H:%M', time.localtime(rec.get('at', 0)))}): battery "
+                f"{cap0} % → {cap1} % at start, charging "
+                + ("paused" + (f" (EC 0x{raw:02X})" if raw is not None else "") if rec.get("held")
+                   else f"left on (below {rec.get('limit', 100) - battery.HYSTERESIS} %: it charges to full while off)"))
+        if rec.get("held") and cap1 > max(cap0, rec.get("limit", 100)) + 1:
+            text += ": the firmware charged while off anyway"
+        log.info("battery: %s", text)
+        return text
 
     def tick_wake(self) -> None:
         """After every wake (even one too short for the resume check): lights
@@ -1757,11 +1818,8 @@ class Controller:
             # held like for sleep (else it charged to full while off; NEXT 2,
             # 2026-10-28), and the lights go off like for sleep (else the
             # stick rings lit up while it charged off).
-            b = self.settings["battery"]
-            self._guard("battery", lambda: self.bat.hold_for_sleep(int(b["limit"]), b["bypass"]))
-            if self.settings["sleep"].get("rgb_off") and self.rgb and self.settings["rgb"]["enabled"]:
-                self._guard("rgb", lambda: self.rgb.apply("off", 0, 0, 0, None))
-            log.info("shutdown: charge limit held, lights off")
+            # (logind's PrepareForShutdown normally did this already; this is the fallback)
+            self._guard("battery", self._before_shutdown)
             return
         if self.bat.limit_mode() == "emulated" and self.bat.inhibited and self.settings["battery"]["bypass"] == "off":
             self._guard("battery", lambda: self.bat.set_behaviour("auto"))
@@ -1900,6 +1958,7 @@ class Controller:
                 "limit_mode": self.bat.limit_mode(),
                 "bypass_options": self.bat.bypass_options(),
                 "unavailable": None if self.bat.behaviours() else (self.bat.ec_why or "no charge control driver"),
+                "last_off": self.last_off,
                 **self.bat.status(),
             },
             "epp": {

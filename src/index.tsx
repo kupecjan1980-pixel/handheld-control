@@ -122,6 +122,7 @@ type State = {
   };
   battery: {
     limit_mode: string | null;
+    last_off?: string | null;
     bypass_options: string[];
     unavailable: string | null;
     capacity?: number | null;
@@ -3108,7 +3109,14 @@ function Content() {
                     <SliderField
                       label="Charge limit"
                       description={
-                        battery.limit_mode === "emulated" ? "Enforced by the plugin while it runs" : undefined
+                        battery.limit_mode === "emulated"
+                          ? [
+                              `Enforced by the plugin while it runs. Powered off at ${Math.max(50, b.limit - 3)} % or more, charging stays paused while it's off; below that it charges to full while off (the firmware can't stop at the limit then).`,
+                              battery.last_off,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : undefined
                       }
                       value={b.limit}
                       min={50}
