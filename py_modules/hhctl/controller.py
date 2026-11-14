@@ -218,6 +218,13 @@ class Controller:
         self.cpu_util = cpu.Util()
         self.limit_reasons = cpu.LimitReasons()
         self.ai = ai.AiEnv(self._home(), self.gpu.driver)
+        try:
+            if self.ai.migrate():
+                log.warning("AI apps: OMP_PLACES / OMP_PROC_BIND taken out of %s (they pinned every program that "
+                            "loads libgomp, the desktop included, to CPU core 0); gone after the next login",
+                            self.ai.path)
+        except OSError as e:
+            log.warning("AI apps: could not rewrite %s: %s", self.ai.path, e)
         self.upscale = upscale.Upscale(self._home(), self.gpu.driver, self.gpu.dev)
         self.lsfg = lsfg.Lsfg(self._home())
         self.memtweak = memtweak.MemTweak()
@@ -2026,7 +2033,8 @@ class Controller:
                 "installed": self.ipconf.installed(),
                 "install": "sudo pacman -S inputplumber" if os.path.exists("/usr/bin/pacman") and not os.path.exists("/run/ostree-booted") else None,
             },
-            "ai": {"enabled": self.ai.enabled(), "vars": self.ai.vars},
+            "ai": {"enabled": self.ai.enabled(), "vars": self.ai.vars, "available": self.ai.available()[0],
+                   "reason": self.ai.available()[1]},
             "memtweak": {"available": self.memtweak.available(), "pending": self.memtweak.pending()},
             "games": {
                 "enabled": self.settings["games"]["enabled"],

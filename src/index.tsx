@@ -183,7 +183,7 @@ type State = {
     install: string | null;
   };
   thermal: { available: boolean; range: [number, number] | null; backend: string | null };
-  ai: { enabled: boolean; vars: Record<string, string> };
+  ai: { enabled: boolean; vars: Record<string, string>; available?: boolean; reason?: string | null };
   memtweak?: { available: Record<string, string>; pending: string[] };
   games?: {
     enabled: boolean;
@@ -2810,13 +2810,18 @@ function Content() {
                 <PanelSectionRow>
                   <ToggleField
                     label="Tune for AI apps (oneDNN)"
-                    description={`For PyTorch, OpenVINO, ONNX Runtime and llama.cpp; games don't use oneDNN, so they're unaffected. Sets ${Object.entries(
-                      state.ai.vars,
-                    )
-                      .map(([k, v]) => `${k}=${v}`)
-                      .join(", ")}${
-                      state.ai.vars.ONEDNN_DEFAULT_FPMATH_MODE ? " (bf16 math: faster, slightly less precise)" : ""
-                    }. Apps started after the next login pick it up.`}
+                    description={
+                      state.ai.available === false
+                        ? `For PyTorch, OpenVINO, ONNX Runtime and llama.cpp. Not available: ${state.ai.reason}. (Up to 0.10.130 this also set OMP_PLACES and OMP_PROC_BIND for the whole session; that tied every program using GNU OpenMP, the desktop itself included, to one CPU core, so it was taken out.)`
+                        : `For PyTorch, OpenVINO, ONNX Runtime and llama.cpp; games don't use oneDNN, so they're unaffected. Sets ${Object.entries(
+                            state.ai.vars,
+                          )
+                            .map(([k, v]) => `${k}=${v}`)
+                            .join(", ")}${
+                            state.ai.vars.ONEDNN_DEFAULT_FPMATH_MODE ? " (bf16 math: faster, slightly less precise)" : ""
+                          }. Apps started after the next login pick it up.`
+                    }
+                    disabled={state.ai.available === false}
                     checked={state.ai.enabled}
                     onChange={async (v) => setState(await setAi(v))}
                   />
