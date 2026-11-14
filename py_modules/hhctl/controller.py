@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import ai, autotune, background, desktoppad, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, steamlib, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
+from . import ai, autotune, npu, background, desktoppad, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, steamlib, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
 log = logging.getLogger("hhctl")
@@ -226,6 +226,7 @@ class Controller:
         except OSError as e:
             log.warning("AI apps: could not rewrite %s: %s", self.ai.path, e)
         self.upscale = upscale.Upscale(self._home(), self.gpu.driver, self.gpu.dev)
+        self.npu = npu.state()  # (what NPU there is: the same until the next start)
         self.lsfg = lsfg.Lsfg(self._home())
         self.memtweak = memtweak.MemTweak()
         self.systweak = systweak.SysTweaks()
@@ -2053,6 +2054,7 @@ class Controller:
                         "game_mode": not self.desktop},
             "rebar": rebar.status(self.gpu.dev, self.gpu.driver),
             "upscale": self.upscale.state(),
+            "npu": self.npu,
             "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},
             "thermal": {
                 "available": bool(self.thermal),

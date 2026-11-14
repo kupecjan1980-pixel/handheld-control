@@ -216,6 +216,7 @@ type State = {
     opti_upscaler: string;
     intel?: boolean;
   };
+  npu?: { present: boolean; name: string | null; driver: string | null; usable: boolean; enabled: boolean; reason: string | null };
   lsfg?: { installed: boolean; ours: boolean; dll: string | null; branch: boolean; vars: Record<string, string>; busy: boolean };
   vram: {
     available: boolean;
@@ -988,6 +989,28 @@ function upscaleNow(kind: string, on: boolean, game: { name: string } | null, st
     : ` Now: set, but ${game.name} isn't using XeSS right now (pick XeSS in its settings).`;
 }
 
+// Upscaling any game's whole picture through the NPU, as Windows' Auto SR does. Shown on every computer;
+// greyed out with the reason while it can't be used (no NPU, or no Linux software that does it yet).
+function NpuUpscaleRow({ n }: { n: State["npu"] }) {
+  if (!n) return null;
+  const has = n.present
+    ? `This computer has one: ${n.name}${n.driver ? ` (driver ${n.driver} loaded)` : " (no driver loaded for it)"}.`
+    : "";
+  return (
+    <PanelSectionRow>
+      <ToggleField
+        label="NPU upscaling (Auto SR)"
+        description={`Upscales the whole picture of any game with a neural net on the NPU (AMD Ryzen AI / XDNA, Intel AI Boost) instead of the GPU, the way Windows' Auto SR does: the game renders smaller and faster, the NPU makes it sharp at full size. ${has}${has ? " " : ""}${
+          n.usable ? "Applies to games started after the next login." : `Not available: ${n.reason}.${n.present ? " This switch turns on by itself in a later version once there is. Until then use FSR / XeSS below, which run on the GPU." : " FSR / XeSS below run on the GPU."}`
+        }`}
+        disabled={!n.usable}
+        checked={!!n.enabled}
+        onChange={() => undefined}
+      />
+    </PanelSectionRow>
+  );
+}
+
 function UpscaleRows({ state, setState }: { state: State; setState: (s: State) => void }) {
   const u = state.upscale;
   const now = useGameUpscale();
@@ -1006,6 +1029,7 @@ function UpscaleRows({ state, setState }: { state: State; setState: (s: State) =
   };
   return (
     <>
+      <NpuUpscaleRow n={state.npu} />
       {u.fsr4_why && (
         <PanelSectionRow>
           <Field
