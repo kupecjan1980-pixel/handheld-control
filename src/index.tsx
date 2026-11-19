@@ -206,6 +206,17 @@ type State = {
   overlay?: { note: string | null; idle_since: string | null; game_mode: boolean };
   topuse?: { cpu: [string, number][]; gpu: [string, number][]; at: string } | null;
   rebar?: { state: "on" | "off" | "partial" | "n/a"; bar_mb: number; vram_mb: number | null; text: string } | null;
+  umaf?: {
+    available: boolean;
+    why: string | null;
+    installed: boolean;
+    entry: string | null;
+    secure_boot: boolean;
+    esp: string | null;
+    busy: boolean;
+    message: string | null;
+    error: string | null;
+  };
   upscale: {
     options: string[];
     on: Record<string, boolean>;
@@ -1150,6 +1161,95 @@ const HDR_MODES: Record<string, string> = {
 const brightnessTest = callable<[], State>("brightness_test");
 const inputCapture = callable<[], State>("input_capture");
 const checkUpdates = callable<[], State>("check_updates");
+const umafInstall = callable<[], State>("umaf_install");
+const umafRemove = callable<[], State>("umaf_remove");
+const umafRestart = callable<[], State>("umaf_restart");
+
+// The firmware's hidden AMD menus (Smokeless UMAF), from HHC: install, restart into it, remove.
+function UmafRows({ state, setState }: { state: State; setState: (s: State) => void }) {
+  const u = state.umaf;
+  const [sure, setSure] = useState(false);
+  if (!u) return null;
+  const status = [u.message, u.error].filter(Boolean).join(" · ");
+  const blocked = !u.available || u.secure_boot;
+  return (
+    <PanelSection title="Advanced BIOS menu">
+      <PanelSectionRow>
+        <Field
+          label="UMAF (hidden AMD settings)"
+          description={
+            "Shows the AMD menus your firmware setup hides: AMD CBS / PBS / Overclocking (GPU memory 'UMA Frame buffer Size', " +
+            "memory speed and timings, power limits, the fan table…). It changes the same settings the firmware setup does and " +
+            "they're kept in the firmware (nothing is flashed). Change one thing at a time: a wrong memory setting can make the PC " +
+            "fail to start until the firmware falls back to its defaults (or you clear CMOS). Settings that reset by themselves " +
+            "reset here too: the firmware loads its defaults after the RAM fails training (an unstable XMP/EXPO speed)." +
+            (u.why ? ` — ${u.why}` : "")
+          }
+        >
+          {!u.available ? "Not here" : u.installed ? (u.entry ? `Installed (Boot${u.entry})` : "Installed, no boot entry") : "Not installed"}
+        </Field>
+      </PanelSectionRow>
+      {u.available && !u.installed && (
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            disabled={u.busy}
+            description={
+              status ||
+              "Downloads Smokeless UMAF from its author (github.com/DavidS95/Smokeless_UMAF), checks it's the version HHC knows, " +
+                `puts it on the EFI partition (${u.esp}) with HHC's look and a plain-language explanation under every setting, and ` +
+                "adds a boot entry that is NOT in the boot order: the PC keeps starting Linux as before."
+            }
+            onClick={async () => setState(await umafInstall())}
+          >
+            Install the Advanced BIOS menu
+          </ButtonItem>
+        </PanelSectionRow>
+      )}
+      {u.installed && (
+        <>
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              disabled={u.busy || blocked || !u.entry}
+              description={
+                status ||
+                (u.secure_boot
+                  ? "Greyed out: Secure Boot is on and the firmware won't start UMAF (it isn't signed). Turn Secure Boot off in the firmware setup."
+                  : !u.entry
+                    ? "Greyed out: its boot entry is missing; remove and install it again."
+                    : sure
+                      ? "Press again to restart now (save your work). UMAF starts once; F10 saves and restarts, Esc leaves without saving. The next start is Linux again."
+                      : "Restarts the PC straight into UMAF, once. Afterwards the PC starts Linux as usual.")
+              }
+              onClick={async () => {
+                if (!sure) {
+                  setSure(true);
+                  setTimeout(() => setSure(false), 8000);
+                  return;
+                }
+                setSure(false);
+                setState(await umafRestart());
+              }}
+            >
+              {sure ? "Restart now into the Advanced BIOS menu" : "Restart into the Advanced BIOS menu"}
+            </ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              disabled={u.busy}
+              description="Removes UMAF's files from the EFI partition and its boot entry. Settings you changed with it stay in the firmware."
+              onClick={async () => setState(await umafRemove())}
+            >
+              Remove the Advanced BIOS menu
+            </ButtonItem>
+          </PanelSectionRow>
+        </>
+      )}
+    </PanelSection>
+  );
+}
 const rgbZoneTest = callable<[], State>("rgb_zone_test");
 const installUpdate = callable<[string], State>("install_update");
 
@@ -3000,6 +3100,7 @@ function Content() {
             </PanelSection>
           )}
           <SystemRows state={state} setState={setState} />
+          <UmafRows state={state} setState={setState} />
           <TopUseRows state={state} setState={setState} />
 
           <PanelSection>

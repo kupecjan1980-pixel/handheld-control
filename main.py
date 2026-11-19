@@ -190,6 +190,15 @@ class Plugin:
     async def rgb_zone_test(self):
         return await self._run(self.ctl.rgb_zone_test)
 
+    async def umaf_install(self):
+        return await self._run(self.ctl.umaf_install)
+
+    async def umaf_remove(self):
+        return await self._run(self.ctl.umaf_remove)
+
+    async def umaf_restart(self):
+        return await self._run(self.ctl.umaf_restart)
+
     async def check_updates(self):
         return await self._run(self.ctl.check_updates)
 

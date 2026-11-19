@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 
+from . import umaf
 from . import ai, autotune, npu, background, desktoppad, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, steamlib, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
 from .device import cpu_model, detect
 
@@ -1564,6 +1565,49 @@ class Controller:
         threading.Thread(target=run, daemon=True).start()
         return self.state()
 
+    # Advanced BIOS menu (Smokeless UMAF, umaf.py): installed on the EFI partition with its own boot entry
+    umaf_job = {"busy": False, "message": None, "error": None}
+    _umaf_cache = (0.0, None)
+
+    def _umaf_status(self) -> dict:
+        at, st = self._umaf_cache
+        if st is None or time.monotonic() - at > 30:  # (efibootmgr and findmnt: not every poll)
+            try:
+                st = umaf.status("AMD" in (self.cpu_model or "").upper())
+            except Exception as e:
+                st = {"available": False, "why": f"Couldn't check: {e}", "installed": False, "entry": None,
+                      "secure_boot": False, "esp": None}
+            self._umaf_cache = (time.monotonic(), st)
+        return st
+
+    def _umaf_do(self, what: str, fn) -> dict:
+        if self.umaf_job["busy"]:
+            return self.state()
+        self.umaf_job = {"busy": True, "message": what, "error": None}
+
+        def run():
+            try:
+                msg = fn()
+                self.umaf_job = {"busy": False, "message": msg, "error": None}
+            except Exception as e:
+                log.warning("UMAF: %s", e)
+                self.umaf_job = {"busy": False, "message": None, "error": str(e)}
+            self._umaf_cache = (0.0, None)
+        threading.Thread(target=run, daemon=True).start()
+        return self.state()
+
+    def umaf_install(self) -> dict:
+        return self._umaf_do("Downloading UMAF and installing it…", umaf.install)
+
+    def umaf_remove(self) -> dict:
+        return self._umaf_do("Removing UMAF…", umaf.remove)
+
+    def umaf_restart(self) -> dict:
+        def go():
+            umaf.restart_into()
+            return "Restarting into the Advanced BIOS menu…"
+        return self._umaf_do("Restarting into the Advanced BIOS menu…", go)
+
     AUTO_UPDATE_S = 300  # every 5 minutes, like Rádio Beat
 
     def start_auto_update(self) -> None:
@@ -2079,6 +2123,8 @@ class Controller:
             "overlay": {"note": self.overlay.note, "idle_since": self.overlay.seen_idle,
                         "game_mode": not self.desktop},
             "rebar": rebar.status(self.gpu.dev, self.gpu.driver),
+            "umaf": {**self._umaf_status(), "busy": self.umaf_job["busy"], "message": self.umaf_job["message"],
+                     "error": self.umaf_job["error"]},
             "upscale": self.upscale.state(),
             "npu": self.npu,
             "lsfg": {**self.lsfg.state(), "busy": self.lsfg_busy},
