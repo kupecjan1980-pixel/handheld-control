@@ -73,6 +73,7 @@ type Settings = {
     bg_dim: number;
     bg_pos: BgPos;
     glass?: boolean;
+    auto_update?: boolean;
     colors?: Colors;
   };
   sdr_brightness: { enabled: boolean; nits: number };
@@ -3882,6 +3883,14 @@ function Content() {
                     >
                       {upd.releases.length ? "Check again" : "Check for updates"}
                     </ButtonItem>
+                  </PanelSectionRow>
+                  <PanelSectionRow>
+                    <ToggleField
+                      label="Update automatically"
+                      description="Checks GitHub every 5 minutes and installs a newer version by itself. It restarts for a moment to load it (HHC Desktop: its background part; the plugin: Decky); your settings stay and are applied again. Off: only when you press the buttons here"
+                      checked={draft.ui?.auto_update ?? true}
+                      onChange={(v) => change("ui", { auto_update: v }, 0)}
+                    />
                   </PanelSectionRow>
                   {sel && (
                     <>

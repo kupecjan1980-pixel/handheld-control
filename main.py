@@ -53,6 +53,7 @@ class Plugin:
         # Button actions come from a listener thread; the panel opens QAM / keyboard.
         self.ctl.emit = lambda action: asyncio.run_coroutine_threadsafe(decky.emit("hhctl_button", action), loop)
         await self._run(self.ctl.apply_all)
+        self.ctl.start_auto_update()
         self.loop_task = asyncio.get_event_loop().create_task(self._loop())
 
     async def _unload(self):

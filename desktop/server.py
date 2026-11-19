@@ -22,8 +22,10 @@ import logging
 import os
 import queue
 import secrets
+import shutil
 import signal
 import socket
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -219,7 +221,14 @@ def main() -> None:
         ctl.plugin_dir = ROOT
         ctl.update_kind = "desktop"
         ctl.update_note = "The app restarts in a moment and reloads."
-        ctl.after_update = lambda: loop.call_soon_threadsafe(loop.stop)
+        def restart():
+            # Under systemd (the installed backend): restarted as a service, so it comes back by itself even with
+            # no window open (started hidden at login); otherwise (--user) stopped, the window starts it again.
+            if os.environ.get("INVOCATION_ID") and shutil.which("systemctl"):
+                subprocess.run(["systemctl", "--no-block", "restart", "hhc-desktop.service"], check=False)
+            else:
+                loop.call_soon_threadsafe(loop.stop)
+        ctl.after_update = restart
     else:
         # Running from the repository: installing a release would overwrite it.
         ctl.plugin_dir = None

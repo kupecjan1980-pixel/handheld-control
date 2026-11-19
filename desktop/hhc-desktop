@@ -5,8 +5,11 @@
 # putting everything the plugin changed back.
 #   hhc-desktop --user   run from this repository as you, read-only (for development)
 set -euo pipefail
-# --hidden: start with the window hidden (as when the desktop's autostart starts it); starting it again shows it
+# --hidden, or started by the desktop's autostart (KDE/GNOME run autostart entries as systemd units named
+# app-…@autostart.service): only the backend is started, which applies the saved settings; no window opens.
+# Opening HHC Desktop from the menu later shows the panel.
 for a in "$@"; do [ "$a" = --hidden ] && export HHC_HIDDEN=1; done
+grep -q autostart /proc/self/cgroup 2>/dev/null && export HHC_HIDDEN=1
 DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 PORT=${HHC_PORT:-8765}
 URL="http://127.0.0.1:$PORT"
@@ -46,6 +49,8 @@ else
     curl -s -m 30 "$URL/ping" >/dev/null || { say "The backend didn't start: journalctl -u hhc-desktop"; exit 1; }
     for _ in $(seq 40); do [ -r "$TOKEN_FILE" ] && break; sleep 0.25; done
     TOKEN=$(cat "$TOKEN_FILE")
+    # at login: the backend is up and applying the settings; no window (it stays running till a window's Quit)
+    [ "${HHC_HIDDEN:-}" = 1 ] && exit 0
 fi
 
 # Its own window (WebKitGTK) when that's here: closing it hides it and HHC goes on (a browser window can't be

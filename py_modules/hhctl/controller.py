@@ -53,7 +53,7 @@ DEFAULTS = {
                    # None = on for the handhelds, off for PCs.
                    "desktop_mouse": None},
     "ui": {"theme": "gold", "font": "quake", "bg": None, "bg_dim": 55, "bg_pos": {"x": 50, "y": 50, "zoom": 100},
-           "glass": True},
+           "glass": True, "auto_update": True},
     # curve "custom": the speeds in "points", one per fan.CUSTOM_TEMPS.
     "fan": {"mode": "auto", "percent": 50, "curve": "balanced", "points": None},
     "rgb": {"enabled": False, "mode": "solid", "hue": 200, "sat": 100, "bright": 70, "effect": None, "match_theme": False},
@@ -1563,6 +1563,32 @@ class Controller:
 
         threading.Thread(target=run, daemon=True).start()
         return self.state()
+
+    AUTO_UPDATE_S = 300  # every 5 minutes, like Rádio Beat
+
+    def start_auto_update(self) -> None:
+        """Checks GitHub every 5 minutes and installs a newer release by itself (settings ui.auto_update, on by
+        default): the plugin (Decky restarts) or HHC Desktop (its backend restarts and applies the settings again)."""
+        if getattr(self, "_auto_update_on", False):
+            return
+        self._auto_update_on = True
+
+        def run():
+            time.sleep(90)  # (the start's own work first; the desktop app sets update_kind meanwhile)
+            while True:
+                try:
+                    if (self.settings.get("ui", {}).get("auto_update", True) and self.plugin_dir and self.version
+                            and not self.upd["busy"]):
+                        rels = [r for r in updater.releases(self.update_kind) if not r.get("prerelease")]
+                        if rels and updater.version_key(rels[0]["version"]) > updater.version_key(self.version):
+                            log.info("auto-update: %s -> %s", self.version, rels[0]["tag"])
+                            self.upd["releases"] = rels
+                            self.install_update(rels[0]["tag"])
+                            return
+                except Exception as e:
+                    log.warning("auto-update check failed: %s", e)
+                time.sleep(self.AUTO_UPDATE_S)
+        threading.Thread(target=run, daemon=True).start()
 
     def install_update(self, tag: str) -> dict:
         rel = next((r for r in self.upd["releases"] if r["tag"] == tag), None)
