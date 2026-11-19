@@ -6,6 +6,7 @@ and exits with HANDED_OVER, so the launcher leaves the backend running). Quit, w
    shell.py <url>"""
 
 import os
+import signal
 import sys
 
 import gi
@@ -13,7 +14,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("WebKit2", "4.1")
-from gi.repository import GLib, Gdk, Gtk, WebKit2  # noqa: E402
+from gi.repository import Gio, GLib, Gdk, Gtk, WebKit2  # noqa: E402
 
 GLib.set_prgname("hhc-desktop")  # the window's app id: its own taskbar icon (hhc-desktop.desktop)
 GLib.set_application_name("HHC Desktop")
@@ -21,8 +22,32 @@ APP_ID = "io.github.kupecjan1980.HhcDesktop"  # (only for one-at-a-time: the win
 HANDED_OVER = 3                               # Wayland app id stays hhc-desktop, the taskbar icon's)
 
 
+def started_at_login() -> bool:
+    """Started by the desktop's autostart (KDE/GNOME run autostart entries as systemd units named
+    app-…@autostart.service), or asked to with --hidden: then it starts with its window hidden."""
+    if "--hidden" in sys.argv or os.environ.get("HHC_HIDDEN") == "1":
+        return True
+    try:
+        with open("/proc/self/cgroup") as f:
+            return "autostart" in f.read()
+    except OSError:
+        return False
+
+
+def session_ending() -> bool:
+    """The desktop is logging out / restarting / shutting down (KDE's session manager says so): then closing the
+    window really quits, or KDE waits for it and asks whether to log out anyway."""
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        r = bus.call_sync("org.kde.ksmserver", "/KSMServer", "org.kde.KSMServerInterface", "isShuttingDown",
+                          None, GLib.VariantType.new("(b)"), Gio.DBusCallFlags.NONE, 500, None)
+        return bool(r.unpack()[0])
+    except GLib.Error:
+        return False
+
+
 def main() -> int:
-    url = sys.argv[1]
+    url = next(a for a in sys.argv[1:] if not a.startswith("--"))
     app = Gtk.Application(application_id=APP_ID)
     try:
         app.register(None)
@@ -45,7 +70,11 @@ def main() -> int:
 
     def close(*_):
         # closing: the window goes, HHC stays (the user: X and the taskbar's "Zavřít" only minimised it before,
-        # and quitting would put TDP, fan and the rest back): hidden, still running, shown again by a new start
+        # and quitting would put TDP, fan and the rest back): hidden, still running, shown again by a new start.
+        # But not when the desktop is logging out or restarting: then it quits, so the restart isn't held up.
+        if session_ending():
+            Gtk.main_quit()
+            return False
         win.hide()
         return True
     # (Hyprland has no taskbar to bring it back from: there it closes as before)
@@ -62,7 +91,13 @@ def main() -> int:
         return False
     win.connect("key-press-event", key)
     view.connect("close", lambda *_: Gtk.main_quit())  # (the page asking to close: window.close())
-    win.show_all()
+    # the session ending (systemd stops the user's apps with SIGTERM), Ctrl+C, the terminal gone: quit cleanly
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_HIGH, sig, lambda *_: (Gtk.main_quit(), False)[1])
+    if started_at_login():
+        view.show()  # (the page loads and runs; the window shows on the next start of HHC Desktop)
+    else:
+        win.show_all()
     Gtk.main()
     return 0
 

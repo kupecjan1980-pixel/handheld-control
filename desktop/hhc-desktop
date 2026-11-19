@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Handheld Control on this PC. No terminal and no password: the backend is a
+# Handheld Control on this PC. Started by the desktop's autostart (or with --hidden) its window starts hidden. No terminal and no password: the backend is a
 # root system service (installed once with: sudo desktop/install.sh) that
 # systemd starts when this window connects and that stops when it closes,
 # putting everything the plugin changed back.
 #   hhc-desktop --user   run from this repository as you, read-only (for development)
 set -euo pipefail
+# --hidden: start with the window hidden (as when the desktop's autostart starts it); starting it again shows it
+for a in "$@"; do [ "$a" = --hidden ] && export HHC_HIDDEN=1; done
 DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 PORT=${HHC_PORT:-8765}
 URL="http://127.0.0.1:$PORT"
