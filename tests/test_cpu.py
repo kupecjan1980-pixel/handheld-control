@@ -40,3 +40,9 @@ from hhctl.controller import Controller
 d = tempfile.mkdtemp(); ctl = Controller(os.path.join(d, "s.json")); st = ctl.state(); json.dumps(st)
 print("controller cpu state:", st["cpu"]); shutil.rmtree(d)
 print("all cpu tests passed")
+# UMAF's AMD check uses the vendor, not the shortened model name ("Ryzen 7 8700G" has no "AMD" in it)
+from hhctl.device import cpu_model, is_amd_cpu
+amd = "vendor_id\t: AuthenticAMD\nmodel name\t: AMD Ryzen 7 8700G w/ Radeon 780M Graphics\n"
+assert cpu_model(amd) == "Ryzen 7 8700G" and is_amd_cpu(amd)
+assert not is_amd_cpu("vendor_id\t: GenuineIntel\nmodel name\t: Intel(R) Core(TM) Ultra 7 258V\n") and not is_amd_cpu("")
+print("amd vendor check ok")

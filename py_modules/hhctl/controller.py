@@ -14,7 +14,7 @@ import time
 
 from . import umaf
 from . import ai, autotune, npu, background, desktoppad, games, overlay, powerkey, rebar, systweak, backlight, buttons, fonts, gestures, lsfg, memtweak, padchord, updater, storage, steamlib, inputcap, inputplumber, thermal, sleep, battery, cpu, diag, ec, epp, fan, gamescope, gpu, kargs, proc, rgb, scx, sysfs, tdp, upscale, watchdog
-from .device import cpu_model, detect
+from .device import cpu_model, detect, is_amd_cpu
 
 log = logging.getLogger("hhctl")
 
@@ -1573,7 +1573,7 @@ class Controller:
         at, st = self._umaf_cache
         if st is None or time.monotonic() - at > 30:  # (efibootmgr and findmnt: not every poll)
             try:
-                st = umaf.status("AMD" in (self.cpu_model or "").upper())
+                st = umaf.status(is_amd_cpu())
             except Exception as e:
                 st = {"available": False, "why": f"Couldn't check: {e}", "installed": False, "entry": None,
                       "secure_boot": False, "esp": None}

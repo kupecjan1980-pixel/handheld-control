@@ -173,6 +173,14 @@ def cpu_model(cpuinfo: str | None = None) -> str | None:
     return None
 
 
+def is_amd_cpu(cpuinfo: str | None = None) -> bool:
+    """The CPU's vendor (cpu_model() drops the "AMD" brand from the name, so that can't tell)."""
+    if cpuinfo is None:
+        cpuinfo = sysfs.read("/proc/cpuinfo") or ""
+    m = re.search(r"^vendor_id\s*:\s*(\S+)", cpuinfo, re.M)
+    return bool(m) and m.group(1) in ("AuthenticAMD", "HygonGenuine")
+
+
 # Vendors whose product names already carry the brand ("ONEXPLAYER F1 EVA-02").
 VENDOR_IN_PRODUCT = {"one-netbook"}
 
