@@ -1610,6 +1610,33 @@ class Controller:
 
     AUTO_UPDATE_S = 300  # every 5 minutes, like Rádio Beat
 
+    X3_RULE = "/etc/udev/rules.d/70-hhc-creative-control.rules"
+    X3_RULE_TEXT = ("# Handheld Control: the desktop user may use Creative sound cards' control port (Sound Blaster X3 etc.,\n"
+                    "# USB CDC serial), e.g. for Radio Beat to press SXFI after boot. Removed when HHC is uninstalled.\n"
+                    'SUBSYSTEM=="tty", ATTRS{idVendor}=="041e", TAG+="uaccess"\n')
+
+    def grant_sound_card_control(self) -> None:
+        """The logged-in user gets access to a Creative card's control port (uaccess). Root only; once."""
+        if os.geteuid() != 0:
+            return
+        try:
+            with open(self.X3_RULE) as f:
+                if f.read() == self.X3_RULE_TEXT:
+                    return
+        except OSError:
+            pass
+        try:
+            os.makedirs(os.path.dirname(self.X3_RULE), exist_ok=True)
+            with open(self.X3_RULE, "w") as f:
+                f.write(self.X3_RULE_TEXT)
+            for cmd in (["udevadm", "control", "--reload"],
+                        ["udevadm", "trigger", "--subsystem-match=tty", "--attr-match=idVendor=041e"],
+                        ["udevadm", "trigger", "--subsystem-match=tty"]):
+                subprocess.run(cmd, capture_output=True, timeout=20, check=False)
+            log.info("udev rule for Creative control ports written")
+        except (OSError, subprocess.SubprocessError) as e:
+            log.warning("udev rule for Creative control ports: %s", e)
+
     def start_auto_update(self) -> None:
         """Checks GitHub every 5 minutes and installs a newer release by itself (settings ui.auto_update, on by
         default): the plugin (Decky restarts) or HHC Desktop (its backend restarts and applies the settings again)."""
@@ -1853,8 +1880,13 @@ class Controller:
         self._guard("battery", lambda: self.bat.tick(int(b["limit"]), b["bypass"]))
 
     def uninstall(self) -> None:
-        """Plugin removed: take our InputPlumber config away too."""
+        """Plugin removed: take our InputPlumber config and udev rule away too."""
         self._guard("controller", self.ipconf.remove)
+        try:
+            os.remove(self.X3_RULE)
+            subprocess.run(["udevadm", "control", "--reload"], capture_output=True, timeout=20, check=False)
+        except OSError:
+            pass
 
     def restore(self, unload: bool = False) -> None:
         """Hand control back to firmware (unload, exit, EC switch)."""

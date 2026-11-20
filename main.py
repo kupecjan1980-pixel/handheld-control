@@ -54,6 +54,7 @@ class Plugin:
         self.ctl.emit = lambda action: asyncio.run_coroutine_threadsafe(decky.emit("hhctl_button", action), loop)
         await self._run(self.ctl.apply_all)
         self.ctl.start_auto_update()
+        self.ctl.grant_sound_card_control()
         self.loop_task = asyncio.get_event_loop().create_task(self._loop())
 
     async def _unload(self):
