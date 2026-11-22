@@ -1613,7 +1613,10 @@ class Controller:
     X3_RULE = "/etc/udev/rules.d/70-hhc-creative-control.rules"
     X3_RULE_TEXT = ("# Handheld Control: the desktop user may use Creative sound cards' control port (Sound Blaster X3 etc.,\n"
                     "# USB CDC serial), e.g. for Radio Beat to press SXFI after boot. Removed when HHC is uninstalled.\n"
-                    'SUBSYSTEM=="tty", ATTRS{idVendor}=="041e", TAG+="uaccess"\n')
+                    "# ModemManager is told to leave the port alone: it probes it like a modem at every boot and that\n"
+                    "# garbles the card's control session (Radio Beat's SXFI presses got no answer in the first minutes).\n"
+                    'SUBSYSTEM=="tty", ATTRS{idVendor}=="041e", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1"\n'
+                    'SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="041e", ENV{ID_MM_DEVICE_IGNORE}="1"\n')
 
     def grant_sound_card_control(self) -> None:
         """The logged-in user gets access to a Creative card's control port (uaccess). Root only; once."""
