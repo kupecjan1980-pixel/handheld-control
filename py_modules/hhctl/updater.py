@@ -96,7 +96,50 @@ def parse_releases(raw: list, kind: str = "plugin") -> list[dict]:
     return out
 
 
+ATOM = f"https://github.com/{REPO}/releases.atom"
+
+
+def parse_atom(xml: bytes, kind: str = "plugin") -> list[dict]:
+    """The releases feed (github.com/…/releases.atom, the newest 10) as parse_releases() gives them. It lists no
+    files, but every release's zips are named handheld-control[-desktop]-<version>.zip; older ones without a
+    desktop zip are long out of the feed's ten. Pre-releases aren't marked there (none are made any more)."""
+    import html
+    import re
+    import xml.etree.ElementTree as ET
+
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    out = []
+    for e in ET.fromstring(xml).findall("a:entry", ns):
+        link = e.find("a:link", ns)
+        m = re.search(r"/releases/tag/(v?[0-9][0-9.]*)$", link.get("href", "") if link is not None else "")
+        if not m:
+            continue
+        tag = m.group(1)
+        version = tag.lstrip("v")
+        name = ("handheld-control-desktop-" if kind == "desktop" else "handheld-control-") + version + ".zip"
+        body = e.findtext("a:content", "", ns)
+        notes = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"</p>\s*<p>|<br\s*/?>", "\n", body))).strip()
+        out.append({
+            "tag": tag,
+            "version": version,
+            "prerelease": False,
+            "date": (e.findtext("a:updated", "", ns) or "")[:10],
+            "url": f"{DOWNLOAD_PREFIX}{tag}/{name}",
+            "notes": notes,
+        })
+    out.sort(key=lambda x: version_key(x["version"]), reverse=True)
+    return out
+
+
 def releases(kind: str = "plugin") -> list[dict]:
+    """The releases, from the feed: the API allows only 60 requests an hour for the whole home network (every
+    computer and app together; Radio Beat showed "GitHub unavailable" when they ran out). The API is the fallback."""
+    try:
+        got = parse_atom(_get(ATOM, 5 * 1024 * 1024), kind)
+        if got:
+            return got
+    except Exception as e:  # (network, or a feed that doesn't parse)
+        log.info("updater: releases feed failed (%s), trying the API", e)
     return parse_releases(json.loads(_get(API, 5 * 1024 * 1024)), kind)
 
 

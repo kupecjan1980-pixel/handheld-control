@@ -11,16 +11,11 @@ REPO=kupecjan1980-pixel/handheld-control
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# Newest release (pre-releases too) that has a desktop zip.
-URL=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=30" | python3 -c '
-import json, sys
-for r in json.load(sys.stdin):
-    for a in r.get("assets", []):
-        n = a.get("name", "")
-        if n.startswith("handheld-control-desktop-") and n.endswith(".zip"):
-            print(a["browser_download_url"]); sys.exit()
-sys.exit("no release has a desktop zip")
-')
+# Newest release's desktop zip: the tag from github.com/…/releases/latest (it redirects to it). Not the API:
+# that allows 60 requests an hour for the whole home network, shared by every computer and app.
+TAG=$(curl -fsSI "https://github.com/$REPO/releases/latest" | tr -d '\r' | sed -n 's|^[Ll]ocation: .*/releases/tag/\(v[0-9.]*\)$|\1|p')
+[ -n "$TAG" ] || { echo "Could not find the newest release on GitHub."; exit 1; }
+URL="https://github.com/$REPO/releases/download/$TAG/handheld-control-desktop-${TAG#v}.zip"
 case "$URL" in
     "https://github.com/$REPO/releases/download/"*) ;;
     *) echo "Unexpected download URL: $URL"; exit 1 ;;

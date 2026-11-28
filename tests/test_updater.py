@@ -75,3 +75,20 @@ except OSError:
     pass
 print("desktop kind ok")
 shutil.rmtree(tmp); print("all updater tests passed")
+
+# The releases feed (no API rate limit): tag, date, notes and the zip named by the version.
+atom = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry><updated>2026-11-22T20:06:37Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/kupecjan1980-pixel/handheld-control/releases/tag/v0.10.139"/>
+    <title>0.10.139</title><content type="html">&lt;p&gt;One &amp;amp; two.&lt;/p&gt;&lt;p&gt;Three&lt;/p&gt;</content></entry>
+  <entry><updated>2026-11-20T08:31:19Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/kupecjan1980-pixel/handheld-control/releases/tag/v0.10.9"/>
+    <title>v0.10.9</title><content type="html">x</content></entry>
+</feed>"""
+fa = updater.parse_atom(atom)
+assert [r["tag"] for r in fa] == ["v0.10.139", "v0.10.9"], fa
+assert fa[0]["url"] == updater.DOWNLOAD_PREFIX + "v0.10.139/handheld-control-0.10.139.zip", fa[0]["url"]
+assert fa[0]["date"] == "2026-11-22" and fa[0]["notes"] == "One & two.\nThree", fa[0]
+assert updater.parse_atom(atom, "desktop")[0]["url"].endswith("/v0.10.139/handheld-control-desktop-0.10.139.zip")
+print("updater atom ok")
